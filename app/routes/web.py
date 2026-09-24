@@ -570,8 +570,9 @@ def trip_miles(trip_id):
 def places():
     if not _history_ok():
         abort(403)
-    cities = City.query.order_by(City.name.asc()).all()
-    return render_template("places.html", cities=cities, properties=None, city=None)
+    from app.services.browse import place_groups
+
+    return render_template("places.html", groups=place_groups(), city=None)
 
 
 @bp.get("/places/<int:city_id>")
@@ -582,8 +583,9 @@ def city_detail(city_id):
     city = db.session.get(City, city_id)
     if not city:
         abort(404)
-    props = Property.query.filter_by(city_id=city.id).filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
-    return render_template("places.html", cities=None, properties=props, city=city)
+    from app.services.browse import place_groups
+
+    return render_template("places.html", groups=place_groups(city.id), city=city)
 
 
 @bp.get("/properties/<int:property_id>")
@@ -594,9 +596,21 @@ def property_detail(property_id):
     prop = db.session.get(Property, property_id)
     if not prop or prop.deleted_at:
         abort(404)
-    units = Unit.query.filter_by(property_id=prop.id).filter(Unit.deleted_at.is_(None)).order_by(Unit.unit_number.asc()).all()
-    jobs = Job.query.filter_by(property_id=prop.id).filter(Job.deleted_at.is_(None)).order_by(Job.id.desc()).all()
-    return render_template("property.html", prop=prop, units=units, jobs=jobs, msg_key=_new_key())
+    from app.services.browse import unit_cards
+
+    sort = request.args.get("sort") or "recent"
+    if sort not in ("recent", "number"):
+        sort = "recent"
+    packed = unit_cards(prop.id, sort=sort, query=request.args.get("q") or "")
+    return render_template(
+        "property.html",
+        prop=prop,
+        cards=packed["cards"],
+        loose_jobs=packed["loose_jobs"],
+        unit_total=packed["total"],
+        sort=sort,
+        msg_key=_new_key(),
+    )
 
 
 @bp.post("/properties/<int:property_id>")
@@ -646,6 +660,7 @@ def unit_detail(unit_id):
         events[job.id] = JobEvent.query.filter_by(job_id=job.id).order_by(JobEvent.id.asc()).all()
     from app.services.equipment import KIND_CHOICES
 
+    last = jobs[0].created_at if jobs else (visits[0].started_at if visits else None)
     return render_template(
         "unit.html",
         unit=unit,
@@ -654,6 +669,7 @@ def unit_detail(unit_id):
         events=events,
         gear=gear,
         gear_kinds=KIND_CHOICES,
+        last=last,
     )
 
 

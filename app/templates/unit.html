@@ -3,51 +3,72 @@
 {% block main %}
 <section class="sheet">
   <p><a href="/properties/{{ unit.property_id }}">{{ unit.property.name }}</a></p>
-  <h1>Unit {{ unit.unit_number }}</h1>
+  <div class="hero">
+    <h1>Unit {{ unit.unit_number }}</h1>
+    <p class="lead">{% if last %}Last worked {{ last|apt_when }}{% else %}Nothing logged on this unit yet{% endif %}</p>
+  </div>
+
   <h2>Equipment</h2>
-  <p class="lead">Fridge, washer, dryer, air conditioner, or anything else in this unit.</p>
-  {% if current_user.role != 'viewer' %}
-  <form method="post" action="/units/{{ unit.id }}/equipment" class="card stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>What is it
-      <select name="kind">
-        {% for kind in gear_kinds %}
-        <option value="{{ kind }}">{{ kind }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Brand <input name="brand" placeholder="Whirlpool, GE, Carrier…"></label>
-    <label>Model <input name="model" autocomplete="off"></label>
-    <label>Serial <input name="serial" autocomplete="off"></label>
-    <label>Size or note <input name="size" placeholder="18 cu ft, 3 ton, stackable"></label>
-    <button type="submit">Save this equipment</button>
-  </form>
-  {% endif %}
   {% if not gear %}
-  <p class="empty">Nothing is filed in this unit yet.</p>
-  {% endif %}
+  <p class="empty">No equipment filed on this unit.</p>
+  {% else %}
   <ul class="list">
     {% for item in gear %}
-    <li>{{ item.brand }} {{ item.size_label }} {{ item.kind }}{% if item.model_number %} · model {{ item.model_number }}{% endif %}{% if item.serial_number %} · serial {{ item.serial_number }}{% endif %}</li>
+    <li>
+      <strong>{{ item.brand }} {{ item.size_label }} {{ item.kind }}</strong>
+      <span class="hint">
+        {% if item.model_number %}Model {{ item.model_number }}{% endif %}
+        {% if item.serial_number %} · Serial {{ item.serial_number }}{% endif %}
+        · Added {{ item.created_at|apt_when }}
+      </span>
+    </li>
     {% endfor %}
   </ul>
-  <h2>Visits</h2>
-  <ul class="list">
-    {% for visit in visits %}
-    <li>{{ visit.started_at }} · {{ visit.status }} {{ visit.note }}</li>
-    {% endfor %}
-  </ul>
-  <h2>Jobs</h2>
+  {% endif %}
+  {% if current_user.role != 'viewer' %}
+  <details>
+    <summary>Add equipment</summary>
+    <form method="post" action="/units/{{ unit.id }}/equipment" class="card stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>What is it
+        <select name="kind">
+          {% for kind in gear_kinds %}
+          <option value="{{ kind }}">{{ kind }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Brand <input name="brand" autocomplete="off"></label>
+      <label>Model <input name="model" autocomplete="off"></label>
+      <label>Serial <input name="serial" autocomplete="off"></label>
+      <label>Size or note <input name="size" autocomplete="off"></label>
+      <button type="submit">Save this equipment</button>
+    </form>
+  </details>
+  {% endif %}
+
+  <h2>What was done</h2>
+  {% if not jobs and not visits %}
+  <p class="empty">No work is on this unit yet.</p>
+  {% endif %}
   {% for job in jobs %}
   <article class="card">
-    <h3>{{ job.title }} · {{ job.status }}</h3>
-    {% if job.detail %}<p>{{ job.detail }}</p>{% endif %}
-    <ul>
-      {% for event in events.get(job.id, []) %}
-      <li>{{ event.created_at }} · {{ event.body }}</li>
-      {% endfor %}
-    </ul>
+    <p class="kicker">{{ job.created_at|apt_when }} · {{ job.status }}</p>
+    <h3>{{ job.title }}</h3>
+    {% if job.detail and job.detail != job.title %}<p>{{ job.detail }}</p>{% endif %}
+    {% for event in events.get(job.id, []) %}
+    {% if event.body and event.body != job.title %}
+    <p class="hint">{{ event.created_at|apt_when }} · {{ event.body }}</p>
+    {% endif %}
+    {% endfor %}
   </article>
+  {% endfor %}
+  {% for visit in visits %}
+  {% if visit.note and visit.note not in jobs|map(attribute='title') %}
+  <article class="card">
+    <p class="kicker">{{ visit.started_at|apt_when }} · {{ visit.status }}</p>
+    <h3>{{ visit.note }}</h3>
+  </article>
+  {% endif %}
   {% endfor %}
 </section>
 {% endblock %}

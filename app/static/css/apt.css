@@ -104,6 +104,33 @@ button.ghost {
 .actions button { min-height: 44px; }
 .hint { font-weight: 500; color: var(--muted); }
 .check { flex-direction: row; align-items: flex-start; gap: 0.65rem; font-weight: 600; color: var(--ink); }
+.unit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-decoration: none;
+  color: inherit;
+  background: white;
+  border-radius: 18px;
+  padding: 0.95rem 1rem;
+  box-shadow: var(--shadow);
+}
+.unit-card strong { font-size: 1.2rem; }
+.unit-meta, .unit-gear { color: var(--muted); font-size: 0.95rem; }
+.unit-card[hidden] { display: none !important; }
+.find-unit { display: flex; flex-direction: column; gap: 0.3rem; font-weight: 700; }
+.find-unit input { font-weight: 500; }
+.unit-tools { display: flex; gap: 0.4rem; }
+.unit-tools a {
+  text-decoration: none;
+  color: var(--ink);
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.4rem 0.8rem;
+  font-weight: 750;
+}
+.unit-tools a[aria-current="page"] { background: var(--soft); color: var(--accent); border-color: transparent; }
 .list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.65rem; }
 .list a { text-decoration: none; color: inherit; display: block; }
 .list strong { display: block; font-size: 1.05rem; }

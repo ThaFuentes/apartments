@@ -48,10 +48,7 @@ def create_app() -> Flask:
     db.init_app(app)
     init_db(app)
 
-    @app.template_filter("chat_clock")
-    def chat_clock(value):
-        if not value:
-            return ""
+    def _local_moment(value):
         from datetime import timezone
 
         from flask import g
@@ -66,8 +63,20 @@ def create_app() -> Flask:
                 g.apt_tz = (profile.timezone if profile else "") or "America/Chicago"
             except Exception:
                 g.apt_tz = "America/Chicago"
-        local = value.replace(tzinfo=timezone.utc).astimezone(zone(g.apt_tz))
-        return local.strftime("%I:%M %p").lstrip("0")
+        return value.replace(tzinfo=timezone.utc).astimezone(zone(g.apt_tz))
+
+    @app.template_filter("chat_clock")
+    def chat_clock(value):
+        if not value:
+            return ""
+        return _local_moment(value).strftime("%I:%M %p").lstrip("0")
+
+    @app.template_filter("apt_when")
+    def apt_when(value):
+        if not value:
+            return ""
+        local = _local_moment(value)
+        return local.strftime("%b %d, %Y").replace(" 0", " ")
 
     try:
         from poweredbytop import init_security

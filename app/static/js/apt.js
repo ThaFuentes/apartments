@@ -54,6 +54,22 @@
     });
   });
 
+  document.querySelectorAll("[data-unit-find]").forEach(function (input) {
+    const list = document.getElementById("unit-list");
+    const empty = document.querySelector("[data-unit-empty]");
+    if (!list) return;
+    input.addEventListener("input", function () {
+      const q = input.value.trim().toLowerCase();
+      let shown = 0;
+      list.querySelectorAll("[data-unit-card]").forEach(function (card) {
+        const hit = !q || (card.getAttribute("data-number") || "").toLowerCase().indexOf(q) !== -1;
+        card.hidden = !hit;
+        if (hit) shown += 1;
+      });
+      if (empty) empty.hidden = shown !== 0;
+    });
+  });
+
   const mic = document.getElementById("mic");
   const composer = document.getElementById("composer");
   if (mic && composer && (window.SpeechRecognition || window.webkitSpeechRecognition)) {

@@ -2,44 +2,54 @@
 {% block title %}{{ prop.name }}{% endblock %}
 {% block main %}
 <section class="sheet">
-  <p><a href="/places/{{ prop.city_id }}">{{ prop.city.name if prop.city else 'City' }}</a></p>
+  <p><a href="/places{% if prop.city_id %}/{{ prop.city_id }}{% endif %}">{{ prop.city.name if prop.city else "Places" }}{% if prop.city and prop.city.region %}, {{ prop.city.region }}{% endif %}</a></p>
   <h1>{{ prop.name }}</h1>
-  <p>{{ prop.address or 'No address yet.' }}</p>
-  {% if prop.lat %}
-  <p>Pin {{ '%.5f'|format(prop.lat) }}, {{ '%.5f'|format(prop.lng) }} · <a href="/map">Map</a></p>
-  {% else %}
-  <p>No map pin yet.</p>
+  <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} logged here.</p>
+  <label class="find-unit">Find a unit
+    <input data-unit-find autocomplete="off" inputmode="text" placeholder="804">
+  </label>
+  <div class="unit-tools">
+    <a href="?sort=recent" {% if sort == "recent" %}aria-current="page"{% endif %}>Most recent</a>
+    <a href="?sort=number" {% if sort == "number" %}aria-current="page"{% endif %}>Unit number</a>
+  </div>
+  {% if not cards %}
+  <p class="empty">No units logged here yet.</p>
+  {% endif %}
+  <div class="stack" id="unit-list">
+    {% for card in cards %}
+    <a class="unit-card" href="/units/{{ card.unit.id }}" data-unit-card data-number="{{ card.unit.unit_number }}">
+      <strong>{{ card.unit.unit_number }}</strong>
+      <span class="unit-meta">
+        {% if card.last %}Last worked {{ card.last|apt_when }}{% else %}Nothing logged yet{% endif %}
+        {% if card.last_title %} · {{ card.last_title }}{% endif %}
+        {% if card.job_count > 1 %} · {{ card.job_count }} jobs{% endif %}
+      </span>
+      {% if card.gear_lines %}
+      <span class="unit-gear">{% for line in card.gear_lines %}{{ line }}{% if not loop.last %} · {% endif %}{% endfor %}{% if card.gear_more %} · {{ card.gear_more }} more{% endif %}</span>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  <p class="empty" data-unit-empty hidden>No unit matches.</p>
+  {% if loose_jobs %}
+  <h2>Not on a unit</h2>
+  <ul class="list">
+    {% for job in loose_jobs %}
+    <li><strong>{{ job.title }}</strong> <span class="hint">{{ job.created_at|apt_when }} · {{ job.status }}</span></li>
+    {% endfor %}
+  </ul>
   {% endif %}
   {% if current_user.role != 'viewer' %}
-  <form method="post" class="stack" action="/properties/{{ prop.id }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
-    <label>Address <input name="address" value="{{ prop.address }}"></label>
-    <button type="submit">Save address and pin</button>
-  </form>
+  <details>
+    <summary>Address and pin</summary>
+    <p>{{ prop.address or "No address yet." }}</p>
+    <form method="post" class="stack" action="/properties/{{ prop.id }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+      <label>Address <input name="address" value="{{ prop.address }}"></label>
+      <button type="submit">Save address and pin</button>
+    </form>
+  </details>
   {% endif %}
-  <h2>Visited units</h2>
-  {% if not units %}
-  <p class="empty">A unit shows up here only after you log work on that number.</p>
-  {% endif %}
-  <ul class="list">
-    {% for unit in units %}
-    <li><a href="/units/{{ unit.id }}">Unit {{ unit.unit_number }}</a></li>
-    {% endfor %}
-  </ul>
-  <h2>Jobs</h2>
-  <ul class="list">
-    {% for job in jobs %}
-    <li>{{ job.title }} · {{ job.status }}
-      {% if current_user.role != 'viewer' %}
-      <form method="post" action="/jobs/{{ job.id }}/delete" class="inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="/properties/{{ prop.id }}">
-        <button type="submit" class="btn-quiet">Remove</button>
-      </form>
-      {% endif %}
-    </li>
-    {% endfor %}
-  </ul>
 </section>
 {% endblock %}

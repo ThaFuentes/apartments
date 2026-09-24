@@ -3,26 +3,33 @@
 {% block main %}
 <section class="sheet">
   {% if city %}
-  <p><a href="/places">All cities</a></p>
-  <h1>{{ city.name }}{% if city.region %} {{ city.region }}{% endif %}</h1>
-  {% if not properties %}
-  <p class="empty">No properties in this city yet.</p>
-  {% endif %}
-  <ul class="list">
-    {% for prop in properties %}
-    <li><a href="/properties/{{ prop.id }}"><strong>{{ prop.name }}</strong></a> {{ prop.address }}</li>
-    {% endfor %}
-  </ul>
+  <p><a href="/places">All places</a></p>
+  <h1>{{ city.name }}{% if city.region %}, {{ city.region }}{% endif %}</h1>
   {% else %}
   <h1>Places</h1>
-  {% if not cities %}
+  <p class="lead">Open a location to see the units, what was done, and the equipment.</p>
+  {% endif %}
+  {% if not groups %}
   <p class="empty">No places yet. Add one on Home.</p>
   {% endif %}
-  <ul class="list">
-    {% for city in cities %}
-    <li><a href="/places/{{ city.id }}">{{ city.name }}{% if city.region %} · {{ city.region }}{% endif %}</a></li>
+  {% for group in groups %}
+  {% if not city %}<h2>{{ group.city }}</h2>{% endif %}
+  <div class="stack">
+    {% for place in group.places %}
+    <a class="unit-card" href="/properties/{{ place.id }}">
+      <strong>{{ place.name }}</strong>
+      <span class="unit-meta">
+        {% if place.unit_count %}
+        {{ place.unit_count }} unit{% if place.unit_count != 1 %}s{% endif %}
+        {% if place.last %} · last {{ place.last|apt_when }}{% endif %}
+        {% if place.last_title %} · {{ place.last_title }}{% endif %}
+        {% else %}
+        No units logged yet
+        {% endif %}
+      </span>
+    </a>
     {% endfor %}
-  </ul>
-  {% endif %}
+  </div>
+  {% endfor %}
 </section>
 {% endblock %}

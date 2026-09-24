@@ -469,6 +469,60 @@ Lubbock — 2 outside compressor installs"""
         clear_chat(user)
         self.assertEqual(ChatMessage.query.filter_by(user_id=user.id).count(), 0)
 
+    def test_a_place_lists_units_by_recent_work(self):
+        from datetime import timedelta
+
+        from app.models import Equipment, Job, Unit
+        from app.services.browse import place_groups, unit_cards
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Madison Sq", "Lubbock", "TX", user.id)
+        older = Unit(property_id=prop.id, unit_number="12", created_at=utcnow())
+        newer = Unit(property_id=prop.id, unit_number="804", created_at=utcnow())
+        db.session.add_all([older, newer])
+        db.session.flush()
+        db.session.add(
+            Job(
+                property_id=prop.id,
+                unit_id=older.id,
+                title="Changed the filter",
+                created_at=utcnow() - timedelta(days=10),
+            )
+        )
+        db.session.add(
+            Job(
+                property_id=prop.id,
+                unit_id=newer.id,
+                title="Replaced the compressor",
+                created_at=utcnow(),
+            )
+        )
+        db.session.add(
+            Equipment(
+                property_id=prop.id,
+                unit_id=newer.id,
+                kind="air conditioner",
+                brand="Carrier",
+                size_label="3 ton",
+                model_number="24ACC",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        recent = unit_cards(prop.id)
+        self.assertEqual(recent["cards"][0]["unit"].unit_number, "804")
+        self.assertIn("compressor", recent["cards"][0]["last_title"].lower())
+        self.assertTrue(any("Carrier" in line for line in recent["cards"][0]["gear_lines"]))
+        numbered = [card["unit"].unit_number for card in unit_cards(prop.id, sort="number")["cards"]]
+        self.assertEqual(numbered, ["12", "804"])
+        self.assertEqual(unit_cards(prop.id, query="804")["cards"][0]["unit"].unit_number, "804")
+        places = place_groups()
+        madison = places[0]["places"][0]
+        self.assertEqual(madison["name"], "Madison Sq")
+        self.assertEqual(madison["unit_count"], 2)
+        self.assertIn("compressor", madison["last_title"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()
