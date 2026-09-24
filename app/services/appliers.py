@@ -1,0 +1,1026 @@
+"""Material writes. Callers commit. Nothing here saves a unit she did not name."""
+from __future__ import annotations
+
+import secrets
+from datetime import timedelta
+
+from app.builddb.builddb import db
+from app.models import (
+    Equipment,
+    Expense,
+    Job,
+    JobEvent,
+    Media,
+    MileageLeg,
+    Notice,
+    Property,
+    Report,
+    ReportShare,
+    Trip,
+    TripProperty,
+    Unit,
+    UnitVisit,
+    User,
+)
+from app.services.clock import local_today, money, next_named_day, utcnow
+from app.services.geo import geocode, haversine_miles
+from app.services.people import create_user, find_user
+from app.services.records import (
+    CONFIDENCE_FLOOR,
+    audit,
+    dumps,
+    ensure_property,
+    find_properties,
+    job_status,
+    match_unit,
+    normalize_unit,
+    open_shift,
+    property_place,
+    site_profile,
+    units_for,
+)
+from app.services.reports import build_snapshot, load_snapshot, render_markdown, sign_report
+
+VISIT_TOOLS = {"record_unit_visit", "log_job_event"}
+
+
+def _src(source: str) -> str:
+    return source if source in ("ai", "human") else "human"
+
+
+def _trip_for(payload, user) -> Trip | None:
+    if payload.get("trip_id"):
+        trip = db.session.get(Trip, int(payload["trip_id"]))
+        if trip and trip.deleted_at is None:
+            return trip
+    shift = open_shift(user)
+    if shift and shift.trip_id:
+        trip = db.session.get(Trip, shift.trip_id)
+        if trip and trip.deleted_at is None:
+            return trip
+    return (
+        Trip.query.filter(Trip.deleted_at.is_(None), Trip.created_by_id == user.id)
+        .order_by(Trip.id.desc())
+        .first()
+    )
+
+
+def _pin_property(prop: Property, address: str = "") -> None:
+    if prop.lat is not None and prop.lng is not None and not address:
+        return
+    city = prop.city.name if prop.city else ""
+    region = prop.city.region if prop.city else ""
+    query = ", ".join(bit for bit in (address or prop.address, prop.name, city, region) if bit)
+    point = geocode(query)
+    if point:
+        prop.lat, prop.lng = point
+
+
+def _miles_between(origin_lat, origin_lng, prop: Property) -> float | None:
+    return haversine_miles(origin_lat, origin_lng, prop.lat, prop.lng)
+
+
+def apply_plan_trip(user, payload, source) -> dict:
+    source = _src(source)
+    name = (payload.get("property_name") or "").strip()
+    city = (payload.get("city") or "").strip()
+    if not name or not city:
+        return {"ok": False, "reply": "I need a property and a city. Try: I'm going to Woodview Odessa Thursday for AC evals."}
+    profile = site_profile()
+    region = (payload.get("region") or (profile.default_region if profile else "") or "").strip()
+    prop = ensure_property(
+        name,
+        city,
+        region,
+        user.id,
+        address=(payload.get("address") or "").strip(),
+        lat=payload.get("lat"),
+        lng=payload.get("lng"),
+        source=source,
+    )
+    _pin_property(prop, (payload.get("address") or "").strip())
+    starts = payload.get("starts_on")
+    if isinstance(starts, str) and len(starts) >= 10:
+        from datetime import date
+
+        try:
+            starts_on = date.fromisoformat(starts[:10])
+        except ValueError:
+            starts_on = local_today(profile.timezone if profile else None)
+    elif hasattr(starts, "isoformat"):
+        starts_on = starts
+    else:
+        day_name = (payload.get("when") or "").strip()
+        today = local_today(profile.timezone if profile else None)
+        starts_on = next_named_day(day_name, today) if day_name else today
+    purpose = (payload.get("purpose") or "").strip()
+    title = f"{prop.name} {prop.city.name if prop.city else city}".strip()
+    if purpose:
+        title = f"{title} — {purpose}"
+    home = (profile.home_label if profile else "") or ""
+    miles = None
+    if profile and profile.home_lat is not None and prop.lat is not None:
+        miles = _miles_between(profile.home_lat, profile.home_lng, prop)
+    checklist = "\n".join(
+        [
+            "Keys",
+            f"Parts{(': ' + purpose) if purpose else ''}",
+            "Address and pin",
+        ]
+    )
+    trip = Trip(
+        title=title[:200],
+        status="staged",
+        starts_on=starts_on,
+        ends_on=starts_on,
+        purpose=purpose[:300],
+        home_label=home,
+        miles_estimate=miles,
+        checklist=checklist,
+        created_by_id=user.id,
+        created_at=utcnow(),
+    )
+    db.session.add(trip)
+    db.session.flush()
+    db.session.add(TripProperty(trip_id=trip.id, property_id=prop.id, sort_order=0, miles_leg=miles))
+    if miles is not None:
+        db.session.add(
+            MileageLeg(
+                trip_id=trip.id,
+                origin=home or "Home base",
+                destination=property_place(prop),
+                miles=miles,
+                source=source,
+                created_at=utcnow(),
+            )
+        )
+    audit(
+        user.id,
+        source,
+        "create",
+        "trip",
+        trip.id,
+        {},
+        {"title": trip.title, "starts_on": starts_on.isoformat(), "property_id": prop.id, "miles_estimate": miles},
+    )
+    miles_bit = f" About {miles} miles from home — you can change that." if miles is not None else " Miles are blank until the pin or home base is set. You can type them."
+    pin_bit = " Pin is on the map." if prop.lat is not None else " No map pin yet. Add an address when you have it."
+    return {
+        "ok": True,
+        "reply": f"Staged {title} on {starts_on.isoformat()}.{pin_bit}{miles_bit}",
+        "trip_id": trip.id,
+        "property_id": prop.id,
+    }
+
+
+def apply_update_trip(user, payload, source) -> dict:
+    source = _src(source)
+    if payload.get("arrive"):
+        return _arrive(user, payload, source)
+    if payload.get("end_visit") or payload.get("end_day"):
+        return _end_visit(user, payload, source)
+    trip = _trip_for(payload, user)
+    if not trip:
+        return {"ok": False, "reply": "There is no trip to change yet."}
+    before = {"miles_estimate": trip.miles_estimate, "miles_actual": trip.miles_actual, "purpose": trip.purpose, "handoff": trip.handoff}
+    if payload.get("miles_estimate") is not None:
+        trip.miles_estimate = float(payload["miles_estimate"])
+    if payload.get("miles_actual") is not None:
+        trip.miles_actual = float(payload["miles_actual"])
+        from app.services.miles import set_trip_actual
+
+        set_trip_actual(user, trip, trip.miles_actual, source)
+    if payload.get("purpose"):
+        trip.purpose = str(payload["purpose"])[:300]
+    if payload.get("handoff"):
+        trip.handoff = str(payload["handoff"]).strip()
+    if payload.get("notes"):
+        trip.notes = str(payload["notes"]).strip()
+    audit(user.id, source, "update", "trip", trip.id, before, {"miles_estimate": trip.miles_estimate, "miles_actual": trip.miles_actual, "handoff": trip.handoff})
+    return {"ok": True, "reply": f"Updated {trip.title}.", "trip_id": trip.id}
+
+
+def _arrive(user, payload, source) -> dict:
+    name = (payload.get("property_name") or "").strip()
+    city = (payload.get("city") or "").strip()
+    found = find_properties(name, city) if name else []
+    if not found and name and not city:
+        found = find_properties(name)
+    if not found:
+        return {"ok": False, "reply": "I don't have that property yet. Stage the trip first, or tell me the city."}
+    if len(found) > 1 and not city:
+        choices = ", ".join(property_place(p) for p in found[:4])
+        return {"ok": False, "needs_answer": True, "reply": f"Which one? {choices}"}
+    prop = found[0]
+    existing = open_shift(user)
+    if existing and existing.property_id != prop.id:
+        existing.ended_at = utcnow()
+        if existing.sharing_on:
+            existing.sharing_on = False
+            existing.share_stopped_reason = "switched"
+    shift = open_shift(user)
+    if shift and shift.property_id == prop.id:
+        shift.confirmed = False
+    else:
+        trip = _trip_for(payload, user)
+        shift = Shift_open(user, prop, trip)
+    audit(user.id, source, "arrive", "shift", shift.id, {}, {"property_id": prop.id, "confirmed": False})
+    return {
+        "ok": True,
+        "needs_property_confirm": True,
+        "reply": f"Is this {property_place(prop)}?",
+        "shift_id": shift.id,
+        "property_id": prop.id,
+    }
+
+
+def Shift_open(user, prop, trip):
+    from app.models import Shift
+
+    shift = Shift(
+        user_id=user.id,
+        trip_id=trip.id if trip else None,
+        property_id=prop.id,
+        confirmed=False,
+        started_at=utcnow(),
+    )
+    db.session.add(shift)
+    db.session.flush()
+    return shift
+
+
+def _end_visit(user, payload, source) -> dict:
+    from app.services.share import stop_share
+
+    shift = open_shift(user)
+    if not shift:
+        return {"ok": False, "reply": "You are not checked in at a property."}
+    prop = db.session.get(Property, shift.property_id)
+    now = utcnow()
+    shift.ended_at = now
+    if shift.sharing_on:
+        stop_share(shift, "trip_end")
+    moved = 0
+    for job in Job.query.filter_by(property_id=shift.property_id, status="blocked").filter(Job.deleted_at.is_(None)).all():
+        job.status = "followup"
+        moved += 1
+    if payload.get("end_day") and shift.trip_id:
+        trip = db.session.get(Trip, shift.trip_id)
+        if trip:
+            trip.status = "done"
+    if payload.get("handoff") and shift.trip_id:
+        trip = db.session.get(Trip, shift.trip_id)
+        if trip:
+            trip.handoff = str(payload["handoff"]).strip()
+    audit(user.id, source, "end_visit", "shift", shift.id, {}, {"property_id": shift.property_id, "followups": moved})
+    place = property_place(prop)
+    extra = f" {moved} blocked job(s) are on tomorrow's list." if moved else ""
+    return {"ok": True, "reply": f"Visit ended at {place}.{extra}", "shift_id": shift.id}
+
+
+def apply_upsert_property(user, payload, source) -> dict:
+    source = _src(source)
+    name = (payload.get("property_name") or "").strip()
+    city = (payload.get("city") or "").strip()
+    if not name or not city:
+        return {"ok": False, "reply": "Tell me the property and the city."}
+    profile = site_profile()
+    region = (payload.get("region") or (profile.default_region if profile else "") or "").strip()
+    prop = ensure_property(
+        name,
+        city,
+        region,
+        user.id,
+        address=(payload.get("address") or "").strip(),
+        lat=payload.get("lat"),
+        lng=payload.get("lng"),
+        source=source,
+    )
+    _pin_property(prop, (payload.get("address") or "").strip())
+    return {
+        "ok": True,
+        "reply": f"{property_place(prop)} is on file." + (" Pin saved." if prop.lat is not None else " Add an address for a pin."),
+        "property_id": prop.id,
+    }
+
+
+def apply_record_unit_visit(user, payload, source) -> dict:
+    source = _src(source)
+    if payload.get("offline_queue"):
+        return {"ok": False, "reply": "That note is still a draft. It files when you are online and you confirm it."}
+    shift = open_shift(user)
+    if not shift or not shift.confirmed:
+        from app.services.records import shift_question
+
+        reply = shift_question(shift) if shift else "Which property is this? Say: I'm at Woodview Odessa."
+        return {"ok": False, "needs_property_confirm": True, "reply": reply}
+    raw_number = payload.get("unit_number") or ""
+    number = normalize_unit(raw_number)
+    if not number:
+        return {"ok": False, "reply": "Which unit? Say the number, like 304."}
+    exact, near = match_unit(shift.property_id, number)
+    if near and not exact and not payload.get("force_new"):
+        return {
+            "ok": False,
+            "needs_answer": True,
+            "reply": f"{number} is close to unit {near.unit_number} already on this property. Say {near.unit_number} to use that one, or 'new unit {number}' if it is really new.",
+        }
+    created = False
+    if exact:
+        unit = exact
+    else:
+        unit = Unit(
+            property_id=shift.property_id,
+            unit_number=number,
+            created_by_id=user.id,
+            created_at=utcnow(),
+        )
+        db.session.add(unit)
+        db.session.flush()
+        created = True
+        audit(user.id, source, "create", "unit", unit.id, {}, {"unit_number": number, "property_id": shift.property_id})
+    status = (payload.get("status") or job_status(payload.get("title") or "")).lower()
+    note = (payload.get("note") or "").strip()
+    title = (payload.get("title") or "").strip()
+    visit = UnitVisit(
+        unit_id=unit.id,
+        property_id=shift.property_id,
+        trip_id=shift.trip_id,
+        shift_id=shift.id,
+        status="skipped" if status == "skipped" else "done" if status == "done" else "started",
+        note=note or title,
+        started_at=utcnow(),
+        created_by_id=user.id,
+    )
+    db.session.add(visit)
+    db.session.flush()
+    job_id = None
+    if title and status != "skipped":
+        job = Job(
+            property_id=shift.property_id,
+            unit_id=unit.id,
+            trip_id=shift.trip_id,
+            visit_id=visit.id,
+            title=title[:300],
+            detail=note,
+            status=status if status in ("done", "planned", "blocked", "followup") else "done",
+            source=source,
+            created_by_id=user.id,
+            created_at=utcnow(),
+        )
+        db.session.add(job)
+        db.session.flush()
+        job_id = job.id
+        db.session.add(JobEvent(job_id=job.id, body=title, actor_id=user.id, source=source, created_at=utcnow()))
+        audit(user.id, source, "create", "job", job.id, {}, {"title": job.title, "unit": number, "status": job.status})
+        if payload.get("media_id"):
+            media = db.session.get(Media, int(payload["media_id"]))
+            if media and media.user_id == user.id:
+                media.job_id = job.id
+                media.unit_id = unit.id
+                media.property_id = shift.property_id
+        _save_equipment(user, payload, unit, job, shift.property_id, source)
+    elif status == "skipped":
+        audit(user.id, source, "skip", "unit_visit", visit.id, {}, {"unit": number})
+    from app.services.equipment import describe
+
+    word = "Added" if created else "Updated"
+    equip = describe(payload.get("equipment") or {})
+    bit = f" {equip or title}." if (equip or title) else ""
+    return {
+        "ok": True,
+        "reply": f"{word} unit {number}.{bit}",
+        "unit_id": unit.id,
+        "job_id": job_id,
+        "visit_id": visit.id,
+        "created_unit": created,
+    }
+
+
+def apply_log_job_event(user, payload, source) -> dict:
+    source = _src(source)
+    job = db.session.get(Job, int(payload.get("job_id") or 0))
+    if not job or job.deleted_at is not None:
+        return {"ok": False, "reply": "I can't find that job."}
+    shift = open_shift(user)
+    if shift and shift.property_id == job.property_id and not shift.confirmed:
+        from app.services.records import shift_question
+
+        return {"ok": False, "needs_property_confirm": True, "reply": shift_question(shift)}
+    body = (payload.get("body") or "").strip()
+    if not body:
+        return {"ok": False, "reply": "What should I add to the job?"}
+    event = JobEvent(job_id=job.id, body=body, actor_id=user.id, source=source, created_at=utcnow())
+    db.session.add(event)
+    if payload.get("status") in ("done", "planned", "blocked", "followup"):
+        before = job.status
+        job.status = payload["status"]
+        audit(user.id, source, "update", "job", job.id, {"status": before}, {"status": job.status, "note": body})
+    else:
+        audit(user.id, source, "note", "job", job.id, {}, {"note": body})
+    return {"ok": True, "reply": f"Noted on job {job.id}: {body}", "job_id": job.id}
+
+
+def apply_attach_media(user, payload, source) -> dict:
+    source = _src(source)
+    media = db.session.get(Media, int(payload.get("media_id") or 0))
+    if not media or media.user_id != user.id:
+        return {"ok": False, "reply": "That photo is not on your account."}
+    if payload.get("caption"):
+        media.caption = str(payload["caption"])[:300]
+    if payload.get("job_id"):
+        media.job_id = int(payload["job_id"])
+    if payload.get("unit_number"):
+        shift = open_shift(user)
+        if not shift or not shift.confirmed:
+            return {"ok": False, "needs_property_confirm": True, "reply": "Confirm the property before filing a unit photo."}
+        exact, near = match_unit(shift.property_id, payload["unit_number"])
+        if near and not exact and not payload.get("force_new"):
+            return {"ok": False, "needs_answer": True, "reply": f"Photo not filed. {normalize_unit(payload['unit_number'])} looks like unit {near.unit_number}."}
+        if not exact:
+            exact = Unit(property_id=shift.property_id, unit_number=normalize_unit(payload["unit_number"]), created_by_id=user.id, created_at=utcnow())
+            db.session.add(exact)
+            db.session.flush()
+            audit(user.id, source, "create", "unit", exact.id, {}, {"unit_number": exact.unit_number})
+        media.unit_id = exact.id
+        media.property_id = shift.property_id
+    audit(user.id, source, "attach", "media", media.id, {}, {"job_id": media.job_id, "unit_id": media.unit_id})
+    return {"ok": True, "reply": "Photo filed.", "media_id": media.id}
+
+
+def apply_log_expense(user, payload, source) -> dict:
+    source = _src(source)
+    if payload.get("offline_queue"):
+        return {"ok": False, "reply": "Money is not filed offline. Keep the receipt photo and confirm it when you have signal."}
+    kind = (payload.get("kind") or "").strip().lower()
+    if kind not in ("gas", "food", "other"):
+        return {"ok": False, "needs_answer": True, "reply": "Is this gas, food, or other?"}
+    try:
+        cents = int(payload.get("amount_cents") or 0)
+    except (TypeError, ValueError):
+        cents = 0
+    if cents <= 0:
+        return {"ok": False, "needs_answer": True, "reply": "What was the total?"}
+    confidence = payload.get("confidence")
+    if confidence is not None and float(confidence) < CONFIDENCE_FLOOR and not payload.get("fields_confirmed"):
+        missing = payload.get("missing") or []
+        ask = ", ".join(missing) if missing else "the amount and what it was for"
+        return {"ok": False, "needs_answer": True, "reply": f"I am not sure of this receipt. Tell me {ask}."}
+    if payload.get("gas_stop") and not payload.get("odometer"):
+        return {"ok": False, "needs_answer": True, "reply": "Gas stop needs the odometer. Say the reading, then the amount."}
+    shift = open_shift(user)
+    trip = _trip_for(payload, user)
+    row = Expense(
+        user_id=user.id,
+        trip_id=trip.id if trip else None,
+        property_id=shift.property_id if shift else payload.get("property_id"),
+        kind=kind,
+        amount_cents=cents,
+        merchant=(payload.get("merchant") or "")[:160],
+        note=(payload.get("note") or "")[:2000],
+        odometer=int(payload["odometer"]) if payload.get("odometer") else None,
+        status="confirmed",
+        confidence=float(confidence) if confidence is not None else 1.0,
+        media_id=payload.get("media_id"),
+        source=source,
+        created_by_id=user.id,
+        confirmed_at=utcnow(),
+        created_at=utcnow(),
+    )
+    db.session.add(row)
+    db.session.flush()
+    if row.media_id:
+        media = db.session.get(Media, row.media_id)
+        if media:
+            media.expense_id = row.id
+    audit(
+        user.id,
+        source,
+        "create",
+        "expense",
+        row.id,
+        {},
+        {"kind": kind, "amount_cents": cents, "merchant": row.merchant, "odometer": row.odometer},
+    )
+    odo = ""
+    if row.odometer:
+        from app.services.miles import record_odometer
+
+        logged = record_odometer(user, row.odometer, note=kind, trip_id=row.trip_id, source=source)
+        if logged.get("ok"):
+            odo = ". " + logged["reply"]
+        else:
+            odo = f", odometer {row.odometer}. " + (logged.get("reply") or "")
+    return {"ok": True, "reply": f"Filed {kind} {money(cents)}{odo}", "expense_id": row.id}
+
+
+def _save_equipment(user, payload, unit, job, property_id, source) -> None:
+    eq = payload.get("equipment") or {}
+    if not isinstance(eq, dict):
+        return
+    if not any((eq.get(key) or "").strip() for key in ("kind", "brand", "model", "serial", "size")):
+        return
+    from app.services.equipment import describe
+
+    row = Equipment(
+        property_id=property_id,
+        unit_id=unit.id if unit else None,
+        job_id=job.id if job else None,
+        media_id=int(payload["media_id"]) if payload.get("media_id") else None,
+        kind=(eq.get("kind") or "")[:80],
+        brand=(eq.get("brand") or "")[:80],
+        model_number=(eq.get("model") or "")[:80],
+        serial_number=(eq.get("serial") or "")[:80],
+        size_label=(eq.get("size") or "")[:40],
+        notes=describe(eq)[:2000],
+        confidence=float(eq["confidence"]) if eq.get("confidence") not in (None, "") else None,
+        source=source,
+        created_by_id=user.id,
+        created_at=utcnow(),
+    )
+    db.session.add(row)
+    if job:
+        line = describe(eq)
+        if line and line not in (job.detail or ""):
+            job.detail = (job.detail + "\n" + line).strip()
+    db.session.flush()
+    audit(
+        user.id,
+        source,
+        "create",
+        "equipment",
+        row.id,
+        {},
+        {"kind": row.kind, "brand": row.brand, "model": row.model_number, "serial": row.serial_number, "unit_id": row.unit_id},
+    )
+
+
+def apply_log_odometer(user, payload, source) -> dict:
+    from app.services.miles import record_odometer
+
+    try:
+        reading = int(payload.get("reading") or 0)
+    except (TypeError, ValueError):
+        reading = 0
+    if reading < 1000:
+        return {"ok": False, "needs_answer": True, "reply": "Say the odometer, like: odometer 120440."}
+    trip = _trip_for(payload, user)
+    return record_odometer(user, reading, note=payload.get("note") or "", trip_id=trip.id if trip else None, source=_src(source))
+
+
+def apply_log_miles(user, payload, source) -> dict:
+    from app.services.miles import add_stated_miles
+
+    try:
+        miles = float(payload.get("miles") or 0)
+    except (TypeError, ValueError):
+        miles = 0
+    trip = _trip_for(payload, user)
+    return add_stated_miles(
+        user,
+        miles,
+        note=payload.get("note") or "Miles she logged",
+        trip_id=trip.id if trip else None,
+        source=_src(source),
+    )
+
+
+def apply_estimate_miles(user, payload, source) -> dict:
+    source = _src(source)
+    trip = _trip_for(payload, user)
+    if not trip:
+        return {"ok": False, "reply": "Stage a trip first, then I can estimate miles."}
+    if payload.get("miles") is not None:
+        before = trip.miles_estimate
+        trip.miles_estimate = float(payload["miles"])
+        audit(user.id, source, "update", "trip", trip.id, {"miles_estimate": before}, {"miles_estimate": trip.miles_estimate})
+        return {"ok": True, "reply": f"Miles set to {trip.miles_estimate}.", "trip_id": trip.id, "miles": trip.miles_estimate}
+    link = TripProperty.query.filter_by(trip_id=trip.id).order_by(TripProperty.sort_order.asc()).first()
+    prop = db.session.get(Property, link.property_id) if link else None
+    profile = site_profile()
+    miles = None
+    if prop and profile and profile.home_lat is not None:
+        if prop.lat is None:
+            _pin_property(prop)
+        miles = _miles_between(profile.home_lat, profile.home_lng, prop) if prop.lat is not None else None
+    if miles is None:
+        return {"ok": False, "reply": "I need a home pin and a property pin, or you can type the miles."}
+    before = trip.miles_estimate
+    trip.miles_estimate = miles
+    if link:
+        link.miles_leg = miles
+    db.session.add(
+        MileageLeg(
+            trip_id=trip.id,
+            origin=(profile.home_label if profile else "") or "Home base",
+            destination=property_place(prop),
+            miles=miles,
+            source=source,
+            created_at=utcnow(),
+        )
+    )
+    audit(user.id, source, "update", "trip", trip.id, {"miles_estimate": before}, {"miles_estimate": miles})
+    return {"ok": True, "reply": f"About {miles} miles. Change it if the drive was different.", "trip_id": trip.id, "miles": miles}
+
+
+def apply_query_record(user, payload, source) -> dict:
+    question = (payload.get("question") or "").strip()
+    if not question:
+        return {"ok": False, "reply": "Ask about a property, a unit, or an expense."}
+    low = question.lower()
+    props = Property.query.filter(Property.deleted_at.is_(None)).all()
+    hit = None
+    for prop in props:
+        if prop.name.lower() in low:
+            hit = prop
+            break
+    jobs = Job.query.filter(Job.deleted_at.is_(None))
+    if hit:
+        jobs = jobs.filter_by(property_id=hit.id)
+    rows = jobs.order_by(Job.id.desc()).limit(80).all()
+    stop = {"what", "which", "when", "where", "did", "the", "and", "for", "this", "that", "with", "from", "have", "were", "was", "you", "our", "install", "installed"}
+    words = [w for w in re_words(low) if w not in stop and len(w) > 2 and (not hit or w != hit.name.lower())]
+    matched = []
+    for job in rows:
+        blob = f"{job.title} {job.detail}".lower()
+        if not words or any(w in blob for w in words):
+            matched.append(job)
+        if len(matched) >= 8:
+            break
+    if not matched:
+        place = f" at {hit.name}" if hit else ""
+        return {"ok": True, "reply": f"I don't have a matching job{place}.", "matches": []}
+    lines = []
+    matches = []
+    for job in matched:
+        unit = db.session.get(Unit, job.unit_id) if job.unit_id else None
+        prop = db.session.get(Property, job.property_id)
+        prefix = f"Unit {unit.unit_number}: " if unit else ""
+        place = property_place(prop)
+        lines.append(f"{prefix}{job.title} ({job.status}) at {place}.")
+        matches.append({"job_id": job.id, "href": f"/properties/{job.property_id}"})
+    return {"ok": True, "reply": " ".join(lines), "matches": matches}
+
+
+def re_words(text: str) -> list[str]:
+    import re
+
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def apply_draft_report(user, payload, source) -> dict:
+    source = _src(source)
+    kind = (payload.get("kind") or "weekly").strip().lower()
+    if kind in ("boss", "bosses", "company packet"):
+        kind = "company"
+    if kind not in ("weekly", "company", "property", "adhoc"):
+        kind = "weekly"
+    profile = site_profile()
+    starts = None
+    if payload.get("starts_on"):
+        from datetime import date
+
+        try:
+            starts = date.fromisoformat(str(payload["starts_on"])[:10])
+        except ValueError:
+            starts = None
+    prop_id = payload.get("property_id")
+    if payload.get("property_name") and not prop_id:
+        found = find_properties(payload["property_name"], payload.get("city") or "")
+        if found:
+            prop_id = found[0].id
+    snapshot = build_snapshot(
+        kind=kind,
+        starts_on=starts,
+        property_id=prop_id,
+        author=user.label(),
+    )
+    from datetime import date
+
+    start = date.fromisoformat(snapshot["period"]["start"])
+    end = date.fromisoformat(snapshot["period"]["end"])
+    existing = (
+        Report.query.filter(
+            Report.kind == kind,
+            Report.period_start == start,
+            Report.period_end == end,
+            Report.deleted_at.is_(None),
+            Report.status.in_(("ready", "sent")),
+        )
+        .order_by(Report.id.desc())
+        .first()
+    )
+    if existing and existing.status == "sent" and not payload.get("force"):
+        return {
+            "ok": True,
+            "reply": f"That {kind} report was already sent. It stays as the company copy.",
+            "report_id": existing.id,
+            "duplicate": True,
+        }
+    body = render_markdown(snapshot)
+    if existing and existing.status == "ready" and not payload.get("force_new"):
+        before = {"title": existing.title}
+        existing.title = snapshot["title"][:200]
+        existing.body_md = body
+        existing.snapshot_json = dumps(snapshot)
+        existing.property_id = prop_id
+        audit(user.id, source, "update", "report", existing.id, before, {"title": existing.title})
+        return {"ok": True, "reply": f"Updated {existing.title}. Bosses with a login can open it. Email is only used when they have one.", "report_id": existing.id}
+    report = Report(
+        kind=kind,
+        title=snapshot["title"][:200],
+        period_start=start,
+        period_end=end,
+        property_id=prop_id,
+        body_md=body,
+        snapshot_json=dumps(snapshot),
+        status="ready",
+        created_by_id=user.id,
+        ready_at=utcnow(),
+        created_at=utcnow(),
+    )
+    db.session.add(report)
+    db.session.flush()
+    audit(user.id, source, "create", "report", report.id, {}, {"kind": kind, "title": report.title})
+    bosses = User.query.filter_by(role="viewer", active=True, can_see_reports=True).count()
+    who = f"{bosses} boss login(s) can read it now." if bosses else "Add a boss whenever you want — they do not need an email."
+    return {"ok": True, "reply": f"Saved {report.title}. {who}", "report_id": report.id}
+
+
+def apply_send_report(user, payload, source) -> dict:
+    source = _src(source)
+    report = db.session.get(Report, int(payload.get("report_id") or 0))
+    if not report or report.deleted_at is not None:
+        report = (
+            Report.query.filter(Report.deleted_at.is_(None), Report.status.in_(("ready", "sent")))
+            .order_by(Report.id.desc())
+            .first()
+        )
+    if not report:
+        return {"ok": False, "reply": "Save a weekly or company report first."}
+    before = {"status": report.status, "sent_at": report.sent_at.isoformat() if report.sent_at else None}
+    report.status = "sent"
+    report.sent_at = utcnow()
+    viewers = User.query.filter_by(role="viewer", active=True, can_see_reports=True).all()
+    delivered = []
+    for viewer in viewers:
+        db.session.add(
+            Notice(
+                user_id=viewer.id,
+                kind="report",
+                body=report.title,
+                href=f"/reports/{report.id}",
+                created_at=utcnow(),
+            )
+        )
+        link = sign_report(report.id, ttl=900)
+        mailed = bool(viewer.email) and _email_report(viewer.email, report, link)
+        db.session.add(
+            ReportShare(
+                report_id=report.id,
+                user_id=viewer.id,
+                label=viewer.label(),
+                expires_at=utcnow() + timedelta(minutes=15),
+                created_by_id=user.id,
+                created_at=utcnow(),
+            )
+        )
+        delivered.append(
+            {
+                "username": viewer.username,
+                "email": viewer.email,
+                "mailed": mailed,
+                "link": link,
+            }
+        )
+    owner_link = sign_report(report.id, ttl=900)
+    audit(user.id, source, "send", "report", report.id, before, {"status": "sent", "viewers": [d["username"] for d in delivered]})
+    if not delivered:
+        return {
+            "ok": True,
+            "reply": f"Marked {report.title} sent. No bosses are on the account yet. This short link works for 15 minutes: {owner_link}",
+            "report_id": report.id,
+            "link": owner_link,
+            "delivered": [],
+        }
+    bits = []
+    for row in delivered:
+        if row["email"] and row["mailed"]:
+            bits.append(f"{row['username']} emailed")
+        elif row["email"]:
+            bits.append(f"{row['username']} has email but send failed — they can still open it when they log in")
+        else:
+            bits.append(f"{row['username']} has no email — it is on their login")
+    return {
+        "ok": True,
+        "reply": f"Sent {report.title}. " + "; ".join(bits) + f". Short link: {owner_link}",
+        "report_id": report.id,
+        "link": owner_link,
+        "delivered": delivered,
+    }
+
+
+def _email_report(address: str, report: Report, link: str) -> bool:
+    import os
+    import smtplib
+    from email.message import EmailMessage
+
+    host = (os.getenv("SMTP_HOST") or "").strip()
+    if not host or not address:
+        return False
+    msg = EmailMessage()
+    msg["Subject"] = report.title
+    msg["From"] = os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "apt@poweredby.top"
+    msg["To"] = address
+    snapshot = load_snapshot(report)
+    msg.set_content(render_markdown(snapshot) + f"\nShort link (15 minutes): {link}\n")
+    try:
+        port = int(os.getenv("SMTP_PORT") or "587")
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            smtp.starttls()
+            user = os.getenv("SMTP_USER") or ""
+            password = os.getenv("SMTP_PASSWORD") or ""
+            if user:
+                smtp.login(user, password)
+            smtp.send_message(msg)
+        return True
+    except Exception:
+        return False
+
+
+def apply_invite_viewer(user, payload, source) -> dict:
+    source = _src(source)
+    if user.role != "owner":
+        return {"ok": False, "reply": "Only you can add logins."}
+    username = (payload.get("username") or "").strip()
+    role = (payload.get("role") or "viewer").strip().lower()
+    try:
+        created, generated = create_user(
+            username=username,
+            password=payload.get("password") or "",
+            display_name=payload.get("display_name") or username,
+            role=role,
+            email=payload.get("email") or None,
+            created_by=user,
+            can_see_reports=payload.get("can_see_reports", True),
+            can_see_history=payload.get("can_see_history", role != "viewer" or payload.get("can_see_history", True)),
+            can_see_live_map=bool(payload.get("can_see_live_map", False)),
+        )
+    except ValueError as exc:
+        return {"ok": False, "reply": str(exc)}
+    token = secrets.token_urlsafe(24)
+    created.invite_token = token
+    created.invite_expires = utcnow() + timedelta(days=7)
+    created.invite_used = False
+    audit(
+        user.id,
+        source,
+        "create",
+        "user",
+        created.id,
+        {},
+        {"username": created.username, "role": created.role, "email": created.email},
+    )
+    mail = created.email or "no email"
+    secret = f" Temporary password: {generated}." if generated else ""
+    return {
+        "ok": True,
+        "reply": (
+            f"Added {created.username} as {created.role} ({mail}). "
+            f"They sign in with that username.{secret} "
+            f"One-time link, 7 days: /join/{token}"
+        ),
+        "user_id": created.id,
+        "username": created.username,
+        "generated_password": generated,
+    }
+
+
+def apply_update_viewer(user, payload, source) -> dict:
+    source = _src(source)
+    if user.role != "owner":
+        return {"ok": False, "reply": "Only you can change logins."}
+    target = find_user(payload.get("username") or "")
+    if not target:
+        return {"ok": False, "reply": "I can't find that login."}
+    before = {
+        "role": target.role,
+        "email": target.email,
+        "can_see_reports": target.can_see_reports,
+        "can_see_history": target.can_see_history,
+        "can_see_live_map": target.can_see_live_map,
+        "active": target.active,
+    }
+    if payload.get("role") in ("owner", "field", "viewer"):
+        target.role = payload["role"]
+    if payload.get("clear_email"):
+        target.email = None
+    elif "email" in payload:
+        from app.services.people import clean_email
+
+        try:
+            target.email = clean_email(payload.get("email"))
+        except ValueError as exc:
+            return {"ok": False, "reply": str(exc)}
+    for flag in ("can_see_reports", "can_see_history", "can_see_live_map", "active"):
+        if flag in payload and payload[flag] is not None:
+            setattr(target, flag, bool(payload[flag]))
+    if payload.get("display_name"):
+        target.display_name = str(payload["display_name"])[:150]
+    audit(user.id, source, "update", "user", target.id, before, {"role": target.role, "email": target.email, "active": target.active})
+    mail = target.email or "no email"
+    return {"ok": True, "reply": f"{target.username} is {target.role}, {mail}.", "user_id": target.id}
+
+
+def _entity(name: str, entity_id: int):
+    model = {"job": Job, "unit": Unit, "expense": Expense}.get(name)
+    if not model:
+        return None
+    return db.session.get(model, entity_id)
+
+
+def apply_soft_delete(user, payload, source) -> dict:
+    source = _src(source)
+    name = (payload.get("entity") or "").strip().lower()
+    row = _entity(name, int(payload.get("entity_id") or 0))
+    if not row or getattr(row, "deleted_at", None):
+        return {"ok": False, "reply": "Nothing to remove."}
+    before = {"deleted_at": None}
+    row.deleted_at = utcnow()
+    audit(user.id, source, "delete", name, row.id, before, {"deleted_at": row.deleted_at.isoformat()})
+    return {"ok": True, "reply": f"Removed {name} {row.id}. Say restore {name} {row.id} if that was the wrong door.", "entity": name, "entity_id": row.id}
+
+
+def apply_restore(user, payload, source) -> dict:
+    source = _src(source)
+    name = (payload.get("entity") or "").strip().lower()
+    row = _entity(name, int(payload.get("entity_id") or 0))
+    if row is None:
+        return {"ok": False, "reply": "I can't find that."}
+    before = {"deleted_at": row.deleted_at.isoformat() if row.deleted_at else None}
+    row.deleted_at = None
+    audit(user.id, source, "restore", name, row.id, before, {"deleted_at": None})
+    return {"ok": True, "reply": f"Restored {name} {row.id}.", "entity": name, "entity_id": row.id}
+
+
+def apply_update_settings(user, payload, source) -> dict:
+    source = _src(source)
+    if user.role != "owner":
+        return {"ok": False, "reply": "Settings stay on your login."}
+    profile = site_profile()
+    if not profile:
+        return {"ok": False, "reply": "No assistant profile yet."}
+    fields = (
+        "assistant_name",
+        "tone",
+        "always_ask",
+        "default_city",
+        "default_region",
+        "report_voice",
+        "company_name",
+        "home_label",
+        "timezone",
+    )
+    before = {name: getattr(profile, name) for name in fields}
+    changed = []
+    for name in fields:
+        if payload.get(name) is not None and str(payload.get(name)).strip() != "":
+            setattr(profile, name, str(payload[name]).strip()[:200] if name != "always_ask" else str(payload[name]).strip())
+            changed.append(name)
+    if payload.get("home_lat") is not None and payload.get("home_lng") is not None:
+        profile.home_lat = float(payload["home_lat"])
+        profile.home_lng = float(payload["home_lng"])
+        changed.append("home_pin")
+    audit(user.id, source, "update", "assistant_profile", profile.id, before, {name: getattr(profile, name) for name in fields})
+    if not changed:
+        return {"ok": False, "reply": "Tell me what to change — name, tone, city, company, or home base."}
+    return {"ok": True, "reply": "Settings saved: " + ", ".join(changed) + "."}
+
+
+APPLIERS = {
+    "plan_trip": apply_plan_trip,
+    "update_trip": apply_update_trip,
+    "upsert_property": apply_upsert_property,
+    "record_unit_visit": apply_record_unit_visit,
+    "log_job_event": apply_log_job_event,
+    "attach_media": apply_attach_media,
+    "log_expense": apply_log_expense,
+    "estimate_miles": apply_estimate_miles,
+    "log_odometer": apply_log_odometer,
+    "log_miles": apply_log_miles,
+    "query_record": apply_query_record,
+    "draft_report": apply_draft_report,
+    "send_report": apply_send_report,
+    "invite_viewer": apply_invite_viewer,
+    "update_viewer": apply_update_viewer,
+    "soft_delete": apply_soft_delete,
+    "restore": apply_restore,
+    "update_settings": apply_update_settings,
+}
+
+
+def apply_tool(user, tool: str, payload: dict, source: str) -> dict:
+    fn = APPLIERS.get(tool)
+    if not fn:
+        return {"ok": False, "reply": "I don't know that action."}
+    return fn(user, payload or {}, source)

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Map{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>Map</h1>
+  <p class="lead">Property pins and the drive. No building layouts.</p>
+  <div id="map" class="map"></div>
+  {% if current_user.role != 'viewer' %}
+  <form method="post" action="/share" class="row-actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if state.on %}
+    <button type="submit" name="on" value="0">Stop sharing</button>
+    {% else %}
+    <button type="submit" name="on" value="1">Share location for this visit</button>
+    {% endif %}
+  </form>
+  {% elif not current_user.can_see_live_map %}
+  <p>Live location is off for this login.</p>
+  {% endif %}
+  {% if state.on and current_user.can_see_live_map or state.on and current_user.role != 'viewer' %}
+  <p>{% if state.fresh %}Last ping is fresh.{% else %}No fresh ping in the last 5 minutes.{% endif %}</p>
+  {% endif %}
+</section>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const pins = {{ pins|tojson }};
+  const home = {{ home|tojson }};
+  const map = L.map("map");
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap" }).addTo(map);
+  const bounds = [];
+  pins.forEach((pin) => {
+    const marker = L.marker([pin.lat, pin.lng]).addTo(map);
+    marker.bindPopup(`<a href="${pin.href}">${pin.name}</a> · ${pin.city}`);
+    bounds.push([pin.lat, pin.lng]);
+  });
+  if (home) {
+    L.circleMarker([home.lat, home.lng], { radius: 8 }).addTo(map).bindPopup(home.label);
+    bounds.push([home.lat, home.lng]);
+  }
+  if (bounds.length) map.fitBounds(bounds, { padding: [24, 24] });
+  else map.setView([31.85, -102.37], 6);
+</script>
+{% endblock %}

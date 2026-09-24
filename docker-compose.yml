@@ -1,0 +1,30 @@
+# apt.poweredby.top — MariaDB for the field record and PoweredByTop pbt_* tables.
+# Host port 3314 (3310 aegis, 3312 family, 3313 new).
+# Start: docker compose up -d
+
+services:
+  apt-mariadb:
+    image: mariadb:10.11
+    container_name: apt-mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: AptRootPass2026!
+      MYSQL_DATABASE: apt
+      MYSQL_USER: apt_user
+      MYSQL_PASSWORD: AptUserPass2026!
+    ports:
+      - "3314:3306"
+    volumes:
+      - ./mariadb_data:/var/lib/mysql
+    command: [
+      "--character-set-server=utf8mb4",
+      "--collation-server=utf8mb4_unicode_ci",
+      "--innodb-buffer-pool-size=128M",
+      "--max-connections=80"
+    ]
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-pAptRootPass2026!"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s

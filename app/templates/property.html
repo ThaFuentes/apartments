@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ prop.name }}{% endblock %}
+{% block main %}
+<section class="sheet">
+  <p><a href="/places/{{ prop.city_id }}">{{ prop.city.name if prop.city else 'City' }}</a></p>
+  <h1>{{ prop.name }}</h1>
+  <p>{{ prop.address or 'No address yet.' }}</p>
+  {% if prop.lat %}
+  <p>Pin {{ '%.5f'|format(prop.lat) }}, {{ '%.5f'|format(prop.lng) }} · <a href="/map">Map</a></p>
+  {% else %}
+  <p>No map pin yet.</p>
+  {% endif %}
+  {% if current_user.role != 'viewer' %}
+  <form method="post" class="stack" action="/properties/{{ prop.id }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <label>Address <input name="address" value="{{ prop.address }}"></label>
+    <button type="submit">Save address and pin</button>
+  </form>
+  {% endif %}
+  <h2>Visited units</h2>
+  {% if not units %}
+  <p class="empty">Units appear only after she names them. 304 is not created until she says 304.</p>
+  {% endif %}
+  <ul class="list">
+    {% for unit in units %}
+    <li><a href="/units/{{ unit.id }}">Unit {{ unit.unit_number }}</a></li>
+    {% endfor %}
+  </ul>
+  <h2>Jobs</h2>
+  <ul class="list">
+    {% for job in jobs %}
+    <li>{{ job.title }} · {{ job.status }}
+      {% if current_user.role != 'viewer' %}
+      <form method="post" action="/jobs/{{ job.id }}/delete" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/properties/{{ prop.id }}">
+        <button type="submit" class="btn-quiet">Remove</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

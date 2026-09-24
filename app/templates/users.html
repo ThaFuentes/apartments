@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}People{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>People</h1>
+  <p class="lead">Add a boss or another person when you want. Username and password are required. Email is optional — leave it blank and they still get the reports on their login.</p>
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <label>Username <input name="username" required autocapitalize="none" placeholder="boss"></label>
+    <label>Name <input name="display_name" placeholder="How reports should address them"></label>
+    <label>Role
+      <select name="role">
+        <option value="viewer">Viewer — reports and history, no edits</option>
+        <option value="field">Field — can log visits</option>
+        <option value="owner">Owner — full access</option>
+      </select>
+    </label>
+    <label>Email <span class="hint">optional</span> <input name="email" placeholder="Leave blank if they have none"></label>
+    <label>Password <span class="hint">optional — one is created if you leave this blank</span> <input name="password" type="text" minlength="8" autocomplete="off"></label>
+    <label class="check"><input type="checkbox" name="can_see_reports" value="1" checked> Reports</label>
+    <label class="check"><input type="checkbox" name="can_see_history" value="1" checked> History</label>
+    <label class="check"><input type="checkbox" name="can_see_live_map" value="1"> Live map</label>
+    <button type="submit">Add person</button>
+  </form>
+  <h2>Logins</h2>
+  {% for person in people %}
+  <form method="post" action="/users/{{ person.id }}" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>{{ person.display_name or person.username }} <span class="hint">{{ person.username }}</span></h3>
+    <p>{{ person.email or "No email" }}</p>
+    <label>Role
+      <select name="role">
+        {% for role in ['owner', 'field', 'viewer'] %}
+        <option value="{{ role }}" {% if person.role == role %}selected{% endif %}>{{ role }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Email <input name="email" value="{{ person.email or '' }}" placeholder="Blank keeps the current email"></label>
+    <label class="check"><input type="checkbox" name="clear_email" value="1"> Remove email</label>
+    <label class="check"><input type="checkbox" name="can_see_reports" value="1" {% if person.can_see_reports %}checked{% endif %}> Reports</label>
+    <label class="check"><input type="checkbox" name="can_see_history" value="1" {% if person.can_see_history %}checked{% endif %}> History</label>
+    <label class="check"><input type="checkbox" name="can_see_live_map" value="1" {% if person.can_see_live_map %}checked{% endif %}> Live map</label>
+    <label class="check"><input type="checkbox" name="active" value="1" {% if person.active %}checked{% endif %}> Active</label>
+    <button type="submit">Update</button>
+  </form>
+  {% endfor %}
+</section>
+{% endblock %}

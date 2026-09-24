@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ report.title }}{% endblock %}
+{% block main %}
+<article class="sheet report">
+  <p class="kicker">{{ snapshot.company or 'Company' }} · {{ report.status }}</p>
+  <h1>{{ snapshot.title or report.title }}</h1>
+  <p>{{ snapshot.period.start }} through {{ snapshot.period.end }}{% if snapshot.author %} · {{ snapshot.author }}{% endif %}</p>
+  {% if report.kind == 'company' %}
+  <p>Company review copy. Jobs she went for, what got done, units, miles, and gas, food, and other.</p>
+  {% endif %}
+  <h2>Went for and completed</h2>
+  <ul>
+    <li>Jobs on the week: {{ snapshot.totals.jobs_went }}</li>
+    <li>Completed: {{ snapshot.totals.jobs_done }}</li>
+    <li>Blocked: {{ snapshot.totals.jobs_blocked }}</li>
+    <li>Units visited: {{ snapshot.totals.units }}</li>
+  </ul>
+  <h2>Properties and units</h2>
+  {% for prop in snapshot.properties or [] %}
+  <section class="card">
+    <h3>{{ prop.name }} · {{ prop.city }}</h3>
+    <p>{{ prop.address or 'Address not on file.' }}{% if prop.lat %} Pin {{ '%.5f'|format(prop.lat) }}, {{ '%.5f'|format(prop.lng) }}.{% endif %}</p>
+    <p>Units: {{ prop.units|join(', ') or 'none logged' }}</p>
+    <p>Went {{ prop.went }}, completed {{ prop.completed }}, blocked {{ prop.blocked }}, follow-up {{ prop.followup }}.</p>
+    <ul>
+      {% for job in prop.jobs %}
+      <li>{% if job.unit %}{{ job.unit }} — {% endif %}{{ job.title }} ({{ job.status }}){% if job.notes %} — {{ job.notes }}{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% else %}
+  <p>No property visits in this period.</p>
+  {% endfor %}
+  <h2>Miles</h2>
+  <p>Estimate {{ snapshot.miles.estimate or 0 }}{% if snapshot.miles.actual %} · actual {{ snapshot.miles.actual }}{% endif %} · driven {{ snapshot.miles.traveled or 0 }}</p>
+  <h2>Expenses</h2>
+  <ul>
+    <li>Gas {{ money(snapshot.expenses.gas) }}</li>
+    <li>Food {{ money(snapshot.expenses.food) }}</li>
+    <li>Other {{ money(snapshot.expenses.other) }}</li>
+    <li>Total {{ money(snapshot.totals.spend_cents) }}</li>
+  </ul>
+  <ul>
+    {% for line in snapshot.expenses.lines or [] %}
+    <li>{{ line.kind }} {{ money(line.amount_cents) }}{% if line.merchant %} · {{ line.merchant }}{% endif %}{% if line.odometer %} · odo {{ line.odometer }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  <h2>What matters</h2>
+  <ul>
+    {% for bit in snapshot.handoffs or [] %}
+    <li>{{ bit }}</li>
+    {% else %}
+    <li>No handoff note on this week.</li>
+    {% endfor %}
+  </ul>
+  <h2>Follow-up</h2>
+  <ul>
+    {% for row in snapshot.followups or [] %}
+    <li>{{ row.property }} {{ row.city }}: {% if row.unit %}{{ row.unit }} — {% endif %}{{ row.title }} ({{ row.status }})</li>
+    {% else %}
+    <li>Nothing queued for a return visit.</li>
+    {% endfor %}
+  </ul>
+  <h2>Compared with last week</h2>
+  <ul>
+    <li>Completed {{ snapshot.totals.jobs_done }} this week, {{ snapshot.prior.completed }} last week.</li>
+    <li>Spend {{ money(snapshot.totals.spend_cents) }} this week, {{ money(snapshot.prior.spend_cents) }} last week.</li>
+    <li>Miles {{ snapshot.miles.estimate or 0 }} this week, {{ snapshot.prior.miles or 0 }} last week.</li>
+  </ul>
+  <p><a href="/reports/{{ report.id }}/pdf">Download PDF</a></p>
+  {% if current_user.is_authenticated and current_user.role == 'owner' and report.status != 'sent' %}
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Edit the written copy <textarea name="body_md" rows="8">{{ report.body_md }}</textarea></label>
+    <button type="submit">Save edits</button>
+  </form>
+  <form method="post" action="/reports/{{ report.id }}/send">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <button type="submit">Send to bosses</button>
+  </form>
+  <h2>Who can read this</h2>
+  {% if viewers %}
+  <ul>
+    {% for person in viewers %}
+    <li>{{ person.display_name or person.username }} · {{ person.email or 'no email' }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No bosses yet. Add one under Settings. They can read this without an email.</p>
+  {% endif %}
+  {% endif %}
+</article>
+{% endblock %}

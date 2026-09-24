@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Apt runtime
+uploads/
+tmp/
+logs/
+mariadb_data/
+backups/

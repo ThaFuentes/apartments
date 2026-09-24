@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{% if city %}{{ city.name }}{% else %}Places{% endif %}{% endblock %}
+{% block main %}
+<section class="sheet">
+  {% if city %}
+  <p><a href="/places">All cities</a></p>
+  <h1>{{ city.name }}{% if city.region %} {{ city.region }}{% endif %}</h1>
+  {% if not properties %}
+  <p class="empty">No properties in this city yet.</p>
+  {% endif %}
+  <ul class="list">
+    {% for prop in properties %}
+    <li><a href="/properties/{{ prop.id }}"><strong>{{ prop.name }}</strong></a> {{ prop.address }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <h1>Cities</h1>
+  {% if not cities %}
+  <p class="empty">A city shows up when you stage a trip. Try: I'm going to Woodview Odessa Thursday for AC evals.</p>
+  {% endif %}
+  <ul class="list">
+    {% for city in cities %}
+    <li><a href="/places/{{ city.id }}">{{ city.name }}{% if city.region %} · {{ city.region }}{% endif %}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

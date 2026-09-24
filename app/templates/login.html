@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{% if setup %}Create your login{% else %}Sign in{% endif %}{% endblock %}
+{% block main %}
+<section class="sheet narrow">
+  {% if setup %}
+  <h1>Create your login</h1>
+  <p class="lead">This is your field record. A username and password are enough. Email is optional — leave it blank.</p>
+  {% else %}
+  <h1>Apt</h1>
+  <p class="lead">Sign in with the username you were given. An email is not required.</p>
+  {% endif %}
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if setup %}
+    <label>Your name <input name="display_name" autocomplete="name" required></label>
+    {% endif %}
+    <label>Username <input name="username" autocomplete="username" required autocapitalize="none"></label>
+    <label>Password <input name="password" type="password" autocomplete="{{ 'new-password' if setup else 'current-password' }}" required minlength="8"></label>
+    <label>Email <span class="hint">optional</span> <input name="email" type="text" inputmode="email" autocomplete="email" placeholder="Leave blank if you have none"></label>
+    <button type="submit">{% if setup %}Create login{% else %}Sign in{% endif %}</button>
+  </form>
+</section>
+{% endblock %}

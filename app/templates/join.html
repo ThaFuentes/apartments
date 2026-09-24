@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Set a password{% endblock %}
+{% block main %}
+<section class="sheet narrow">
+  <h1>Set a password for {{ person.username }}</h1>
+  <p class="lead">This link works once. {{ person.display_name or person.username }} does not need an email on the account.</p>
+  <form method="post" class="stack">
+    <label>Password <input name="password" type="password" minlength="8" required autocomplete="new-password"></label>
+    <button type="submit">Save password</button>
+  </form>
+</section>
+{% endblock %}

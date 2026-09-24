@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Expenses{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>Expenses</h1>
+  <p class="lead">Gas, food, or other. Nothing here is a tax filing. A receipt still waits for you to confirm the amount.</p>
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <label>Kind
+      <select name="kind">
+        <option value="gas">Gas</option>
+        <option value="food">Food</option>
+        <option value="other">Other</option>
+      </select>
+    </label>
+    <label>Amount <input name="amount" inputmode="decimal" required placeholder="42.18"></label>
+    <label>Merchant <input name="merchant"></label>
+    <label>Odometer <span class="hint">gas stops</span> <input name="odometer" inputmode="numeric"></label>
+    <label>Note <input name="note"></label>
+    <button type="submit">File expense</button>
+  </form>
+  <ul class="list">
+    {% for row in expenses %}
+    <li>{{ row.kind }} {{ money(row.amount_cents) }} {% if row.merchant %}· {{ row.merchant }}{% endif %} {% if row.odometer %}· odo {{ row.odometer }}{% endif %} · {{ row.status }}</li>
+    {% else %}
+    <li>No expenses yet. Say “filled up, odometer 120440, $48.20 at Pilot”.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

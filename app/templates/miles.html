@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Miles{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>Miles traveled</h1>
+  <p class="lead">{{ total }} miles on the record. An odometer reading counts the miles since the last one. You can also say “drove 86 miles” or type them here.</p>
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <label>Odometer <input name="reading" inputmode="numeric" placeholder="120440"></label>
+    <button type="submit">Save odometer</button>
+  </form>
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="miles-{{ msg_key }}">
+    <label>Miles driven <input name="miles" inputmode="decimal" placeholder="86"></label>
+    <label>Note <input name="note" placeholder="Odessa to Midland"></label>
+    <button type="submit">Add miles</button>
+  </form>
+  <h2>Odometer</h2>
+  <ul class="list">
+    {% for row in readings %}
+    <li>{{ row.recorded_at }} · {{ row.reading }} {% if row.note %}· {{ row.note }}{% endif %}</li>
+    {% else %}
+    <li>No odometer yet. The first reading is the start. The next one adds the miles.</li>
+    {% endfor %}
+  </ul>
+  <h2>Log</h2>
+  <ul class="list">
+    {% for row in entries %}
+    <li>{{ row.miles }} mi · {{ row.note or row.source }}{% if row.id not in counted_ids %} · not added again, an odometer already covers that day{% endif %}</li>
+    {% else %}
+    <li>No driven miles yet.</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}

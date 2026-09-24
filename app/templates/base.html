@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f3d34">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>{% block title %}Apt{% endblock %} · Field record</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}">
+</head>
+<body class="{% if drive %}drive{% endif %} {% block body_class %}{% endblock %}" data-share="{{ '1' if share.on else '0' }}" data-property="{{ header_property }}">
+  <header class="top">
+    <div class="where">
+      <a href="/places">{{ header_city }}</a>
+      <span aria-hidden="true">→</span>
+      <strong>{{ header_property }}</strong>
+    </div>
+    {% if current_user.is_authenticated and current_user.role != 'viewer' and header_property != 'Property' and not header_confirmed %}
+    <form method="post" action="/property/confirm" class="confirm-place">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Yes, this is {{ header_property }}</button>
+    </form>
+    {% endif %}
+    {% if share.on %}
+    <p class="share-banner">Sharing with {{ share.viewers }} · {% if share.fresh %}fresh{% else %}waiting on a ping{% endif %}</p>
+    {% endif %}
+  </header>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flashes">
+      {% for category, message in messages %}
+      <p class="flash {{ category }}">{{ message }}</p>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endwith %}
+  {% if notices %}
+  <div class="notices">
+    {% for note in notices %}
+    <a href="{{ note.href or '/' }}">{{ note.body }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <main>
+    {% block main %}{% endblock %}
+  </main>
+  {% if current_user.is_authenticated %}
+  <nav class="nav">
+    {% if current_user.role != 'viewer' %}
+    <a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Chat</a>
+    <a href="/trips">Trips</a>
+    <a href="/miles">Miles</a>
+    <a href="/places">Places</a>
+    <a href="/expenses">Money</a>
+    {% endif %}
+    <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>
+    <a href="/map">Map</a>
+    {% if current_user.role == 'owner' %}
+    <a href="/settings">Settings</a>
+    {% endif %}
+  </nav>
+  <form method="post" action="/drive" class="drive-toggle">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+    {% if drive %}
+    <input type="hidden" name="on" value="0">
+    <button type="submit">Leave drive mode</button>
+    {% else %}
+    <input type="hidden" name="on" value="1">
+    <button type="submit">Drive mode</button>
+    {% endif %}
+  </form>
+  {% endif %}
+  <script src="{{ url_for('static', filename='js/apt.js') }}"></script>
+</body>
+</html>

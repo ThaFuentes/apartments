@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Unit {{ unit.unit_number }}{% endblock %}
+{% block main %}
+<section class="sheet">
+  <p><a href="/properties/{{ unit.property_id }}">{{ unit.property.name }}</a></p>
+  <h1>Unit {{ unit.unit_number }}</h1>
+  <h2>Equipment</h2>
+  {% if not gear %}
+  <p class="empty">No nameplate yet. A photo of the sticker, or a sentence like “Carrier 3 ton model 24ACC serial AB12”, files it here.</p>
+  {% endif %}
+  <ul class="list">
+    {% for item in gear %}
+    <li>{{ item.brand }} {{ item.size_label }} {{ item.kind }}{% if item.model_number %} · model {{ item.model_number }}{% endif %}{% if item.serial_number %} · serial {{ item.serial_number }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  <h2>Visits</h2>
+  <ul class="list">
+    {% for visit in visits %}
+    <li>{{ visit.started_at }} · {{ visit.status }} {{ visit.note }}</li>
+    {% endfor %}
+  </ul>
+  <h2>Jobs</h2>
+  {% for job in jobs %}
+  <article class="card">
+    <h3>{{ job.title }} · {{ job.status }}</h3>
+    {% if job.detail %}<p>{{ job.detail }}</p>{% endif %}
+    <ul>
+      {% for event in events.get(job.id, []) %}
+      <li>{{ event.created_at }} · {{ event.body }}</li>
+      {% endfor %}
+    </ul>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

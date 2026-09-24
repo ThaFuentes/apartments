@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>Reports</h1>
+  <p class="lead">Weekly and company copies for bosses. They open them with a username. An email is only used when that person has one.</p>
+  {% if current_user.role != 'viewer' %}
+  <form method="post" action="/reports/build" class="row-actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <button type="submit" name="kind" value="weekly">Save weekly report</button>
+    <button type="submit" name="kind" value="company">Save company report</button>
+  </form>
+  {% endif %}
+  <h2>Saved</h2>
+  {% if not saved %}
+  <p class="empty">No saved report yet. The live week is below until you save it for the company.</p>
+  {% endif %}
+  <ul class="list">
+    {% for report in saved %}
+    <li><a href="/reports/{{ report.id }}">{{ report.title }}</a> · {{ report.status }}</li>
+    {% endfor %}
+  </ul>
+  {% if preview %}
+  <h2>This week, not saved yet</h2>
+  <p>{{ preview.period.start }} – {{ preview.period.end }}</p>
+  <ul>
+    <li>Went {{ preview.totals.jobs_went }}, completed {{ preview.totals.jobs_done }}, units {{ preview.totals.units }}</li>
+    <li>Gas {{ money(preview.expenses.gas) }} · food {{ money(preview.expenses.food) }} · other {{ money(preview.expenses.other) }}</li>
+    <li>Miles about {{ preview.miles.estimate }}</li>
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ trip.title }}{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>{{ trip.title }}</h1>
+  <p>{{ trip.starts_on }} · {{ trip.status }}{% if trip.purpose %} · {{ trip.purpose }}{% endif %}</p>
+  {% if trip.checklist %}
+  <h2>Before you roll</h2>
+  <pre class="note">{{ trip.checklist }}</pre>
+  {% endif %}
+  <h2>Stops</h2>
+  <ul class="list">
+    {% for link in links %}
+    <li><a href="/properties/{{ link.property_id }}">{{ link.property.name }}{% if link.property.city %} · {{ link.property.city.name }}{% endif %}</a>
+      {% if link.property.lat %}Pin {{ '%.5f'|format(link.property.lat) }}, {{ '%.5f'|format(link.property.lng) }}{% else %}No pin yet{% endif %}
+      {% if link.confirmed_at %} · property confirmed{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if current_user.role != 'viewer' %}
+  <form method="post" action="/trips/{{ trip.id }}/miles" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Estimated miles <input name="miles_estimate" value="{{ trip.miles_estimate or '' }}" inputmode="decimal"></label>
+    <label>Actual miles <input name="miles_actual" value="{{ trip.miles_actual or '' }}" inputmode="decimal"></label>
+    <button type="submit">Save miles</button>
+  </form>
+  {% endif %}
+  {% if trip.handoff %}
+  <h2>Handoff</h2>
+  <pre class="note">{{ trip.handoff }}</pre>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>Settings</h1>
+  {% if current_user.role == 'owner' %}
+  <p><a href="/users">People</a> — add a boss or another field login. Email can stay blank.</p>
+  <form method="post" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <label>Assistant name <input name="assistant_name" value="{{ profile.assistant_name if profile else 'Apt' }}"></label>
+    <label>Tone <input name="tone" value="{{ profile.tone if profile else '' }}"></label>
+    <label>Always ask <textarea name="always_ask" rows="3">{{ profile.always_ask if profile else '' }}</textarea></label>
+    <label>Default city <input name="default_city" value="{{ profile.default_city if profile else '' }}"></label>
+    <label>Region <input name="default_region" value="{{ profile.default_region if profile else '' }}"></label>
+    <label>Company name <input name="company_name" value="{{ profile.company_name if profile else '' }}" placeholder="Shown on boss reports"></label>
+    <label>Report voice <input name="report_voice" value="{{ profile.report_voice if profile else '' }}"></label>
+    <label>Home base <input name="home_label" value="{{ profile.home_label if profile else '' }}"></label>
+    <label>Home latitude <input name="home_lat" value="{{ profile.home_lat if profile and profile.home_lat is not none else '' }}"></label>
+    <label>Home longitude <input name="home_lng" value="{{ profile.home_lng if profile and profile.home_lng is not none else '' }}"></label>
+    <label>Timezone <input name="timezone" value="{{ profile.timezone if profile else 'America/Chicago' }}"></label>
+    <button type="submit">Save settings</button>
+  </form>
+  <h2>Gemini key</h2>
+  <p>Free key from Google AI Studio. The latest free flash model is picked for you. Last 4 only: {{ cred.last4 if cred else 'none' }}{% if cred and cred.model_id %} · {{ cred.model_id }}{% endif %}</p>
+  <form method="post" action="/settings/key" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>API key <input name="api_key" type="password" autocomplete="off" placeholder="AIza…"></label>
+    <button type="submit">Check and save key</button>
+  </form>
+  {% else %}
+  <p>API keys and people stay on the owner's login.</p>
+  {% endif %}
+</section>
+{% endblock %}

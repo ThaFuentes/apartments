@@ -1,0 +1,11 @@
+flask
+flask-login
+flask-sqlalchemy
+python-dotenv
+requests>=2.31.0
+pymysql
+sqlalchemy
+cryptography
+werkzeug
+Pillow
+reportlab
