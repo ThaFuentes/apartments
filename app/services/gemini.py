@@ -42,7 +42,7 @@ FALLBACK_FREE = (
 TOOL_DECLS = [
     {
         "name": "plan_trip",
-        "description": "She is going on a trip. Create the property if it is new, or update the open trip if that place is already planned. Save immediately. Include every detail she gave: property, city, what the visit is for, the day, and the miles.",
+        "description": "Save a plan or a trip. Use this when she says plan, schedule, or trip. Do not use upsert_property for a plan. property_name is the apartment name only.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -93,7 +93,7 @@ TOOL_DECLS = [
     },
     {
         "name": "upsert_property",
-        "description": "Save a property name, address, and map pin. No floor plans.",
+        "description": "Add or update an apartment property. property_name is only the apartment name, never her whole sentence. If she did not give a name, do not call this. Use update_property when she says edit, change, or correct. Use plan_trip when she says plan.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -397,6 +397,19 @@ def retry_after(resp) -> int:
         return 60
 
 
+CHAT_RULES = (
+    "You are the conversation. Talk like a person she works with every day. "
+    "The server runs your tool calls and shows your words. "
+    "property_name is only the apartment name, never her sentence. "
+    "If she says create a property in a city and does not name it, ask for the name and do not call upsert_property. "
+    "A plan or a trip is plan_trip, not a new property. Gas and meals are not properties. "
+    "Edit, change, or correct uses update_property on the property she already has. Do not create a second one. "
+    "Delete all of a name removes every match. If several match and she did not say all, list them with the city. "
+    "A typed street address is the address. Do not say you searched and could not find it. "
+    "Do not say there is no matching job unless she asked about a job."
+)
+
+
 class QuotaError(Exception):
     def __init__(self, seconds: int = 60):
         super().__init__("quota")
@@ -413,16 +426,7 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False) 
         body["systemInstruction"] = {
             "parts": [
                 {
-                    "text": (
-                        "You are the conversation. Talk like a person who works with her every day. The server runs your tool calls and shows your words. It does not rewrite them. "
-                        "When she says to add a property, call upsert_property with only the apartment name and the city. Never put her sentence in property_name. If she says create a property in a city and does not give the apartment name, ask for the name and do not call upsert_property. The server looks up the street. "
-                        "When she asks for a plan or a trip, call plan_trip. Do not create a property for gas, fuel, or a meal. "
-                        "You have Google Search. Use it for anything that is not already in her record: addresses, businesses, phone numbers, hours. Do not say you can only see her sites. "
-                        "When she asks for an address on Google or online, search the web or call lookup_address. Do not say it is missing from her sites. "
-                        "Never add or change a different property from the record. "
-                        "Do not call query_record when she asked to add a place or look up an address. "
-                        "Do not say there is no matching job unless she asked about a job."
-                    )
+                    "text": CHAT_RULES + " You have Google Search. Use it for addresses and businesses that are not already in her record."
                 }
             ]
         }

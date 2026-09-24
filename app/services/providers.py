@@ -9,7 +9,7 @@ from app.builddb.builddb import db
 from app.models import ApiCredential, User
 from app.services.clock import utcnow
 from app.services.crypto import decrypt_text, encrypt_text, last4
-from app.services.gemini import TOOL_DECLS, backoff_until, complete as gemini_complete, read_nameplate, resolve_model
+from app.services.gemini import CHAT_RULES, TOOL_DECLS, backoff_until, complete as gemini_complete, read_nameplate, resolve_model
 
 PROVIDERS = {
     "gemini": {
@@ -237,7 +237,7 @@ def chat_with_tools(row, text: str, timeout: int = 25) -> dict:
     messages = [
         {
             "role": "system",
-            "content": "You help one regional manager. The message names you and says how to talk. When she says to add a property, call upsert_property with only the apartment name and the city. Never put her sentence in property_name. If she only gives a city, ask for the apartment name and do not save anything. Never substitute a different property. A plan or a trip plan is plan_trip, not a new property. Gas, fuel, and meals are never properties. Do not call query_record for an add. Do not say there is no matching job unless she asked about a job.",
+            "content": CHAT_RULES,
         },
         {"role": "user", "content": text},
     ]

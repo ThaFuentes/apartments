@@ -893,6 +893,23 @@ def _file_unit_board(user, text: str, key: str, source: str):
     return commit_apply(user, "unit_board", payload, source, key)
 
 
+def _calls_for_her(text: str, calls: list) -> list:
+    """A plan is not a new property. An edit does not create a second property."""
+    planning = _is_trip_plan(text)
+    editing = _is_edit(text) and not re.search(r"\b(office manager|employee|let|give|allow)\b", text or "", re.I)
+    kept = []
+    for call in calls:
+        name = (call.get("name") or "").strip()
+        args = call.get("args") if isinstance(call.get("args"), dict) else {}
+        if name == "upsert_property" and planning:
+            continue
+        if name == "upsert_property" and editing:
+            kept.append({"name": "update_property", "args": args})
+            continue
+        kept.append(call)
+    return kept
+
+
 def _from_model(user, text: str, key: str, source: str):
     """The saved key answers first. Local chat runs only when this returns failed."""
     from app.services.providers import collect_tool_calls
@@ -904,7 +921,11 @@ def _from_model(user, text: str, key: str, source: str):
     calls = heard.get("calls") or []
     prose = (heard.get("text") or "").strip()
     if calls:
-        return _from_calls(user, calls, key, source, note)
+        calls = _calls_for_her(text, calls)
+        if calls:
+            return _from_calls(user, calls, key, source, note)
+        if _is_trip_plan(text):
+            return None
     if prose:
         if note:
             prose = f"{note} {prose}"

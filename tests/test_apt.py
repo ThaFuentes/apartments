@@ -1587,6 +1587,64 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn("quota", local["reply"].lower())
         self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
 
+    def test_gemini_cannot_turn_a_plan_or_an_edit_into_a_new_property(self):
+        from app.models import Trip
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        wood = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            side_effect=[
+                {
+                    "ok": True,
+                    "text": "Added a property.",
+                    "calls": [{"name": "upsert_property", "args": {"property_name": "Woodview", "city": "Odessa"}}],
+                },
+                {
+                    "ok": True,
+                    "text": "Added another Woodview.",
+                    "calls": [
+                        {
+                            "name": "upsert_property",
+                            "args": {
+                                "property_name": "Woodview",
+                                "city": "Odessa",
+                                "address": "4330 N Grandview Ave, Odessa, Texas",
+                            },
+                        }
+                    ],
+                },
+            ],
+        ):
+            planned = handle_message(
+                user,
+                "make me a plan for woodview odessa to replace an ac",
+                idempotency_key="guard-plan",
+            )
+            edited = handle_message(
+                user,
+                "edit woodview the address is 4330 N Grandview Ave Odessa Texas",
+                idempotency_key="guard-edit",
+            )
+        self.assertIn("trip", planned["reply"].lower())
+        self.assertEqual(Trip.query.filter(Trip.deleted_at.is_(None)).count(), 1)
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        self.assertIn("Updated", edited["reply"])
+        db.session.refresh(wood)
+        self.assertIn("4330 N Grandview", wood.address)
+
 
 if __name__ == "__main__":
     unittest.main()
