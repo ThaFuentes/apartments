@@ -13,11 +13,11 @@
   <title>{% block title %}Apt{% endblock %}</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=10">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=11">
 </head>
 <body class="{% if drive %}drive{% endif %} {% block body_class %}{% endblock %}" data-share="{{ '1' if share.on else '0' }}">
   <div class="intro" id="apt-intro" hidden>
-    <video id="apt-intro-video" playsinline muted poster="/static/intro/poster.jpg" src="/static/intro/open.mp4"></video>
+    <video id="apt-intro-video" playsinline muted poster="/static/intro/poster.jpg?v=2" src="/static/intro/open.mp4?v=2"></video>
     <button type="button" id="apt-intro-skip">Skip</button>
   </div>
   <header class="top">
@@ -79,6 +79,6 @@
     {% endif %}
   </nav>
   {% endif %}
-  <script src="{{ url_for('static', filename='js/apt.js') }}?v=10"></script>
+  <script src="{{ url_for('static', filename='js/apt.js') }}?v=11"></script>
 </body>
 </html>

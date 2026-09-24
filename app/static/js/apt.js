@@ -4,12 +4,12 @@
   const introSkip = document.getElementById("apt-intro-skip");
   if (intro && introVideo && introSkip) {
     let seen = false;
-    try { seen = localStorage.getItem("apt-intro-seen") === "1"; } catch (err) { seen = true; }
+    try { seen = localStorage.getItem("apt-intro-hwy") === "1"; } catch (err) { seen = true; }
     function closeIntro() {
       intro.hidden = true;
       document.body.classList.remove("intro-on");
       introVideo.pause();
-      try { localStorage.setItem("apt-intro-seen", "1"); } catch (err) {}
+      try { localStorage.setItem("apt-intro-hwy", "1"); } catch (err) {}
     }
     if (!seen) {
       intro.hidden = false;
