@@ -962,12 +962,14 @@ def apply_invite_viewer(user, payload, source) -> dict:
         {},
         {"username": created.username, "role": created.role, "email": created.email},
     )
+    from app.services.providers import ROLE_LABELS as ROLE_WORD
+
     mail = created.email or "no email"
     secret = f" Temporary password: {generated}." if generated else ""
     return {
         "ok": True,
         "reply": (
-            f"Added {created.username} as {created.role} ({mail}). "
+            f"Added {created.username} as {ROLE_WORD.get(created.role, created.role)} ({mail}). "
             f"They sign in with that username.{secret} "
             f"One-time link, 7 days: /join/{token}"
         ),
@@ -995,6 +997,9 @@ def apply_update_viewer(user, payload, source) -> dict:
     if payload.get("role") in ("owner", "field", "viewer"):
         target.role = payload["role"]
     if payload.get("clear_email"):
+        first = User.query.filter_by(role="owner").order_by(User.id.asc()).first()
+        if first and first.id == target.id:
+            return {"ok": False, "reply": "The first login has to keep an email."}
         target.email = None
     elif "email" in payload:
         from app.services.people import clean_email

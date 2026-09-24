@@ -149,51 +149,9 @@ def _save_waiting(user, source: str) -> dict:
 def _gemini_calls(user, text: str):
     if user.role == "viewer":
         return None
-    owner_id = user.id if user.role == "owner" else None
-    if owner_id is None:
-        from app.models import User
+    from app.services.providers import collect_tool_calls
 
-        owner = User.query.filter_by(role="owner").order_by(User.id.asc()).first()
-        owner_id = owner.id if owner else None
-    if not owner_id:
-        return None
-    cred = (
-        ApiCredential.query.filter_by(user_id=owner_id, provider="gemini")
-        .order_by(ApiCredential.id.desc())
-        .first()
-    )
-    if not cred:
-        return None
-    if cred.backoff_until and cred.backoff_until > utcnow():
-        return "Gemini is out of free quota. I will not retry until it cools down."
-    from app.services.crypto import decrypt_text
-
-    try:
-        api_key = decrypt_text(cred.secret_ciphertext)
-    except Exception:
-        return None
-    if not api_key:
-        return None
-    stale = not cred.model_id or not cred.model_checked_at or (utcnow() - cred.model_checked_at).total_seconds() > 6 * 3600
-    if stale:
-        resolved = resolve_model(api_key, cred.model_id)
-        if resolved.get("quota"):
-            cred.backoff_until = backoff_until(resolved.get("seconds") or 60)
-            db.session.commit()
-            return "Gemini is out of free quota. I will not keep calling it."
-        if resolved.get("model"):
-            cred.model_id = resolved["model"]
-            cred.model_checked_at = utcnow()
-            db.session.commit()
-    if not cred.model_id:
-        return None
-    result = complete(api_key, cred.model_id, text)
-    if result.get("quota"):
-        cred.backoff_until = backoff_until(result.get("seconds") or 60)
-        db.session.commit()
-        return "Gemini is out of free quota. I will not keep calling it."
-    calls = result.get("calls") or []
-    return calls or None
+    return collect_tool_calls(user, text)
 
 
 def _from_calls(user, calls, key, source, quota_note) -> dict:

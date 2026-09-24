@@ -58,4 +58,30 @@ def init_db(app):
         from app import models  # noqa: F401 — register tables
 
         db.create_all()
+        _evolve_credentials()
         _say("[apt] MariaDB schema ready")
+
+
+def _evolve_credentials():
+    """Add key columns on a database that was created before several AI providers."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    if "api_credentials" not in names:
+        return
+    have = {col["name"] for col in inspect(db.engine).get_columns("api_credentials")}
+    statements = []
+    if "base_url" not in have:
+        statements.append("ALTER TABLE api_credentials ADD COLUMN base_url VARCHAR(300) NULL")
+    if "active" not in have:
+        statements.append("ALTER TABLE api_credentials ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1")
+    if "preferred" not in have:
+        statements.append("ALTER TABLE api_credentials ADD COLUMN preferred TINYINT(1) NOT NULL DEFAULT 0")
+    if not statements:
+        return
+    with db.engine.begin() as conn:
+        for sql in statements:
+            conn.execute(text(sql))

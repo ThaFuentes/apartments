@@ -455,7 +455,7 @@ def read_nameplate(api_key: str, model: str, image: bytes, mime: str = "image/jp
     prompt = (
         "Read this equipment nameplate, sticker, or product label for a field technician. "
         "Return JSON only with keys kind, brand, model, serial, size, confidence, missing. "
-        "kind is a short name such as air conditioner, furnace, air handler, coil, water heater, or thermostat. "
+        "kind is a short name such as refrigerator, washer, dryer, dishwasher, range, air conditioner, furnace, or water heater. "
         "size is like 3 ton when it is printed. confidence is 0 to 1. "
         "missing is a list of fields you could not read. Do not invent a serial or model."
     )

@@ -5,8 +5,26 @@
   <p><a href="/properties/{{ unit.property_id }}">{{ unit.property.name }}</a></p>
   <h1>Unit {{ unit.unit_number }}</h1>
   <h2>Equipment</h2>
+  <p class="lead">Fridge, washer, dryer, air conditioner, or anything else in this unit.</p>
+  {% if current_user.role != 'viewer' %}
+  <form method="post" action="/units/{{ unit.id }}/equipment" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>What is it
+      <select name="kind">
+        {% for kind in gear_kinds %}
+        <option value="{{ kind }}">{{ kind }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Brand <input name="brand" placeholder="Whirlpool, GE, Carrier…"></label>
+    <label>Model <input name="model" autocomplete="off"></label>
+    <label>Serial <input name="serial" autocomplete="off"></label>
+    <label>Size or note <input name="size" placeholder="18 cu ft, 3 ton, stackable"></label>
+    <button type="submit">Save this equipment</button>
+  </form>
+  {% endif %}
   {% if not gear %}
-  <p class="empty">No nameplate yet. A photo of the sticker, or a sentence like “Carrier 3 ton model 24ACC serial AB12”, files it here.</p>
+  <p class="empty">Nothing is filed in this unit yet.</p>
   {% endif %}
   <ul class="list">
     {% for item in gear %}

@@ -3,7 +3,7 @@
 {% block main %}
 <section class="sheet">
   <h1>People</h1>
-  <p class="lead">Add a boss or another person when you want. Username and password are required. Email is optional — leave it blank and they still get the reports on their login.</p>
+  <p class="lead">Add a boss or an employee who helps her. Their email can stay blank. They still sign in with a username.</p>
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
@@ -11,8 +11,8 @@
     <label>Name <input name="display_name" placeholder="How reports should address them"></label>
     <label>Role
       <select name="role">
-        <option value="viewer">Viewer — reports and history, no edits</option>
-        <option value="field">Field — can log visits</option>
+        <option value="viewer">Boss — can read reports and history, cannot change anything</option>
+        <option value="field">Employee — can log visits and work with her</option>
         <option value="owner">Owner — full access</option>
       </select>
     </label>
@@ -31,8 +31,8 @@
     <p>{{ person.email or "No email" }}</p>
     <label>Role
       <select name="role">
-        {% for role in ['owner', 'field', 'viewer'] %}
-        <option value="{{ role }}" {% if person.role == role %}selected{% endif %}>{{ role }}</option>
+        {% for role, label in [('owner', 'Owner'), ('field', 'Employee'), ('viewer', 'Boss')] %}
+        <option value="{{ role }}" {% if person.role == role %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
     </label>

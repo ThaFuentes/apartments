@@ -67,6 +67,8 @@ def create_user(
         generated = secrets.token_urlsafe(9)
         password = generated
     mail = clean_email(email)
+    if User.query.count() == 0 and mail is None:
+        raise ValueError("The first login needs an email.")
     user = User(
         username=ident,
         display_name=(display_name or ident).strip()[:150],

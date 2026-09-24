@@ -80,10 +80,14 @@ class AptTests(unittest.TestCase):
             password="field-pass",
             display_name="Alex",
             role="owner",
-            email=None,
+            email=f"{username}@example.com",
         )
         db.session.commit()
         return user
+
+    def test_first_login_needs_email(self):
+        with self.assertRaises(ValueError):
+            create_user(username="first", password="field-pass", role="owner", email=None)
 
     def test_users_without_email(self):
         owner = self.owner()
@@ -104,11 +108,11 @@ class AptTests(unittest.TestCase):
             created_by=owner,
         )
         db.session.commit()
-        self.assertIsNone(owner.email)
+        self.assertEqual(owner.email, "alex@example.com")
         self.assertIsNone(boss.email)
         self.assertIsNone(peer.email)
         self.assertTrue(generated)
-        self.assertEqual(User.query.filter(User.email.is_(None)).count(), 3)
+        self.assertEqual(User.query.filter(User.email.is_(None)).count(), 2)
         with self.assertRaises(ValueError):
             create_user(username="boss", password="field-pass", role="viewer", email=None, created_by=owner)
 
@@ -222,15 +226,15 @@ class AptTests(unittest.TestCase):
             )
         )
         db.session.commit()
-        with patch("app.services.talk.resolve_model", return_value={"model": "gemini-3.8-flash", "quota": False}), patch(
-            "app.services.talk.complete",
+        with patch("app.services.providers.resolve_model", return_value={"model": "gemini-3.8-flash", "quota": False}), patch(
+            "app.services.providers.gemini_complete",
             return_value={"ok": False, "quota": True, "seconds": 90, "calls": [], "text": ""},
         ) as complete:
             first = handle_message(user, "hello from the truck", idempotency_key="q1")
             second = handle_message(user, "hello again", idempotency_key="q2")
         self.assertEqual(complete.call_count, 1)
         self.assertIn("quota", first["reply"].lower())
-        self.assertIn("quota", second["reply"].lower())
+        self.assertIn("cooling down", second["reply"].lower())
 
     def test_free_model_picks_newest_flash(self):
         picked = pick_free_model(
@@ -292,6 +296,11 @@ class AptTests(unittest.TestCase):
         from app.services.equipment import merge_equipment, parse_equipment, plate_from_json, plate_ready
         from app.services.miles import traveled_total
 
+        fridge = parse_equipment("Whirlpool fridge model WRT311FZDW serial AB12C")
+        self.assertEqual(fridge["kind"], "refrigerator")
+        self.assertEqual(fridge["brand"], "Whirlpool")
+        washer = parse_equipment("Maytag washer dryer model MLE22 serial ZZ9")
+        self.assertEqual(washer["kind"], "washer dryer")
         parsed = parse_equipment("Carrier 3 ton model 24ACC636A003 serial AB12C install done")
         self.assertEqual(parsed["brand"], "Carrier")
         self.assertEqual(parsed["kind"], "air conditioner")

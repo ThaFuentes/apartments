@@ -4,7 +4,7 @@
 <section class="hero narrow">
   {% if setup %}
   <h1>Welcome</h1>
-  <p class="lead">Pick a name and a password. You can skip the email.</p>
+  <p class="lead">Your name, a username, a password, and an email. People you add later can skip email.</p>
   {% else %}
   <h1>Welcome back</h1>
   <p class="lead">Use the name and password you set up.</p>
@@ -16,10 +16,9 @@
     {% endif %}
     <label>Username <input name="username" autocomplete="username" required autocapitalize="none"></label>
     <label>Password <input name="password" type="password" autocomplete="{{ 'new-password' if setup else 'current-password' }}" required minlength="8"></label>
-    <details>
-      <summary>Add an email later</summary>
-      <label>Email <input name="email" type="text" inputmode="email" autocomplete="email" placeholder="You can leave this blank"></label>
-    </details>
+    {% if setup %}
+    <label>Email <input name="email" type="email" autocomplete="email" required placeholder="Required for this first login"></label>
+    {% endif %}
     <button type="submit">{% if setup %}Get started{% else %}Sign in{% endif %}</button>
   </form>
 </section>

@@ -114,7 +114,7 @@ def login():
                 flash(str(exc), "warn")
                 return render_template("login.html", setup=True)
             login_person(user)
-            flash("You're in. Add a free Gemini key in Settings when you want chat to understand more than set phrases.", "ok")
+            flash("You're in. In Settings you can add a Gemini, Groq, OpenAI, Grok, or other key when you want.", "ok")
             return redirect("/")
         user = attempt(request.form.get("username") or "", request.form.get("password") or "")
         if not user:
@@ -601,7 +601,58 @@ def unit_detail(unit_id):
     events = {}
     for job in jobs:
         events[job.id] = JobEvent.query.filter_by(job_id=job.id).order_by(JobEvent.id.asc()).all()
-    return render_template("unit.html", unit=unit, visits=visits, jobs=jobs, events=events, gear=gear)
+    from app.services.equipment import KIND_CHOICES
+
+    return render_template(
+        "unit.html",
+        unit=unit,
+        visits=visits,
+        jobs=jobs,
+        events=events,
+        gear=gear,
+        gear_kinds=KIND_CHOICES,
+    )
+
+
+@bp.post("/units/<int:unit_id>/equipment")
+@login_required
+def unit_equipment(unit_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.models import Equipment
+    from app.services.records import audit
+
+    unit = db.session.get(Unit, unit_id)
+    if not unit or unit.deleted_at:
+        abort(404)
+    kind = (request.form.get("kind") or "").strip()
+    brand = (request.form.get("brand") or "").strip()
+    model = (request.form.get("model") or "").strip()
+    serial = (request.form.get("serial") or "").strip()
+    size = (request.form.get("size") or "").strip()
+    if not any((kind, brand, model, serial)):
+        flash("Say what the equipment is, or its brand, model, or serial.", "warn")
+        return redirect(f"/units/{unit.id}")
+    row = Equipment(
+        property_id=unit.property_id,
+        unit_id=unit.id,
+        kind=kind[:80],
+        brand=brand[:80],
+        model_number=model[:80],
+        serial_number=serial[:80],
+        size_label=size[:40],
+        notes=" ".join(bit for bit in (brand, size, kind, f"model {model}" if model else "", f"serial {serial}" if serial else "") if bit)[:2000],
+        confidence=1,
+        source="human",
+        created_by_id=current_user.id,
+        created_at=utcnow(),
+    )
+    db.session.add(row)
+    db.session.flush()
+    audit(current_user.id, "human", "create", "equipment", row.id, {}, {"kind": kind, "brand": brand, "model": model, "serial": serial, "unit_id": unit.id})
+    db.session.commit()
+    flash(f"Saved the {kind or 'equipment'} in unit {unit.unit_number}.", "ok")
+    return redirect(f"/units/{unit.id}")
 
 
 @bp.get("/expenses")
@@ -963,9 +1014,22 @@ def settings():
     if current_user.role == "viewer":
         abort(403)
     profile = site_profile()
-    cred = None
+    keys = []
+    providers = []
     if current_user.role == "owner":
-        cred = ApiCredential.query.filter_by(user_id=current_user.id, provider="gemini").order_by(ApiCredential.id.desc()).first()
+        from app.services.providers import PROVIDERS
+
+        keys = (
+            ApiCredential.query.filter_by(user_id=current_user.id)
+            .order_by(ApiCredential.preferred.desc(), ApiCredential.id.asc())
+            .all()
+        )
+        for row in keys:
+            row.provider_label = (PROVIDERS.get(row.provider) or {}).get("label") or row.provider
+        providers = [
+            {"id": key, "label": spec["label"], "hint": spec["hint"], "models": list(spec["models"])}
+            for key, spec in PROVIDERS.items()
+        ]
     if request.method == "POST":
         if current_user.role != "owner":
             abort(403)
@@ -988,36 +1052,72 @@ def settings():
         result = commit_apply(current_user, "update_settings", payload, "human", _key() or _new_key())
         flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
         return redirect("/settings")
-    return render_template("settings.html", profile=profile, cred=cred, msg_key=_new_key())
+    return render_template("settings.html", profile=profile, keys=keys, providers=providers, msg_key=_new_key())
 
 
 @bp.post("/settings/key")
 @owner_required
 def settings_key():
+    from app.services.providers import PROVIDERS, check_key
+
+    provider = (request.form.get("provider") or "").strip().lower()
     raw = (request.form.get("api_key") or "").strip()
-    if len(raw) < 10:
-        flash("Paste the Gemini key from Google AI Studio.", "warn")
+    model = (request.form.get("model_custom") or request.form.get("model") or "").strip()
+    base_url = (request.form.get("base_url") or "").strip()
+    if provider not in PROVIDERS:
+        flash("Pick a provider.", "warn")
         return redirect("/settings")
-    resolved = resolve_model(raw)
-    if resolved.get("quota"):
-        flash("That key is out of free quota right now. I did not keep retrying.", "warn")
+    if len(raw) < 8:
+        flash("Paste the API key. It is stored encrypted and only the last 4 are shown.", "warn")
         return redirect("/settings")
-    if not resolved.get("model"):
-        flash(resolved.get("error") or "That key did not answer on a free Gemini model.", "warn")
+    checked = check_key(provider, raw, model, base_url)
+    if not checked.get("ok"):
+        flash(checked.get("error") or "That key did not answer. I did not keep retrying.", "warn")
         return redirect("/settings")
+    others = ApiCredential.query.filter_by(user_id=current_user.id).count()
     row = ApiCredential(
         user_id=current_user.id,
-        provider="gemini",
+        provider=provider,
         secret_ciphertext=encrypt_text(raw),
         last4=last4(raw),
-        model_id=resolved["model"],
+        model_id=checked.get("model") or model,
+        base_url=base_url or None,
+        active=True,
+        preferred=others == 0,
         model_checked_at=utcnow(),
         created_at=utcnow(),
     )
     db.session.add(row)
-    audit(current_user.id, "human", "update", "api_credential", None, {}, {"last4": row.last4, "model": row.model_id})
+    from app.services.records import audit
+
+    audit(current_user.id, "human", "update", "api_credential", None, {}, {"provider": provider, "last4": row.last4, "model": row.model_id})
     db.session.commit()
-    flash(f"Gemini key saved. Using {row.model_id}. Only the last 4 are shown.", "ok")
+    flash(f"Saved the {PROVIDERS[provider]['label']} key ····{row.last4}. Model {row.model_id}.", "ok")
+    return redirect("/settings")
+
+
+@bp.post("/settings/key/<int:key_id>/prefer")
+@owner_required
+def settings_key_prefer(key_id):
+    row = ApiCredential.query.filter_by(id=key_id, user_id=current_user.id).first()
+    if not row:
+        abort(404)
+    for other in ApiCredential.query.filter_by(user_id=current_user.id).all():
+        other.preferred = other.id == row.id
+    row.active = True
+    db.session.commit()
+    flash("That key is used first.", "ok")
+    return redirect("/settings")
+
+
+@bp.post("/settings/key/<int:key_id>/delete")
+@owner_required
+def settings_key_delete(key_id):
+    row = ApiCredential.query.filter_by(id=key_id, user_id=current_user.id).first()
+    if row:
+        db.session.delete(row)
+        db.session.commit()
+    flash("Key removed.", "ok")
     return redirect("/settings")
 
 

@@ -4,7 +4,7 @@
 <section class="sheet">
   <h1>Settings</h1>
   {% if current_user.role == 'owner' %}
-  <p><a href="/users">People</a> — add a boss or another field login. Email can stay blank.</p>
+  <p><a href="/users">People</a> — add a boss or an employee. Their email can stay blank.</p>
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
@@ -21,13 +21,63 @@
     <label>Timezone <input name="timezone" value="{{ profile.timezone if profile else 'America/Chicago' }}"></label>
     <button type="submit">Save settings</button>
   </form>
-  <h2>Gemini key</h2>
-  <p>Free key from Google AI Studio. The latest free flash model is picked for you. Last 4 only: {{ cred.last4 if cred else 'none' }}{% if cred and cred.model_id %} · {{ cred.model_id }}{% endif %}</p>
-  <form method="post" action="/settings/key" class="stack">
+  <h2>AI keys</h2>
+  <p class="lead">Add the keys you already pay for or a free Gemini key. Apt uses the one you mark first, then the next if that one is out of quota. Only the last 4 characters are shown.</p>
+  {% for row in keys %}
+  <article class="card">
+    <strong>{{ row.provider_label }}</strong>
+    <p>····{{ row.last4 }}{% if row.model_id %} · {{ row.model_id }}{% endif %}{% if row.preferred %} · used first{% endif %}{% if not row.active %} · off{% endif %}</p>
+    <div class="actions">
+      <form method="post" action="/settings/key/{{ row.id }}/prefer">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="quiet">Use this first</button>
+      </form>
+      <form method="post" action="/settings/key/{{ row.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="ghost">Remove</button>
+      </form>
+    </div>
+  </article>
+  {% else %}
+  <p class="empty">No key yet. The buttons and search still work without one.</p>
+  {% endfor %}
+  <form method="post" action="/settings/key" class="card stack" id="key-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>API key <input name="api_key" type="password" autocomplete="off" placeholder="AIza…"></label>
+    <label>Provider
+      <select name="provider" id="provider">
+        {% for item in providers %}
+        <option value="{{ item.id }}">{{ item.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <p class="lead" id="provider-hint"></p>
+    <label>API key <input name="api_key" type="password" autocomplete="off" required></label>
+    <label>Model
+      <select name="model" id="model"></select>
+    </label>
+    <label>Different model id <input name="model_custom" placeholder="Only if it is not in the list"></label>
+    <label>Base URL <input name="base_url" placeholder="Only for Other OpenAI-compatible"></label>
     <button type="submit">Check and save key</button>
   </form>
+  <script>
+    const providerInfo = {{ providers|tojson }};
+    const providerSelect = document.getElementById("provider");
+    const modelSelect = document.getElementById("model");
+    const hint = document.getElementById("provider-hint");
+    function fillModels() {
+      const current = providerInfo.find((item) => item.id === providerSelect.value) || providerInfo[0];
+      hint.textContent = current.hint || "";
+      modelSelect.innerHTML = "";
+      (current.models || []).forEach((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        modelSelect.appendChild(option);
+      });
+    }
+    providerSelect.addEventListener("change", fillModels);
+    fillModels();
+  </script>
   {% else %}
   <p>API keys and people stay on the owner's login.</p>
   {% endif %}

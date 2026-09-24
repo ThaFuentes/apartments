@@ -25,9 +25,25 @@ BRANDS = (
     "samsung",
     "whirlpool",
     "ge",
+    "maytag",
+    "frigidaire",
+    "kenmore",
+    "kitchenaid",
+    "speed queen",
+    "electrolux",
+    "haier",
+    "hotpoint",
 )
 
 KINDS = (
+    ("washer dryer", ("washer dryer", "washer/dryer", "laundry center")),
+    ("refrigerator", ("refrigerator", "fridge", "freezer")),
+    ("washer", ("washing machine", "washer")),
+    ("dryer", ("clothes dryer", "dryer")),
+    ("dishwasher", ("dishwasher",)),
+    ("range", ("range", "stove", "oven", "cooktop")),
+    ("microwave", ("microwave",)),
+    ("disposal", ("garbage disposal", "disposal")),
     ("air conditioner", ("air conditioner", "a/c", "ac", "condenser", "heat pump", "mini split", "minisplit")),
     ("furnace", ("furnace",)),
     ("air handler", ("air handler", "airhandler")),
@@ -36,6 +52,8 @@ KINDS = (
     ("thermostat", ("thermostat", "tstat")),
     ("package unit", ("package unit", "rooftop unit", "rtu")),
 )
+
+KIND_CHOICES = tuple(kind for kind, _words in KINDS)
 
 SERIAL = re.compile(
     r"\b(?:sn|s/?n|serial(?:\s*(?:number|no\.?|#))?)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-]{2,})",
@@ -223,31 +241,36 @@ def gemini_key(user):
 
 
 def read_photo(user, image: bytes, mime: str) -> dict:
-    """Ask Gemini to read a label. No key, or a quota stop, returns an empty plate."""
+    """Ask the saved AI keys to read a label. One try each. A quota stop moves to the next key."""
     from app.builddb.builddb import db
-    from app.services.gemini import backoff_until, read_nameplate
+    from app.services.gemini import backoff_until
+    from app.services.providers import keys_for, provider_spec, read_image
 
-    api_key, cred = gemini_key(user)
-    if cred and cred.backoff_until:
+    rows = [row for row in keys_for(user) if provider_spec(row.provider).get("vision")]
+    if not rows:
+        return empty()
+    notes = []
+    for cred in rows:
         from app.services.clock import utcnow
 
-        if cred.backoff_until > utcnow():
-            row = empty()
-            row["quota"] = True
-            row["reply"] = "Gemini is out of free quota, so I kept the photo and did not retry. Type the brand, model, and serial."
-            return row
-    if not api_key or not cred or not cred.model_id:
-        return empty()
-    seen = read_nameplate(api_key, cred.model_id, image, mime)
-    if seen.get("quota"):
-        cred.backoff_until = backoff_until(seen.get("seconds") or 60)
-        db.session.commit()
+        if cred.backoff_until and cred.backoff_until > utcnow():
+            notes.append(provider_spec(cred.provider).get("label") or cred.provider)
+            continue
+        seen = read_image(cred, image, mime)
+        if seen.get("quota"):
+            cred.backoff_until = backoff_until(seen.get("seconds") or 60)
+            db.session.commit()
+            notes.append(provider_spec(cred.provider).get("label") or cred.provider)
+            continue
+        seen.pop("ok", None)
+        if has_identity(seen) or seen.get("kind"):
+            return seen
+    if notes:
         row = empty()
         row["quota"] = True
-        row["reply"] = "Gemini is out of free quota. I kept the photo and will not keep calling it. Type the serial if you can see it."
+        row["reply"] = "Out of quota on " + ", ".join(notes) + ". I kept the photo and will not keep calling. Type the brand, model, and serial."
         return row
-    seen.pop("ok", None)
-    return seen
+    return empty()
 
 
 def plate_ready(row: dict, *, from_photo: bool) -> bool:
