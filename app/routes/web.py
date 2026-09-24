@@ -1168,6 +1168,24 @@ def settings_key():
     return redirect("/settings")
 
 
+@bp.post("/settings/key/<int:key_id>")
+@owner_required
+def settings_key_update(key_id):
+    row = ApiCredential.query.filter_by(id=key_id, user_id=current_user.id).first()
+    if not row:
+        abort(404)
+    model = (request.form.get("model") or "").strip()
+    if model:
+        row.model_id = model[:120]
+    base_url = (request.form.get("base_url") or "").strip()
+    row.base_url = base_url[:300] or None
+    row.active = request.form.get("active") == "1"
+    db.session.commit()
+    state = "on" if row.active else "off"
+    flash(f"Saved ····{row.last4}. Model {row.model_id or 'unset'}. {state}.", "ok")
+    return redirect("/settings")
+
+
 @bp.post("/settings/key/<int:key_id>/prefer")
 @owner_required
 def settings_key_prefer(key_id):

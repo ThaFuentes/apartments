@@ -193,14 +193,56 @@ def _calls_she_asked(text: str, calls: list) -> list:
     return kept
 
 
+def _address_she_wants(text: str) -> dict | None:
+    """A place and city she asked to look up on the web, not in her sites."""
+    raw = (text or "").strip()
+    if not re.search(r"\b(address|google|online|look\s*up|lookup|search)\b", raw, re.I):
+        return None
+    if _place_she_named(raw):
+        return None
+    blob = ""
+    found = re.search(r"\bfor\s+(?:the\s+)?(.+?)(?:\s+address|\s+find|\s+on\s+google|\s+online|\?|$)", raw, re.I)
+    if found:
+        blob = found.group(1)
+    if not blob:
+        found = re.search(r"\b(?:the\s+)?([a-z0-9][a-z0-9 .'-]{2,80}?)\s+address\b", raw, re.I)
+        if found:
+            blob = found.group(1)
+    blob = re.sub(r"\b(the|online|not|my|site|google|please|whats|what's|what|is)\b", " ", blob or "", flags=re.I)
+    blob = _clean_slot(blob)
+    if not blob:
+        return None
+    slots = _slots_from_destination(blob)
+    name = slots.get("property_name") or slots.get("place") or ""
+    city = slots.get("city") or ""
+    generic = {"a", "the", "property", "place", "site", "address", "street", "google", "online"}
+    if not name or not city or name.lower() in generic or city.lower() in generic:
+        return None
+    return {"property_name": name, "city": city, "region": slots.get("region") or ""}
+
+
+def _online_address(place: dict) -> dict:
+    from app.services.geo import lookup_place
+
+    name = place["property_name"]
+    city = place["city"]
+    found = lookup_place(name, city, place.get("region") or "")
+    if not found or not found.get("address"):
+        return {"ok": False, "reply": f"I searched online for {name} in {city} and didn't find a street address."}
+    return {"ok": True, "reply": f"{name} in {city} is {found['address']}. That's from the web, not from your sites."}
+
+
 def _from_model(user, text: str, key: str, source: str):
-    """Her words go to the saved model. Local phrases run only when she has no key."""
+    """Her words go to the saved model. A web address lookup is answered from the web."""
     from app.services.pending import commit_apply
     from app.services.providers import collect_tool_calls
 
     heard = collect_tool_calls(user, text)
     if not heard:
         return None
+    wanted = _address_she_wants(text)
+    if wanted:
+        return _online_address(wanted)
     place = _place_she_named(text)
     if place:
         _close_questions(user)
@@ -220,6 +262,12 @@ def _from_model(user, text: str, key: str, source: str):
 
 
 def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:
+    wanted = _address_she_wants(text)
+    if wanted:
+        result = _online_address(wanted)
+        if note:
+            result["reply"] = note + " " + (result.get("reply") or "")
+        return result
     direct = _direct_action(user, text, key, source)
     if direct:
         result = direct

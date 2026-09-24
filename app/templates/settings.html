@@ -56,7 +56,16 @@
   {% for row in keys %}
   <article class="card">
     <strong>{{ row.provider_label }}</strong>
-    <p>····{{ row.last4 }}{% if row.model_id %} · {{ row.model_id }}{% endif %}{% if row.preferred %} · used first{% endif %}{% if not row.active %} · off{% endif %}</p>
+    <p>····{{ row.last4 }}{% if row.preferred %} · used first{% endif %}{% if not row.active %} · off{% endif %}</p>
+    <form method="post" action="/settings/key/{{ row.id }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Model <input name="model" value="{{ row.model_id or '' }}" autocomplete="off"></label>
+      <label>Base URL <input name="base_url" value="{{ row.base_url or '' }}" placeholder="Only for a custom endpoint" autocomplete="off"></label>
+      <label class="check"><input type="checkbox" name="active" value="1" {% if row.active %}checked{% endif %}> On</label>
+      <div class="actions">
+        <button type="submit">Save this key</button>
+      </div>
+    </form>
     <div class="actions">
       <form method="post" action="/settings/key/{{ row.id }}/prefer">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

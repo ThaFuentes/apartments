@@ -79,6 +79,19 @@ TOOL_DECLS = [
         },
     },
     {
+        "name": "lookup_address",
+        "description": "Search the web, not her saved sites, for a property's street address. Use this when she says Google, online, or look up an address. Does not add the property.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "region": {"type": "string"},
+            },
+            "required": ["property_name", "city"],
+        },
+    },
+    {
         "name": "upsert_property",
         "description": "Save a property name, address, and map pin. No floor plans.",
         "parameters": {
@@ -394,7 +407,7 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False) 
     url = f"{BASE}/models/{model}:generateContent"
     body: dict = {
         "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 800},
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1600},
     }
     if tools:
         body["systemInstruction"] = {
@@ -403,14 +416,16 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False) 
                     "text": (
                         "You help one regional manager. The message tells you your name and how to talk. Use that name and that tone. "
                         "When she says to add a property, call upsert_property with the exact property name and city she said. The server looks up the street. "
+                        "You have Google Search. Use it for anything that is not already in her record: addresses, businesses, phone numbers, hours. Do not say you can only see her sites. "
+                        "When she asks for an address on Google or online, search the web or call lookup_address. Do not say it is missing from her sites. "
                         "Never add or change a different property from the record. "
-                        "Do not call query_record when she asked to add a place. "
+                        "Do not call query_record when she asked to add a place or look up an address. "
                         "Do not say there is no matching job unless she asked about a job."
                     )
                 }
             ]
         }
-        body["tools"] = [{"functionDeclarations": TOOL_DECLS}]
+        body["tools"] = [{"functionDeclarations": TOOL_DECLS}, {"google_search": {}}]
     resp = requests.post(
         url,
         params={"key": api_key},
@@ -418,6 +433,15 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False) 
         json=body,
         timeout=timeout,
     )
+    if tools and resp.status_code >= 400 and resp.status_code != 429:
+        body["tools"] = [{"functionDeclarations": TOOL_DECLS}]
+        resp = requests.post(
+            url,
+            params={"key": api_key},
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            json=body,
+            timeout=timeout,
+        )
     if resp.status_code == 429:
         raise QuotaError(retry_after(resp))
     if resp.status_code >= 400:

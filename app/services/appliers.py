@@ -1327,6 +1327,21 @@ def _property_match(payload) -> tuple[Property | None, str]:
     return rows[0], ""
 
 
+def apply_lookup_address(user, payload, source) -> dict:
+    """Search the web for a street. This does not add the property."""
+    from app.services.geo import lookup_place
+
+    name = (payload.get("property_name") or "").strip()
+    city = (payload.get("city") or "").strip()
+    region = (payload.get("region") or "").strip()
+    if not name or not city:
+        return {"ok": False, "reply": "I need the property and the city to search online."}
+    found = lookup_place(name, city, region)
+    if not found or not found.get("address"):
+        return {"ok": False, "reply": f"I searched online for {name} in {city} and didn't find a street address."}
+    return {"ok": True, "reply": f"{name} in {city} is {found['address']}. That's from the web, not from your sites."}
+
+
 def apply_delete_property(user, payload, source) -> dict:
     source = _src(source)
     prop, missing = _property_match(payload)
@@ -1446,6 +1461,7 @@ APPLIERS = {
     "plan_outcome": apply_plan_outcome,
     "clear_plan": apply_clear_plan,
     "delete_property": apply_delete_property,
+    "lookup_address": apply_lookup_address,
     "update_property": apply_update_property,
     "update_trip": apply_update_trip,
     "upsert_property": apply_upsert_property,

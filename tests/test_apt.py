@@ -750,6 +750,40 @@ Lubbock — 2 outside compressor installs"""
         self.assertEqual(prop.name, "Woodview")
         self.assertEqual(prop.city.name, "Odessa")
 
+    def test_online_address_is_not_a_job_search(self):
+        from app.services.talk import _address_she_wants
+
+        asked = "whats the address for brookview odessa texas find it on google"
+        place = _address_she_wants(asked)
+        self.assertEqual(place["property_name"], "Brookview")
+        self.assertEqual(place["city"], "Odessa")
+        self.assertEqual(place["region"], "TX")
+        again = _address_she_wants("search online not my site for the brookview odessa address")
+        self.assertEqual(again["property_name"], "Brookview")
+        self.assertEqual(again["city"], "Odessa")
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        hit = {"address": "5100 E Everglade Ave, Odessa, TX", "lat": 31.9, "lng": -102.3, "label": "Brookview"}
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={"ok": True, "text": "I couldn't locate Brookview in our current records.", "calls": []},
+        ), patch("app.services.geo.lookup_place", return_value=hit):
+            heard = handle_message(user, asked, idempotency_key="brook-web")
+        self.assertIn("5100 E Everglade", heard["reply"])
+        self.assertNotIn("matching job", heard["reply"])
+        self.assertNotIn("current records", heard["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
+
     def test_its_at_saves_the_looked_up_address(self):
         user = self.owner()
         hit = {
