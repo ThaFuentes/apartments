@@ -4,7 +4,7 @@
 <section class="sheet">
   <div class="hero">
     <h1>Make a plan</h1>
-    <p class="lead">Pick a property you already have and say what needs doing. That saves the plan.</p>
+    <p class="lead">Each job is its own card. Put the unit on that card. Add the starting and ending mileage for the drive.</p>
   </div>
   <form method="post" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -18,13 +18,27 @@
         {% endfor %}
       </select>
     </label>
-    <label>What to do <textarea name="work" required placeholder="Replace the AC"></textarea></label>
+    <label>Starting mileage <input name="odometer_start" inputmode="numeric" placeholder="120000"></label>
+    <label>Ending mileage <input name="odometer_end" inputmode="numeric" placeholder="120086"></label>
+    <h2>Work cards</h2>
+    <p class="hint">One card per job. Unit 12 is not the same record as unit 26.</p>
+    {% for n in [0, 1, 2] %}
+    <div class="card stack">
+      <label>Unit <input name="card_unit" inputmode="numeric" placeholder="12"></label>
+      <label>What was done <input name="card_work" placeholder="{% if n == 0 %}Worked on the AC{% else %}Fix the tub clog{% endif %}"></label>
+    </div>
+    {% endfor %}
+    <label>Or one job per line
+      <textarea name="work" placeholder="worked on the AC at unit 12&#10;fix the tub clog at unit 26"></textarea>
+    </label>
     <button type="submit">Save this plan</button>
   </form>
   <form method="post" class="stack" id="plan-form" data-place-search data-mode="many">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
     <label>Day <input type="date" name="day" value="{{ today }}"></label>
+    <label>Starting mileage <input name="odometer_start" inputmode="numeric" placeholder="120000"></label>
+    <label>Ending mileage <input name="odometer_end" inputmode="numeric" placeholder="120086"></label>
     <label>Find a property
       <input data-search autocomplete="off" placeholder="Type two letters">
     </label>
@@ -35,7 +49,7 @@
       <div class="stack">
         <label>Property name <input name="new_name" autocomplete="off"></label>
         <label>City <input name="new_city" autocomplete="off"></label>
-        <label>Job there, if you know it <textarea name="new_work" placeholder="One job per line"></textarea></label>
+        <label>Jobs there, one per line <textarea name="new_work" placeholder="worked on the AC at unit 12&#10;fix the tub clog at unit 26"></textarea></label>
       </div>
     </details>
     <button type="submit">Save this plan</button>

@@ -653,7 +653,9 @@ def _plan_purpose(text: str) -> tuple[str, str]:
 
 
 def _plan_slots(text: str) -> dict | None:
-    raw = text or ""
+    from app.services.plan import pull_plan_extras
+
+    raw, extras = pull_plan_extras(text or "")
     gas = ""
     if re.search(r"\b(gas|fuel)\b", raw, re.I):
         where = re.search(r"\bgas(?:\s+in\s+([A-Za-z][A-Za-z .'-]{2,30}))?", raw, re.I)
@@ -673,10 +675,10 @@ def _plan_slots(text: str) -> dict | None:
     if not dest:
         dest = re.search(r"\bat\s+([a-z][a-z0-9' ]{2,60})$", raw, re.I)
     if not dest:
-        return {"gas": gas} if gas else None
+        return _keep_plan_extras({"gas": gas} if gas else {}, extras)
     body, purpose = _plan_purpose(dest.group(1).strip(" ."))
     if not body:
-        return {"gas": gas, "purpose": purpose} or None
+        return _keep_plan_extras({"gas": gas, "purpose": purpose}, extras)
     slots = _slots_from_destination(body)
     if purpose and not slots.get("purpose"):
         slots["purpose"] = purpose
@@ -688,7 +690,20 @@ def _plan_slots(text: str) -> dict | None:
         slots["property_name"] = ""
     if not_a_property(slots.get("place") or ""):
         slots["place"] = ""
-    return slots
+    return _keep_plan_extras(slots, extras)
+
+
+def _keep_plan_extras(slots: dict | None, extras: dict) -> dict | None:
+    slots = dict(slots or {})
+    if extras.get("odometer_start") is not None and slots.get("odometer_start") is None:
+        slots["odometer_start"] = extras["odometer_start"]
+    if extras.get("odometer_end") is not None and slots.get("odometer_end") is None:
+        slots["odometer_end"] = extras["odometer_end"]
+    if extras.get("work_items") and not slots.get("work_items"):
+        slots["work_items"] = extras["work_items"]
+        if not slots.get("purpose") and len(extras["work_items"]) == 1:
+            slots["purpose"] = extras["work_items"][0]["title"]
+    return slots or None
 
 
 def _remember_gas(user, trip_id: int, property_id: int, detail: str, source: str) -> None:
@@ -722,6 +737,13 @@ def _file_trip_plan(user, text: str, key: str, source: str):
         profile.default_region if profile else "",
     )
     if planned and planned.get("stops"):
+        from app.services.plan import pull_plan_extras
+
+        _cleaned, extras = pull_plan_extras(text)
+        if extras.get("odometer_start") is not None:
+            planned["odometer_start"] = extras["odometer_start"]
+        if extras.get("odometer_end") is not None:
+            planned["odometer_end"] = extras["odometer_end"]
         _close_questions(user)
         return commit_apply(user, "plan_day", planned, source, key)
     slots = _plan_slots(text) or {}
@@ -742,6 +764,41 @@ def _file_trip_plan(user, text: str, key: str, source: str):
         }
     _close_questions(user)
     return _file_outing(user, slots, key, source)
+
+
+def _file_trip_readings(user, text: str, key: str, source: str):
+    """Starting and ending mileage on the open plan, when that is all she said."""
+    from app.models import Trip
+    from app.services.pending import commit_apply
+    from app.services.plan import pull_plan_extras
+
+    if _is_trip_plan(text) or parse_outing(text):
+        return None
+    if re.search(r"\b(add|create|edit|delete|remove|property)\b", text or "", re.I):
+        return None
+    _cleaned, extras = pull_plan_extras(text or "")
+    if extras.get("work_items"):
+        return None
+    if extras.get("odometer_start") is None and extras.get("odometer_end") is None:
+        return None
+    trip = (
+        Trip.query.filter(
+            Trip.deleted_at.is_(None),
+            Trip.created_by_id == user.id,
+            Trip.status.in_(("staged", "active")),
+        )
+        .order_by(Trip.id.desc())
+        .first()
+    )
+    if trip is None:
+        return {"ok": True, "reply": "Make the plan first, then tell me the starting and ending mileage."}
+    payload = {"trip_id": trip.id}
+    if extras.get("odometer_start") is not None:
+        payload["odometer_start"] = extras["odometer_start"]
+    if extras.get("odometer_end") is not None:
+        payload["odometer_end"] = extras["odometer_end"]
+    _close_questions(user)
+    return commit_apply(user, "update_trip", payload, source, key)
 
 
 def _board_payload(text: str) -> dict | None:
@@ -906,8 +963,35 @@ def _calls_for_her(text: str, calls: list) -> list:
         if name == "upsert_property" and editing:
             kept.append({"name": "update_property", "args": args})
             continue
-        kept.append(call)
+        if name == "plan_trip":
+            args = _separate_plan_records(text, args)
+        kept.append({"name": name, "args": args})
     return kept
+
+
+def _separate_plan_records(text: str, args: dict) -> dict:
+    """Her sentence wins when it names more unit jobs than the tool call did."""
+    from app.services.plan import pull_plan_extras, work_cards
+
+    args = dict(args or {})
+    _cleaned, extras = pull_plan_extras(text or "")
+    hers = list(extras.get("work_items") or [])
+    model_items = args.get("work_items") or []
+    if isinstance(model_items, str):
+        model_items = work_cards(model_items)
+    if not isinstance(model_items, list):
+        model_items = []
+    if len(hers) > len(model_items):
+        args["work_items"] = hers
+    elif not model_items and args.get("purpose"):
+        parsed = [card for card in work_cards(str(args.get("purpose") or "")) if card.get("unit_number")]
+        if parsed:
+            args["work_items"] = parsed
+    if args.get("odometer_start") in (None, "") and extras.get("odometer_start") is not None:
+        args["odometer_start"] = extras["odometer_start"]
+    if args.get("odometer_end") in (None, "") and extras.get("odometer_end") is not None:
+        args["odometer_end"] = extras["odometer_end"]
+    return args
 
 
 def _from_model(user, text: str, key: str, source: str):
@@ -1161,6 +1245,9 @@ def _local_fallback(user, text: str, key: str, source: str, note: str, *, split:
     planned = _file_trip_plan(user, text, key, source)
     if planned:
         return planned
+    readings = _file_trip_readings(user, text, key, source)
+    if readings:
+        return readings
     board = _file_unit_board(user, text, key, source)
     if board:
         return board
@@ -1351,7 +1438,10 @@ def _split_state(city: str) -> tuple[str, str]:
 
 
 def _slots_from_destination(body: str) -> dict:
-    """Pull city, property, purpose, day, and miles out of the destination half of a sentence."""
+    """Pull city, property, purpose, day, miles, and per-unit jobs out of the destination half."""
+    from app.services.plan import pull_plan_extras
+
+    body, extras = pull_plan_extras(body or "")
     body = _clean_slot(body)
     miles = None
     mile = MILES_PHRASE.search(body)
@@ -1396,7 +1486,7 @@ def _slots_from_destination(body: str) -> dict:
         if state_word and city:
             city = f"{city} {state_word}"
     city, region = _split_state(city)
-    return {
+    result = {
         "property_name": _tidy_place(property_name) if property_name else "",
         "city": city,
         "region": region,
@@ -1406,6 +1496,8 @@ def _slots_from_destination(body: str) -> dict:
         "place": _tidy_place(place) if place else "",
         "day_stated": bool(when),
     }
+    kept = _keep_plan_extras(result, extras)
+    return kept or result
 
 
 def parse_outing(text: str) -> dict | None:
@@ -1443,6 +1535,9 @@ def _ask_trip(user, slots: dict, key: str, source: str, row, question: str) -> d
         "when": slots.get("when") or "",
         "place": slots.get("place") or "",
         "miles_estimate": slots.get("miles_estimate"),
+        "odometer_start": slots.get("odometer_start"),
+        "odometer_end": slots.get("odometer_end"),
+        "work_items": slots.get("work_items") or [],
         "gas": slots.get("gas") or "",
         "day_stated": bool(slots.get("when")),
         "needs_answer": True,
@@ -1552,6 +1647,12 @@ def _file_outing(user, slots: dict, key: str, source: str, row=None) -> dict:
     }
     if slots.get("miles_estimate") is not None:
         payload["miles_estimate"] = slots["miles_estimate"]
+    if slots.get("odometer_start") is not None:
+        payload["odometer_start"] = slots["odometer_start"]
+    if slots.get("odometer_end") is not None:
+        payload["odometer_end"] = slots["odometer_end"]
+    if slots.get("work_items"):
+        payload["work_items"] = slots["work_items"]
     from app.services.pending import commit_apply
 
     result = commit_apply(user, "plan_trip", payload, source, key)
@@ -1585,6 +1686,12 @@ def _answer_trip(user, row, text: str, key: str, source: str) -> dict:
             payload[field] = extra[field]
     if extra.get("miles_estimate") is not None:
         payload["miles_estimate"] = extra["miles_estimate"]
+    if extra.get("odometer_start") is not None:
+        payload["odometer_start"] = extra["odometer_start"]
+    if extra.get("odometer_end") is not None:
+        payload["odometer_end"] = extra["odometer_end"]
+    if extra.get("work_items"):
+        payload["work_items"] = extra["work_items"]
     if extra.get("when"):
         payload["day_stated"] = True
     return _file_outing(user, payload, key, source, row)

@@ -26,7 +26,7 @@
   <div class="stack">
     {% for item in board.plan %}
     <a class="unit-card" href="{% if item.trip_id %}/trips/{{ item.trip_id }}{% else %}/plan{% endif %}">
-      <strong>{{ item.title }}</strong>
+      <strong>{% if item.unit %}Unit {{ item.unit }} · {% endif %}{{ item.title }}</strong>
       <span class="unit-meta">{{ item.property }}{% if item.left %} · {{ item.left }}{% endif %} · {{ item.status }}</span>
     </a>
     {% endfor %}

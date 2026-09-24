@@ -219,18 +219,31 @@ def plan_day():
 
     properties = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
     if request.method == "POST":
+        from app.services.plan import work_cards
+
         stops = []
         ids = request.form.getlist("property_id")
         works = request.form.getlist("work")
+        typed = []
+        for unit, title in zip(request.form.getlist("card_unit"), request.form.getlist("card_work")):
+            unit = (unit or "").strip()
+            title = (title or "").strip()
+            if unit or title:
+                typed.append({"title": (title or "Work")[:200], "detail": "", "planned_qty": 1, "unit_number": unit[:40]})
+        first = True
         for prop_id, work in zip(ids, works):
-            prop = db.session.get(Property, int(prop_id))
+            try:
+                prop = db.session.get(Property, int(prop_id))
+            except (TypeError, ValueError):
+                continue
             if not prop or prop.deleted_at:
                 continue
-            items = []
-            for line in (work or "").splitlines():
-                line = line.strip()
-                if line:
-                    items.append({"title": line[:200], "detail": "", "planned_qty": 1})
+            items = work_cards(work or "")
+            if first:
+                items = typed + items
+                first = False
+            if not items:
+                continue
             stops.append(
                 {
                     "property_name": prop.name,
@@ -242,19 +255,21 @@ def plan_day():
         new_name = (request.form.get("new_name") or "").strip()
         new_city = (request.form.get("new_city") or "").strip()
         if new_name and new_city:
-            items = []
-            for line in (request.form.get("new_work") or "").splitlines():
-                line = line.strip()
-                if line:
-                    items.append({"title": line[:200], "detail": "", "planned_qty": 1})
-            stops.append({"property_name": new_name, "city": new_city, "region": "", "items": items})
+            items = work_cards(request.form.get("new_work") or "")
+            if items:
+                stops.append({"property_name": new_name, "city": new_city, "region": "", "items": items})
         if not stops:
-            flash("Search for a property and tap it. Nothing was added.", "warn")
+            flash("Add a work card for each job. Say the unit on that card.", "warn")
             return render_template("plan.html", today=today, properties=properties, msg_key=_new_key())
+        payload = {"starts_on": request.form.get("day") or today, "stops": stops}
+        if (request.form.get("odometer_start") or "").strip():
+            payload["odometer_start"] = request.form.get("odometer_start")
+        if (request.form.get("odometer_end") or "").strip():
+            payload["odometer_end"] = request.form.get("odometer_end")
         result = commit_apply(
             current_user,
             "plan_day",
-            {"starts_on": request.form.get("day") or today, "stops": stops},
+            payload,
             "human",
             _key() or _new_key(),
         )
@@ -548,7 +563,34 @@ def trip_miles(trip_id):
         payload["miles_estimate"] = float(request.form.get("miles_estimate"))
     if request.form.get("miles_actual"):
         payload["miles_actual"] = float(request.form.get("miles_actual"))
+    if (request.form.get("odometer_start") or "").strip():
+        payload["odometer_start"] = request.form.get("odometer_start")
+    if (request.form.get("odometer_end") or "").strip():
+        payload["odometer_end"] = request.form.get("odometer_end")
     result = commit_apply(current_user, "update_trip", payload, "human", _key() or f"miles-{trip_id}-{_new_key()}")
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect(f"/trips/{trip_id}")
+
+
+@bp.post("/trips/<int:trip_id>/cards")
+@login_required
+def trip_card(trip_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.services.pending import commit_apply
+
+    result = commit_apply(
+        current_user,
+        "add_plan_card",
+        {
+            "trip_id": trip_id,
+            "property_id": request.form.get("property_id") or "",
+            "unit_number": request.form.get("unit_number") or "",
+            "title": request.form.get("title") or "",
+        },
+        "human",
+        _key() or f"card-{trip_id}-{_new_key()}",
+    )
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
     return redirect(f"/trips/{trip_id}")
 

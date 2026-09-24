@@ -67,6 +67,291 @@ def _title_detail(work: str) -> tuple[str, str, int]:
     return work[:200], "", qty
 
 
+CARD_BREAK = re.compile(
+    r"\s+/\s+|\n+|\s+\bnext\s+(?:work\s+)?(?:card|job|order|record)s?\b\s*",
+    re.I,
+)
+CARD_PREFIX = re.compile(
+    r"^(?:next|another)\s+(?:work\s+)?(?:card|job|order|record)s?\s*[:\-–—]?\s*",
+    re.I,
+)
+UNIT_LEAD = re.compile(
+    r"^(?:at\s+)?unit\s*#?\s*([A-Za-z0-9][A-Za-z0-9-]{0,12})\s*(?:[—–:\-]\s*|\s+)(.+)$",
+    re.I,
+)
+UNIT_WORD = re.compile(
+    r"\b(?:at\s+)?unit\s*#?\s*([A-Za-z0-9][A-Za-z0-9-]{0,12})\b",
+    re.I,
+)
+UNIT_AFTER = re.compile(
+    r"\bat\s+([A-Za-z0-9][A-Za-z0-9-]{0,12})\s+unit\b",
+    re.I,
+)
+START_ODO = re.compile(
+    r"\b(?:starting|start|began|begin)\s+(?:mileage|miles|odometer|odo)\s*#?:?\s*(\d{1,7})\b",
+    re.I,
+)
+END_ODO = re.compile(
+    r"\b(?:ending|end|ended)\s+(?:mileage|miles|odometer|odo)\s*#?:?\s*(\d{1,7})\b",
+    re.I,
+)
+ODO_SPAN = re.compile(
+    r"\b(?:mileage|miles|odometer|odo)\s+(?:from\s+)?(\d{4,7})\s+(?:to|through|–|—|-)\s*(\d{4,7})\b",
+    re.I,
+)
+CARD_OPEN = re.compile(
+    r"\b(?:worked\s+on|work\s+on|fix(?:ed|ing)?|replace[d]?|install(?:ed|ing)?|check(?:ed|ing)?|repair(?:ed|ing)?|clean(?:ed|ing)?|swap(?:ped)?|next\s+work\s+(?:card|order|job|record)|unit\s*#?\s*[A-Za-z0-9])\b",
+    re.I,
+)
+
+
+def reading(value) -> int | None:
+    if value is None:
+        return None
+    raw = str(value).strip().replace(",", "")
+    if not raw:
+        return None
+    try:
+        number = int(float(raw))
+    except (TypeError, ValueError):
+        return None
+    if number < 0 or number > 9999999:
+        return None
+    return number
+
+
+def _one_card(line: str) -> dict | None:
+    from app.services.records import normalize_unit
+
+    line = CARD_PREFIX.sub("", (line or "").strip()).strip(" .")
+    if not line:
+        return None
+    unit = ""
+    title_src = line
+    lead = UNIT_LEAD.match(line)
+    if lead:
+        unit = lead.group(1)
+        title_src = lead.group(2)
+    else:
+        found = UNIT_AFTER.search(line) or UNIT_WORD.search(line)
+        if found:
+            unit = found.group(1)
+            title_src = (line[: found.start()] + " " + line[found.end() :]).strip(" -—,;/")
+    title, detail, qty = _title_detail(title_src)
+    if not title:
+        return None
+    return {
+        "title": title,
+        "detail": detail,
+        "planned_qty": qty,
+        "unit_number": normalize_unit(unit)[:40] if unit else "",
+    }
+
+
+def _chunks_with_units(chunks: list[str]) -> list[str]:
+    out = []
+    for chunk in chunks:
+        hits = UNIT_WORD.findall(chunk) + UNIT_AFTER.findall(chunk)
+        if len(hits) <= 1:
+            out.append(chunk)
+            continue
+        bits = [bit.strip(" .") for bit in re.split(r"\s*,\s*|\s+\band\b\s+", chunk, flags=re.I) if bit.strip(" .")]
+        built: list[str] = []
+        for bit in bits:
+            if not built or UNIT_WORD.search(bit) or UNIT_AFTER.search(bit):
+                built.append(bit)
+            else:
+                built[-1] = f"{built[-1]}, {bit}"
+        out.extend(built or [chunk])
+    return out
+
+
+def work_cards(text: str) -> list[dict]:
+    """One card per job. A slash, a new line, or 'next work card' starts the next one."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    chunks = [part.strip(" .") for part in CARD_BREAK.split(raw) if part.strip(" .")]
+    cards = []
+    for chunk in _chunks_with_units(chunks):
+        card = _one_card(chunk)
+        if card:
+            cards.append(card)
+    return cards
+
+
+def pull_plan_extras(text: str) -> tuple[str, dict]:
+    """Lift starting mileage, ending mileage, and per-unit jobs out of a sentence."""
+    raw = text or ""
+    extras: dict = {}
+    start = START_ODO.search(raw)
+    if start:
+        extras["odometer_start"] = int(start.group(1))
+        raw = raw[: start.start()] + " " + raw[start.end() :]
+    end = END_ODO.search(raw)
+    if end:
+        extras["odometer_end"] = int(end.group(1))
+        raw = raw[: end.start()] + " " + raw[end.end() :]
+    if "odometer_start" not in extras or "odometer_end" not in extras:
+        span = ODO_SPAN.search(raw)
+        if span:
+            extras.setdefault("odometer_start", int(span.group(1)))
+            extras.setdefault("odometer_end", int(span.group(2)))
+            raw = raw[: span.start()] + " " + raw[span.end() :]
+    peeled = None
+    for candidate in CARD_OPEN.finditer(raw):
+        if re.search(r"\bunit\b", raw[candidate.start() :], re.I):
+            peeled = candidate
+            break
+    if peeled is not None:
+        cards = [card for card in work_cards(raw[peeled.start() :]) if card.get("unit_number")]
+        if cards:
+            extras["work_items"] = cards
+            raw = raw[: peeled.start()]
+    raw = re.sub(r"\s+", " ", raw).strip(" .,")
+    return raw, extras
+
+
+def cards_for_trip(payload: dict) -> list[dict]:
+    """The jobs on a plan. One entry per unit, never one combined detail."""
+    raw_items = payload.get("work_items") or payload.get("items") or []
+    if isinstance(raw_items, str):
+        raw_items = work_cards(raw_items)
+    cards = []
+    if isinstance(raw_items, list):
+        for item in raw_items:
+            if isinstance(item, str):
+                cards.extend(work_cards(item))
+                continue
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or item.get("work") or "").strip()
+            unit = str(item.get("unit_number") or item.get("unit") or "").strip()
+            if unit:
+                from app.services.records import normalize_unit
+
+                unit = normalize_unit(unit)[:40]
+            if title and not unit:
+                parsed = [card for card in work_cards(title) if card.get("unit_number") or len(work_cards(title)) > 1]
+                if parsed:
+                    cards.extend(parsed)
+                    continue
+            if title or unit:
+                cards.append(
+                    {
+                        "title": (title or "Work")[:200],
+                        "detail": item.get("detail") or "",
+                        "planned_qty": int(item.get("planned_qty") or 1),
+                        "unit_number": unit,
+                    }
+                )
+    if cards:
+        return cards
+    purpose = (payload.get("purpose") or "").strip()
+    if not purpose:
+        return []
+    parsed = work_cards(purpose)
+    if len(parsed) > 1 or any(card.get("unit_number") for card in parsed):
+        return parsed
+    return [{"title": purpose[:200], "detail": "", "planned_qty": 1, "unit_number": ""}]
+
+
+def separate_record_sentence(cards: list[dict]) -> str:
+    numbered = [card for card in cards if card.get("unit_number")]
+    if not numbered:
+        return ""
+    bits = [f"unit {card['unit_number']}, {card['title']}" for card in numbered]
+    if len(numbered) == 1:
+        return f" Record for {bits[0]}."
+    return " Separate records: " + "; ".join(bits) + "."
+
+
+def mileage_sentence(trip: Trip) -> str:
+    start = trip.odometer_start
+    end = trip.odometer_end
+    if start is not None and end is not None:
+        gap = int(end) - int(start)
+        if gap >= 0:
+            return f" Starting mileage {int(start)}, ending mileage {int(end)} ({gap} miles)."
+        return f" Starting mileage {int(start)} is higher than ending mileage {int(end)}."
+    if start is not None:
+        return f" Starting mileage {int(start)}."
+    if end is not None:
+        return f" Ending mileage {int(end)}."
+    return ""
+
+
+def apply_trip_mileage(user, trip: Trip, payload: dict, source: str) -> str:
+    """Store the readings she gave. The gap is the miles for this plan when she did not type a separate total."""
+    start = reading(payload.get("odometer_start")) if payload.get("odometer_start") not in (None, "") else None
+    end = reading(payload.get("odometer_end")) if payload.get("odometer_end") not in (None, "") else None
+    changed = False
+    if start is not None:
+        trip.odometer_start = start
+        changed = True
+    if end is not None:
+        trip.odometer_end = end
+        changed = True
+    if not changed:
+        return ""
+    if trip.odometer_start is not None and trip.odometer_end is not None:
+        gap = int(trip.odometer_end) - int(trip.odometer_start)
+        if gap >= 0 and payload.get("miles_actual") in (None, ""):
+            trip.miles_actual = float(gap)
+            from app.services.miles import set_trip_actual
+
+            set_trip_actual(user, trip, gap, source)
+    return mileage_sentence(trip)
+
+
+def remember_work_record(user, prop: Property, unit_number: str, title: str, source: str) -> None:
+    """One work order on that unit. The same title is not filed twice."""
+    from app.models import UnitTask
+    from app.services.board import add_needed, ensure_unit
+
+    unit, _how = ensure_unit(prop, unit_number, user, source)
+    title = (title or "Work").strip()[:200]
+    existing = (
+        UnitTask.query.filter_by(unit_id=unit.id, kind="work_order")
+        .filter(UnitTask.deleted_at.is_(None), db.func.lower(UnitTask.title) == title.lower())
+        .first()
+    )
+    if existing:
+        return
+    add_needed(user, unit, [title], source, kind="work_order")
+
+
+def finish_work_record(user, item: PlanItem) -> None:
+    from app.models import Unit, UnitTask
+
+    if not (item.unit_number or "").strip():
+        return
+    unit = (
+        Unit.query.filter_by(property_id=item.property_id, unit_number=item.unit_number)
+        .filter(Unit.deleted_at.is_(None))
+        .first()
+    )
+    if not unit:
+        return
+    row = (
+        UnitTask.query.filter_by(unit_id=unit.id, kind="work_order")
+        .filter(
+            UnitTask.deleted_at.is_(None),
+            UnitTask.status == "needed",
+            db.func.lower(UnitTask.title) == (item.title or "").lower(),
+        )
+        .first()
+    )
+    if not row:
+        return
+    if item.status == "not_needed":
+        row.deleted_at = utcnow()
+        return
+    row.status = "done"
+    row.done_by_id = user.id
+    row.done_at = utcnow()
+
+
 def _split_place(left: str, default_city: str) -> tuple[str, str]:
     words = [w for w in left.split() if w]
     city = (default_city or "").strip()
@@ -103,12 +388,11 @@ def parse_plan_text(text: str, today: date, default_city: str = "", default_regi
                     current["items"][-1]["detail"] = (current["items"][-1]["detail"] + " " + work).strip()
                 continue
             name, city = _split_place(place, header_city or default_city)
-            title, detail, qty = _title_detail(work)
             current = {
                 "property_name": name,
                 "city": city or header_city or default_city,
                 "region": default_region or "",
-                "items": [{"title": title, "detail": detail, "planned_qty": qty}],
+                "items": work_cards(work) or [{"title": work[:200], "detail": "", "planned_qty": 1, "unit_number": ""}],
             }
             stops.append(current)
         elif current and current["items"]:
@@ -216,14 +500,19 @@ def ensure_plan_item(
     qty: int,
     user_id: int,
     source: str,
+    unit_number: str = "",
 ) -> tuple[PlanItem, bool]:
+    from app.services.records import normalize_unit
+
     title = (title or "Work").strip()[:200]
+    unit = normalize_unit(unit_number or "")[:40]
     existing = (
         PlanItem.query.filter(
             PlanItem.trip_id == trip.id,
             PlanItem.property_id == prop.id,
             PlanItem.deleted_at.is_(None),
             db.func.lower(PlanItem.title) == title.lower(),
+            db.func.lower(PlanItem.unit_number) == unit.lower(),
         )
         .order_by(PlanItem.id.asc())
         .first()
@@ -233,12 +522,15 @@ def ensure_plan_item(
             existing.detail = detail
         if qty > int(existing.planned_qty or 1) and existing.status == "open":
             existing.planned_qty = qty
+        if unit and not existing.unit_number:
+            existing.unit_number = unit
         return existing, False
     item = PlanItem(
         trip_id=trip.id,
         property_id=prop.id,
         title=title,
         detail=detail or "",
+        unit_number=unit,
         planned_qty=max(1, int(qty or 1)),
         done_qty=0,
         status="open",
@@ -260,6 +552,22 @@ def ensure_plan_item(
         {"title": item.title, "property_id": prop.id, "planned_qty": item.planned_qty, "trip_id": trip.id},
     )
     return item, True
+
+
+def save_work_card(user, trip: Trip, prop: Property, card: dict, source: str) -> tuple[PlanItem, bool]:
+    item, was_new = ensure_plan_item(
+        trip,
+        prop,
+        card.get("title") or "Work",
+        card.get("detail") or "",
+        int(card.get("planned_qty") or 1),
+        user.id,
+        source,
+        card.get("unit_number") or "",
+    )
+    if item.unit_number:
+        remember_work_record(user, prop, item.unit_number, item.title, source)
+    return item, was_new
 
 
 def save_plan_day(user, payload: dict, source: str) -> dict:
@@ -326,33 +634,43 @@ def save_plan_day(user, payload: dict, source: str) -> dict:
             added.append(f"{prop.name}: on the route")
             continue
         for item in items:
-            row, was_new = ensure_plan_item(
-                trip,
-                prop,
-                item.get("title") or "Work",
-                item.get("detail") or "",
-                int(item.get("planned_qty") or 1),
-                user.id,
-                source,
-            )
+            row, was_new = save_work_card(user, trip, prop, item, source)
             word = "planned" if was_new else "already on the plan"
-            added.append(f"{prop.name} — {row.title} ({row.planned_qty}) {word}")
+            where = f"unit {row.unit_number} " if row.unit_number else ""
+            added.append(f"{prop.name} — {where}{row.title} ({row.planned_qty}) {word}")
     if created_trip is False and not added:
         return {"ok": False, "reply": "That plan is already on the day."}
+    note = apply_trip_mileage(user, trip, payload, source)
     reply = f"{trip.title} on {starts_on.isoformat()}. " + " ".join(added)
+    reply += separate_record_sentence(
+        [{"unit_number": row.unit_number, "title": row.title} for row in PlanItem.query.filter_by(trip_id=trip.id).filter(PlanItem.deleted_at.is_(None)).all() if row.unit_number]
+    )
+    reply += note
     reply += " Tell me what you actually did. Anything you skip stays open."
     return {"ok": True, "reply": reply, "trip_id": trip.id}
 
 
 def _score(item: PlanItem, hint: str, property_name: str) -> int:
+    from app.services.records import normalize_unit
+
     blob = _tokens(f"{item.title} {item.detail}")
+    if item.unit_number:
+        blob.add(item.unit_number.lower())
     place = _tokens(item.property.name if item.property else "")
     want = _tokens(f"{hint} {property_name}")
+    found = UNIT_WORD.search(hint or "") or UNIT_AFTER.search(hint or "")
+    hint_unit = normalize_unit(found.group(1)).lower() if found else ""
+    if hint_unit:
+        want.add(hint_unit)
     if not want:
         return 0
     score = len(want & blob) + len(want & place)
     if property_name and item.property and property_name.lower() in item.property.name.lower():
         score += 2
+    if hint_unit and (item.unit_number or "").lower() == hint_unit:
+        score += 5
+    elif hint_unit and item.unit_number and (item.unit_number or "").lower() != hint_unit:
+        score -= 3
     return score
 
 
@@ -385,8 +703,22 @@ def _write_actual_job(user, item: PlanItem, note: str, source: str) -> Job | Non
     title = item.title
     if int(item.planned_qty or 1) > 1:
         title = f"{item.title} ({item.done_qty} of {item.planned_qty})"
+    if item.unit_number:
+        title = f"Unit {item.unit_number}: {title}"
+    unit_id = None
+    if item.unit_number:
+        from app.models import Unit
+
+        unit = (
+            Unit.query.filter_by(property_id=item.property_id, unit_number=item.unit_number)
+            .filter(Unit.deleted_at.is_(None))
+            .first()
+        )
+        if unit:
+            unit_id = unit.id
     job = Job(
         property_id=item.property_id,
+        unit_id=unit_id,
         trip_id=item.trip_id,
         title=title[:300],
         detail=(note or item.outcome_note or "")[:4000],
@@ -446,6 +778,8 @@ def apply_outcome(user, payload: dict, source: str) -> dict:
     item.updated_at = utcnow()
     if status in ("done", "partial"):
         _write_actual_job(user, item, note, source)
+    if status in ("done", "closed_by_other", "not_needed"):
+        finish_work_record(user, item)
     audit(user.id, source, "update", "plan_item", item.id, before, {"status": item.status, "done_qty": item.done_qty})
     place = item.property.name if item.property else "that property"
     extra = f" {item.outcome_note}" if item.outcome_note else ""

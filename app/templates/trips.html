@@ -16,7 +16,7 @@
     <li>
       <a href="/trips/{{ item.trip_id }}">
         <strong>{{ item.property.name }}</strong>
-        {{ item.title }}
+        {% if item.unit_number %}Unit {{ item.unit_number }} · {% endif %}{{ item.title }}
         {% if item.status == 'partial' %}
         <span class="pill partial">Did {{ item.done_qty }} of {{ item.planned_qty }}</span>
         {% else %}
@@ -33,7 +33,7 @@
   {% endif %}
   <ul class="list">
     {% for trip in trips %}
-    <li><a href="/trips/{{ trip.id }}"><strong>{{ trip.title }}</strong><span class="hint">{{ trip.starts_on or '' }}</span></a></li>
+    <li><a href="/trips/{{ trip.id }}"><strong>{{ trip.title }}</strong><span class="hint">{{ trip.starts_on or '' }}{% if trip.odometer_start is not none %} · start {{ trip.odometer_start }}{% endif %}{% if trip.odometer_end is not none %} · end {{ trip.odometer_end }}{% endif %}</span></a></li>
     {% endfor %}
   </ul>
   {% if followups %}

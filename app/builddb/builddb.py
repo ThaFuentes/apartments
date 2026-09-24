@@ -62,6 +62,7 @@ def init_db(app):
         _evolve_mail()
         _evolve_equipment()
         _evolve_units()
+        _evolve_trip_mileage()
         _say("[apt] MariaDB schema ready")
 
 
@@ -160,6 +161,32 @@ def _evolve_units():
         statements.append("ALTER TABLE units ADD COLUMN occupancy VARCHAR(20) NOT NULL DEFAULT ''")
     if "building" not in have:
         statements.append("ALTER TABLE units ADD COLUMN building VARCHAR(40) NOT NULL DEFAULT ''")
+    if not statements:
+        return
+    with db.engine.begin() as conn:
+        for sql in statements:
+            conn.execute(text(sql))
+
+
+def _evolve_trip_mileage():
+    """Starting and ending mileage live on the trip. Each plan card can name its unit."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    statements = []
+    if "trips" in names:
+        have = {col["name"] for col in inspect(db.engine).get_columns("trips")}
+        if "odometer_start" not in have:
+            statements.append("ALTER TABLE trips ADD COLUMN odometer_start INT NULL")
+        if "odometer_end" not in have:
+            statements.append("ALTER TABLE trips ADD COLUMN odometer_end INT NULL")
+    if "plan_items" in names:
+        have = {col["name"] for col in inspect(db.engine).get_columns("plan_items")}
+        if "unit_number" not in have:
+            statements.append("ALTER TABLE plan_items ADD COLUMN unit_number VARCHAR(40) NOT NULL DEFAULT ''")
     if not statements:
         return
     with db.engine.begin() as conn:

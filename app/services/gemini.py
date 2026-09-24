@@ -42,7 +42,7 @@ FALLBACK_FREE = (
 TOOL_DECLS = [
     {
         "name": "plan_trip",
-        "description": "Save a plan or a trip. Use this when she says plan, schedule, or trip. Do not use upsert_property for a plan. property_name is the apartment name only.",
+        "description": "Save a plan or a trip. Use this when she says plan, schedule, or trip. Do not use upsert_property for a plan. property_name is the apartment name only. Each unit job is its own work_items record. Never combine two units into one purpose.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -51,8 +51,22 @@ TOOL_DECLS = [
                 "region": {"type": "string"},
                 "address": {"type": "string"},
                 "starts_on": {"type": "string", "description": "YYYY-MM-DD"},
-                "purpose": {"type": "string", "description": "What the visit is for"},
-                "miles_estimate": {"type": "number", "description": "Miles she stated for the drive"},
+                "purpose": {"type": "string", "description": "Short reason for the trip. Not a list of unit jobs."},
+                "miles_estimate": {"type": "number", "description": "Miles she stated for the drive, not the odometer"},
+                "odometer_start": {"type": "integer", "description": "Starting mileage on the vehicle"},
+                "odometer_end": {"type": "integer", "description": "Ending mileage on the vehicle"},
+                "work_items": {
+                    "type": "array",
+                    "description": "One record per unit job. worked on the AC at unit 12 and fix the tub clog at unit 26 are two items.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "unit_number": {"type": "string"},
+                            "title": {"type": "string", "description": "The job at that unit only"},
+                        },
+                        "required": ["title"],
+                    },
+                },
                 "day_stated": {"type": "boolean"},
                 "day_assumed": {"type": "boolean"},
             },
@@ -70,6 +84,8 @@ TOOL_DECLS = [
                 "city": {"type": "string"},
                 "miles_estimate": {"type": "number"},
                 "miles_actual": {"type": "number"},
+                "odometer_start": {"type": "integer", "description": "Starting mileage"},
+                "odometer_end": {"type": "integer", "description": "Ending mileage"},
                 "arrive": {"type": "boolean"},
                 "end_visit": {"type": "boolean"},
                 "end_day": {"type": "boolean"},
@@ -403,6 +419,10 @@ CHAT_RULES = (
     "property_name is only the apartment name, never her sentence. "
     "If she says create a property in a city and does not name it, ask for the name and do not call upsert_property. "
     "A plan or a trip is plan_trip, not a new property. Gas and meals are not properties. "
+    "Each unit job is its own record. Pass work_items with one object per job, unit_number and title. "
+    "Do not put two jobs into one purpose or one detail. "
+    "Worked on the AC at unit 12 and fix the tub clog at unit 26 are two records. "
+    "Starting mileage and ending mileage are odometer_start and odometer_end on that same plan. "
     "Edit, change, or correct uses update_property on the property she already has. Do not create a second one. "
     "Delete all of a name removes every match. If several match and she did not say all, list them with the city. "
     "A typed street address is the address. Do not say you searched and could not find it. "

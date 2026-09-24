@@ -17,7 +17,7 @@
   {% for item in items %}
   <article class="card">
     <p class="pill {{ item.status }}">{{ status_line(item) }}</p>
-    <h3>{{ item.property.name }}</h3>
+    <h3>{% if item.unit_number %}Unit {{ item.unit_number }} · {% endif %}{{ item.property.name }}</h3>
     <p><strong>{{ item.title }}</strong></p>
     {% if item.detail %}<pre class="note">{{ item.detail }}</pre>{% endif %}
     {% if item.outcome_note and item.status != 'open' %}<p class="lead">{{ item.outcome_note }}</p>{% endif %}
@@ -65,9 +65,32 @@
     {% endfor %}
   </ul>
   {% if current_user.role != 'viewer' %}
+  <form method="post" action="/trips/{{ trip.id }}/cards" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>Another work card</h3>
+    {% if links|length > 1 %}
+    <label>Property
+      <select name="property_id">
+        {% for link in links %}
+        <option value="{{ link.property_id }}">{{ link.property.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% elif links %}
+    <input type="hidden" name="property_id" value="{{ links[0].property_id }}">
+    {% endif %}
+    <label>Unit <input name="unit_number" inputmode="numeric" placeholder="26"></label>
+    <label>What was done <input name="title" required placeholder="Fix the tub clog"></label>
+    <button type="submit">Add this card</button>
+  </form>
   <form method="post" action="/trips/{{ trip.id }}/miles" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <h3>Miles for this day</h3>
+    {% if trip.odometer_start is not none and trip.odometer_end is not none %}
+    <p>Starting {{ trip.odometer_start }} · ending {{ trip.odometer_end }}{% if (trip.odometer_end - trip.odometer_start) >= 0 %} · {{ trip.odometer_end - trip.odometer_start }} miles{% endif %}</p>
+    {% endif %}
+    <label>Starting mileage <input name="odometer_start" value="{{ trip.odometer_start if trip.odometer_start is not none else '' }}" inputmode="numeric"></label>
+    <label>Ending mileage <input name="odometer_end" value="{{ trip.odometer_end if trip.odometer_end is not none else '' }}" inputmode="numeric"></label>
     <label>About how far <input name="miles_estimate" value="{{ trip.miles_estimate or '' }}" inputmode="decimal"></label>
     <label>What you actually drove <input name="miles_actual" value="{{ trip.miles_actual or '' }}" inputmode="decimal"></label>
     <button type="submit">Save miles</button>

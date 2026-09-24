@@ -1691,6 +1691,119 @@ Lubbock — 2 outside compressor installs"""
             handle_message(user, "hello again", idempotency_key="fresh")
         self.assertEqual(seen["history"], [])
 
+    def test_a_plan_keeps_mileage_and_a_record_per_unit(self):
+        from app.models import PlanItem, UnitTask
+        from app.services.gemini import CHAT_RULES
+        from app.services.records import ensure_property
+
+        self.assertIn("work_items", CHAT_RULES)
+        self.assertIn("own record", CHAT_RULES.lower())
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.commit()
+        heard = handle_message(
+            user,
+            "make me a plan for woodview odessa starting mileage 120000 ending mileage 120086 "
+            "worked on the ac at unit 12 / next work card fix the tub clog at 26 unit",
+            idempotency_key="miles-cards",
+        )
+        self.assertIn("Separate records", heard["reply"])
+        self.assertIn("120000", heard["reply"])
+        self.assertIn("120086", heard["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        trip = Trip.query.one()
+        self.assertEqual(trip.odometer_start, 120000)
+        self.assertEqual(trip.odometer_end, 120086)
+        self.assertEqual(float(trip.miles_actual), 86.0)
+        cards = PlanItem.query.order_by(PlanItem.id.asc()).all()
+        self.assertEqual([(row.unit_number, row.title.lower()) for row in cards], [
+            ("12", "worked on the ac"),
+            ("26", "fix the tub clog"),
+        ])
+        orders = UnitTask.query.filter_by(kind="work_order").order_by(UnitTask.id.asc()).all()
+        self.assertEqual(len(orders), 2)
+        self.assertEqual({row.unit.unit_number for row in orders}, {"12", "26"})
+        moved = handle_message(user, "ending mileage 120090", idempotency_key="miles-end")
+        db.session.refresh(trip)
+        self.assertEqual(trip.odometer_end, 120090)
+        self.assertEqual(float(trip.miles_actual), 90.0)
+        self.assertIn("120090", moved["reply"])
+
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        page = client.post(
+            f"/trips/{trip.id}/cards",
+            data={
+                "csrf_token": token,
+                "idempotency_key": "card-30",
+                "unit_number": "30",
+                "title": "Replace the bulbs",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Unit 30", page.data)
+        self.assertIn(b"120000", page.data)
+        self.assertEqual(PlanItem.query.filter_by(unit_number="30").count(), 1)
+        self.assertEqual(UnitTask.query.filter_by(kind="work_order").count(), 3)
+
+    def test_the_model_files_each_unit_as_its_own_record(self):
+        from app.models import PlanItem, UnitTask
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+
+        def fake(row, text, timeout=25, history=None):
+            return {
+                "ok": True,
+                "text": "",
+                "calls": [
+                    {
+                        "name": "plan_trip",
+                        "args": {
+                            "property_name": "Woodview",
+                            "city": "Odessa",
+                            "purpose": "worked on the ac at unit 12 / next work card fix the tub clog at unit 26",
+                            "odometer_start": 120000,
+                            "odometer_end": 120086,
+                        },
+                    }
+                ],
+            }
+
+        with patch("app.services.providers.chat_with_tools", side_effect=fake):
+            heard = handle_message(
+                user,
+                "make me a plan for woodview odessa starting mileage 120000 ending mileage 120086 "
+                "worked on the ac at unit 12 / next work card fix the tub clog at unit 26",
+                idempotency_key="model-cards",
+            )
+        self.assertIn("Separate records", heard["reply"])
+        cards = [(row.unit_number, row.title.lower()) for row in PlanItem.query.order_by(PlanItem.id.asc()).all()]
+        self.assertEqual(cards, [("12", "worked on the ac"), ("26", "fix the tub clog")])
+        self.assertEqual(UnitTask.query.filter_by(kind="work_order").count(), 2)
+        trip = Trip.query.one()
+        self.assertEqual(trip.odometer_start, 120000)
+        self.assertEqual(trip.odometer_end, 120086)
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

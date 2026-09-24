@@ -39,6 +39,7 @@ def _plan_lines(start, end) -> list[dict]:
         rows.append(
             {
                 "property": item.property.name if item.property else "",
+                "unit": item.unit_number or "",
                 "title": item.title,
                 "planned_qty": item.planned_qty,
                 "done_qty": item.done_qty,
@@ -238,6 +239,7 @@ def build_snapshot(
     legs = []
     miles_est = 0.0
     miles_actual = 0.0
+    readings = []
     for trip in trips:
         if trip.id not in trip_ids:
             continue
@@ -245,6 +247,18 @@ def build_snapshot(
             miles_est += float(trip.miles_estimate)
         if trip.miles_actual:
             miles_actual += float(trip.miles_actual)
+        if trip.odometer_start is not None or trip.odometer_end is not None:
+            gap = None
+            if trip.odometer_start is not None and trip.odometer_end is not None:
+                gap = int(trip.odometer_end) - int(trip.odometer_start)
+            readings.append(
+                {
+                    "title": trip.title,
+                    "start": trip.odometer_start,
+                    "end": trip.odometer_end,
+                    "miles": gap,
+                }
+            )
         for leg in MileageLeg.query.filter_by(trip_id=trip.id).all():
             legs.append(
                 {
@@ -317,6 +331,7 @@ def build_snapshot(
             "legs": legs,
             "traveled": snapshot_miles_traveled,
             "log": snapshot_miles_log,
+            "readings": readings,
         },
         "expenses": {
             "gas": spend(week_exp, "gas"),
@@ -405,8 +420,9 @@ def render_markdown(snapshot: dict) -> str:
     lines += ["## Plan and what happened", ""]
     if snapshot.get("plan"):
         for row in snapshot["plan"]:
+            unit = f"unit {row.get('unit')}: " if row.get("unit") else ""
             lines.append(
-                f"- {row.get('property')}: planned {row.get('planned_qty')} {row.get('title')}. {row.get('result')}"
+                f"- {row.get('property')}: {unit}planned {row.get('planned_qty')} {row.get('title')}. {row.get('result')}"
             )
     else:
         lines.append("No plan lines in this period.")
@@ -414,6 +430,11 @@ def render_markdown(snapshot: dict) -> str:
     lines.append(f"Estimate {miles.get('estimate') or 0} miles.")
     if miles.get("actual"):
         lines.append(f"Actual {miles.get('actual')} miles.")
+    for row in miles.get("readings") or []:
+        lines.append(
+            f"- {row.get('title')}: starting {row.get('start') if row.get('start') is not None else '—'}, ending {row.get('end') if row.get('end') is not None else '—'}"
+            + (f" ({row.get('miles')} miles)" if row.get("miles") is not None and row.get("miles") >= 0 else "")
+        )
     lines.append(f"Miles driven {miles.get('traveled') or 0}.")
     for row in miles.get("log") or []:
         lines.append(f"- {row.get('miles')} mi · {row.get('note') or row.get('source')}")

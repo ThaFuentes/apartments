@@ -13,7 +13,7 @@
   {% if snapshot.plan %}
   <ul>
     {% for row in snapshot.plan %}
-    <li>{{ row.property }}: planned {{ row.planned_qty }} {{ row.title }}. {{ row.result }}{% if row.note %} — {{ row.note }}{% endif %}</li>
+    <li>{{ row.property }}: {% if row.unit %}unit {{ row.unit }}: {% endif %}planned {{ row.planned_qty }} {{ row.title }}. {{ row.result }}{% if row.note %} — {{ row.note }}{% endif %}</li>
     {% endfor %}
   </ul>
   {% else %}
@@ -44,6 +44,9 @@
   {% endfor %}
   <h2>Miles</h2>
   <p>Estimate {{ snapshot.miles.estimate or 0 }}{% if snapshot.miles.actual %} · actual {{ snapshot.miles.actual }}{% endif %} · driven {{ snapshot.miles.traveled or 0 }}</p>
+  {% for row in snapshot.miles.readings or [] %}
+  <p>{{ row.title }}: starting {{ row.start if row.start is not none else "—" }}, ending {{ row.end if row.end is not none else "—" }}{% if row.miles is not none and row.miles >= 0 %} ({{ row.miles }} miles){% endif %}</p>
+  {% endfor %}
   <h2>Expenses</h2>
   <ul>
     <li>Gas {{ money(snapshot.expenses.gas) }}</li>

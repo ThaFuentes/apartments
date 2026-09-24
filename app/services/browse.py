@@ -79,6 +79,7 @@ def home_board(user_id: int, user=None) -> dict:
         plan.append(
             {
                 "title": item.title,
+                "unit": item.unit_number or "",
                 "status": item.status,
                 "left": left,
                 "property": prop.name if prop else "",

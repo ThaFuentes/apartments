@@ -66,7 +66,7 @@
                   const block = document.createElement("div");
                   block.className = "job";
                   block.setAttribute("data-id", String(row.id));
-                  block.innerHTML = "<strong></strong><input type=\"hidden\" name=\"property_id\"><label>Job here<textarea name=\"work\" placeholder=\"One job per line\"></textarea></label><button type=\"button\" class=\"ghost\">Remove</button>";
+                  block.innerHTML = "<strong></strong><input type=\"hidden\" name=\"property_id\"><label>Jobs here, one per line<textarea name=\"work\" placeholder=\"worked on the AC at unit 12&#10;fix the tub clog at unit 26\"></textarea></label><button type=\"button\" class=\"ghost\">Remove</button>";
                   block.querySelector("strong").textContent = row.name + (row.city ? " · " + row.city : "");
                   block.querySelector("input").value = row.id;
                   block.querySelector("button").addEventListener("click", function () { block.remove(); });

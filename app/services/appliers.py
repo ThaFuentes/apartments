@@ -178,6 +178,7 @@ def apply_plan_trip(user, payload, source) -> dict:
             source,
             bool(payload.get("day_stated")),
             created_prop,
+            payload,
         )
     checklist = "\n".join(
         [
@@ -221,19 +222,34 @@ def apply_plan_trip(user, payload, source) -> dict:
         {},
         {"title": trip.title, "starts_on": starts_on.isoformat(), "property_id": prop.id, "miles_estimate": miles},
     )
-    if purpose:
-        from app.services.plan import ensure_plan_item
+    from app.services.plan import apply_trip_mileage, cards_for_trip, mileage_sentence, save_work_card, separate_record_sentence
 
-        ensure_plan_item(trip, prop, purpose[:200], "", 1, user.id, source)
+    cards = cards_for_trip(payload)
+    if not cards and purpose:
+        cards = [{"title": purpose[:200], "detail": "", "planned_qty": 1, "unit_number": ""}]
+    if cards and not purpose:
+        purpose = "; ".join(
+            ((f"unit {card['unit_number']}: " if card.get("unit_number") else "") + (card.get("title") or "Work"))
+            for card in cards
+        )[:300]
+        trip.purpose = purpose
+        place = f"{prop.name} {prop.city.name if prop.city else city}".strip()
+        trip.title = (f"{place} — {purpose}" if purpose else place)[:200]
+    for card in cards:
+        save_work_card(user, trip, prop, card, source)
+    apply_trip_mileage(user, trip, payload, source)
+    reply = _trip_sentence(prop, starts_on, purpose, miles, created_prop, False, bool(payload.get("day_assumed")))
+    reply += separate_record_sentence(cards)
+    reply += mileage_sentence(trip)
     return {
         "ok": True,
-        "reply": _trip_sentence(prop, starts_on, purpose, miles, created_prop, False, bool(payload.get("day_assumed"))),
+        "reply": reply,
         "trip_id": trip.id,
         "property_id": prop.id,
     }
 
 
-def _refresh_trip(user, trip, prop, starts_on, purpose, stated_miles, calculated, source, day_stated, created_prop) -> dict:
+def _refresh_trip(user, trip, prop, starts_on, purpose, stated_miles, calculated, source, day_stated, created_prop, payload=None) -> dict:
     before = {"purpose": trip.purpose, "miles_estimate": trip.miles_estimate, "starts_on": trip.starts_on.isoformat() if trip.starts_on else None}
     if day_stated and starts_on:
         trip.starts_on = starts_on
@@ -249,15 +265,22 @@ def _refresh_trip(user, trip, prop, starts_on, purpose, stated_miles, calculated
     link = TripProperty.query.filter_by(trip_id=trip.id, property_id=prop.id).first()
     if link and stated_miles is not None:
         link.miles_leg = stated_miles
-    if trip.purpose:
-        from app.services.plan import ensure_plan_item
+    from app.services.plan import apply_trip_mileage, cards_for_trip, mileage_sentence, save_work_card, separate_record_sentence
 
-        ensure_plan_item(trip, prop, trip.purpose[:200], "", 1, user.id, source)
+    cards = cards_for_trip(payload if payload else {"purpose": trip.purpose})
+    if not cards and trip.purpose:
+        cards = [{"title": trip.purpose[:200], "detail": "", "planned_qty": 1, "unit_number": ""}]
+    for card in cards:
+        save_work_card(user, trip, prop, card, source)
+    apply_trip_mileage(user, trip, payload or {}, source)
     audit(user.id, source, "update", "trip", trip.id, before, {"purpose": trip.purpose, "miles_estimate": trip.miles_estimate, "starts_on": trip.starts_on.isoformat() if trip.starts_on else None})
     when = trip.starts_on or starts_on
+    reply = _trip_sentence(prop, when, trip.purpose, trip.miles_estimate, created_prop, True, False)
+    reply += separate_record_sentence(cards)
+    reply += mileage_sentence(trip)
     return {
         "ok": True,
-        "reply": _trip_sentence(prop, when, trip.purpose, trip.miles_estimate, created_prop, True, False),
+        "reply": reply,
         "trip_id": trip.id,
         "property_id": prop.id,
         "updated": True,
@@ -399,6 +422,39 @@ def _worked_stamp(value, tz_name: str | None):
     return local.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def apply_add_plan_card(user, payload, source) -> dict:
+    source = _src(source)
+    trip = db.session.get(Trip, int(payload.get("trip_id") or 0))
+    if not trip or trip.deleted_at:
+        return {"ok": False, "reply": "That plan is gone."}
+    prop = db.session.get(Property, int(payload["property_id"])) if payload.get("property_id") else None
+    if prop is None or prop.deleted_at:
+        link = TripProperty.query.filter_by(trip_id=trip.id).order_by(TripProperty.sort_order.asc()).first()
+        prop = db.session.get(Property, link.property_id) if link else None
+    if prop is None or prop.deleted_at:
+        return {"ok": False, "reply": "Which property is this card for?"}
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "reply": "What was done on that card?"}
+    from app.services.plan import save_work_card
+
+    item, was_new = save_work_card(
+        user,
+        trip,
+        prop,
+        {
+            "title": title,
+            "detail": "",
+            "planned_qty": 1,
+            "unit_number": payload.get("unit_number") or "",
+        },
+        source,
+    )
+    where = f"unit {item.unit_number}" if item.unit_number else prop.name
+    word = "Added a work card" if was_new else "That card is already on the plan"
+    return {"ok": True, "reply": f"{word}: {where}, {item.title}.", "trip_id": trip.id}
+
+
 def apply_plan_day(user, payload, source) -> dict:
     from app.services.plan import save_plan_day
 
@@ -434,6 +490,9 @@ def apply_update_trip(user, payload, source) -> dict:
         trip.handoff = str(payload["handoff"]).strip()
     if payload.get("notes"):
         trip.notes = str(payload["notes"]).strip()
+    from app.services.plan import apply_trip_mileage
+
+    mileage_note = apply_trip_mileage(user, trip, payload, source)
     if payload.get("starts_on"):
         from datetime import date
 
@@ -444,7 +503,7 @@ def apply_update_trip(user, payload, source) -> dict:
             pass
     audit(user.id, source, "update", "trip", trip.id, before, {"miles_estimate": trip.miles_estimate, "miles_actual": trip.miles_actual, "handoff": trip.handoff})
     moved = f" Moved it to {trip.starts_on.strftime('%A')}." if payload.get("starts_on") and trip.starts_on else ""
-    return {"ok": True, "reply": f"Updated {trip.title}.{moved}", "trip_id": trip.id}
+    return {"ok": True, "reply": f"Updated {trip.title}.{moved}{mileage_note}", "trip_id": trip.id}
 
 
 def _arrive(user, payload, source) -> dict:
@@ -1730,6 +1789,7 @@ from app.services.board import apply_unit_board
 APPLIERS = {
     "plan_trip": apply_plan_trip,
     "plan_day": apply_plan_day,
+    "add_plan_card": apply_add_plan_card,
     "log_work": apply_log_work,
     "note_equipment": apply_note_equipment,
     "unit_board": apply_unit_board,
