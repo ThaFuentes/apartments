@@ -174,6 +174,27 @@ button.ghost {
 .composer, .camera { padding: 0.75rem; }
 .composer-dock { position: sticky; bottom: 4.8rem; display: flex; flex-direction: column; gap: 0.55rem; }
 .row-actions, .inline { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+.intro {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: #0b1c18;
+}
+.intro[hidden] { display: none !important; }
+.intro video { width: 100%; height: 100%; object-fit: cover; background: #0b1c18; }
+.intro button {
+  position: absolute;
+  top: calc(0.7rem + env(safe-area-inset-top));
+  right: 0.7rem;
+  min-height: 40px;
+  padding: 0.4rem 0.9rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #0b1c18;
+  font-weight: 800;
+}
+body.intro-on { overflow: hidden; }
 .chat-fab {
   position: fixed;
   right: 0.85rem;

@@ -1,4 +1,35 @@
 (function () {
+  const intro = document.getElementById("apt-intro");
+  const introVideo = document.getElementById("apt-intro-video");
+  const introSkip = document.getElementById("apt-intro-skip");
+  if (intro && introVideo && introSkip) {
+    let seen = false;
+    try { seen = localStorage.getItem("apt-intro-seen") === "1"; } catch (err) { seen = true; }
+    function closeIntro() {
+      intro.hidden = true;
+      document.body.classList.remove("intro-on");
+      introVideo.pause();
+      try { localStorage.setItem("apt-intro-seen", "1"); } catch (err) {}
+    }
+    if (!seen) {
+      intro.hidden = false;
+      document.body.classList.add("intro-on");
+      const giveUp = window.setTimeout(closeIntro, 9000);
+      introVideo.addEventListener("ended", function () {
+        window.clearTimeout(giveUp);
+        closeIntro();
+      });
+      introSkip.addEventListener("click", function () {
+        window.clearTimeout(giveUp);
+        closeIntro();
+      });
+      introVideo.play().catch(function () {
+        window.clearTimeout(giveUp);
+        window.setTimeout(closeIntro, 1600);
+      });
+    }
+  }
+
   const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
   document.querySelectorAll("[data-place-search]").forEach(function (root) {
     const input = root.querySelector("[data-search]");

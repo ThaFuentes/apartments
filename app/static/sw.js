@@ -1,4 +1,4 @@
-const CACHE = "apt-shell-1";
+const CACHE = "apt-shell-2";
 const SHELL = ["/static/offline.html", "/static/css/apt.css", "/static/js/apt.js"];
 
 self.addEventListener("install", function (event) {
@@ -7,7 +7,11 @@ self.addEventListener("install", function (event) {
 });
 
 self.addEventListener("activate", function (event) {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then(function (keys) {
+      return Promise.all(keys.filter(function (key) { return key !== CACHE; }).map(function (key) { return caches.delete(key); }));
+    }).then(function () { return self.clients.claim(); })
+  );
 });
 
 self.addEventListener("fetch", function (event) {

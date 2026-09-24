@@ -3,15 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#f4f6f8">
+  <meta name="theme-color" content="#0f6e66">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Apt">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-startup-image" href="/static/intro/poster.jpg">
   <meta name="csrf-token" content="{{ csrf_token }}">
   <title>{% block title %}Apt{% endblock %}</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=9">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=10">
 </head>
 <body class="{% if drive %}drive{% endif %} {% block body_class %}{% endblock %}" data-share="{{ '1' if share.on else '0' }}">
+  <div class="intro" id="apt-intro" hidden>
+    <video id="apt-intro-video" playsinline muted poster="/static/intro/poster.jpg" src="/static/intro/open.mp4"></video>
+    <button type="button" id="apt-intro-skip">Skip</button>
+  </div>
   <header class="top">
     <div class="brand">
       <strong>Apt</strong>
@@ -71,6 +79,6 @@
     {% endif %}
   </nav>
   {% endif %}
-  <script src="{{ url_for('static', filename='js/apt.js') }}?v=9"></script>
+  <script src="{{ url_for('static', filename='js/apt.js') }}?v=10"></script>
 </body>
 </html>
