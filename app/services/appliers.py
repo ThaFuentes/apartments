@@ -1,6 +1,7 @@
 """Material writes. Callers commit. Nothing here saves a unit she did not name."""
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import timedelta
 
@@ -295,9 +296,18 @@ def apply_log_work(user, payload, source) -> dict:
             source=source,
         )
     if not prop or prop.deleted_at:
-        return {"ok": False, "reply": "Search for the property and tap it."}
+        return {"ok": False, "reply": "Which apartments, and which city?"}
+    _locate_property(
+        prop,
+        prop.name,
+        prop.city.name if prop.city else "",
+        prop.city.region if prop.city else "",
+        "",
+    )
     title = (payload.get("title") or "").strip()
-    if not title:
+    equipment = payload.get("equipment") if isinstance(payload.get("equipment"), dict) else {}
+    has_gear = any((equipment.get(key) or "").strip() for key in ("kind", "brand", "model", "serial", "size"))
+    if not title and not has_gear:
         return {"ok": False, "reply": "What did you do there?"}
     number = normalize_unit(payload.get("unit_number") or "")
     unit = None
@@ -316,6 +326,22 @@ def apply_log_work(user, payload, source) -> dict:
             db.session.add(unit)
             db.session.flush()
             audit(user.id, source, "create", "unit", unit.id, {}, {"unit_number": number, "property_id": prop.id})
+    profile = site_profile()
+    stamp = _worked_stamp(payload.get("worked_on"), profile.timezone if profile else None)
+    if not title:
+        from app.services.equipment import describe
+
+        if has_gear and unit:
+            _save_equipment(user, {"equipment": equipment}, unit, None, prop.id, source)
+            gear_row = Equipment.query.filter_by(unit_id=unit.id).order_by(Equipment.id.desc()).first()
+            if gear_row:
+                gear_row.created_at = stamp
+        where = f"unit {number} at {prop.name}" if number else prop.name
+        city = prop.city.name if prop.city else ""
+        line = f"{describe(equipment)} is on {where}" + (f" in {city}" if city else "") + "."
+        if prop.address:
+            line += f" Address: {prop.address}."
+        return {"ok": True, "reply": line, "property_id": prop.id, "unit_id": unit.id if unit else None}
     job = Job(
         property_id=prop.id,
         unit_id=unit.id if unit else None,
@@ -324,19 +350,43 @@ def apply_log_work(user, payload, source) -> dict:
         status=(payload.get("status") or "done"),
         source=source,
         created_by_id=user.id,
-        created_at=utcnow(),
+        created_at=stamp,
     )
     if job.status not in ("done", "planned", "blocked", "followup"):
         job.status = "done"
     db.session.add(job)
     db.session.flush()
-    db.session.add(JobEvent(job_id=job.id, body=title, actor_id=user.id, source=source, created_at=utcnow()))
-    audit(user.id, source, "create", "job", job.id, {}, {"title": job.title, "property_id": prop.id, "unit": number})
+    db.session.add(JobEvent(job_id=job.id, body=title, actor_id=user.id, source=source, created_at=stamp))
+    if has_gear and unit:
+        _save_equipment(user, {"equipment": equipment}, unit, job, prop.id, source)
+        gear_row = Equipment.query.filter_by(unit_id=unit.id).order_by(Equipment.id.desc()).first()
+        if gear_row:
+            gear_row.created_at = stamp
+    audit(user.id, source, "create", "job", job.id, {}, {"title": job.title, "property_id": prop.id, "unit": number, "worked_on": payload.get("worked_on") or ""})
     from app.services.plan import note_work_against_plan
 
     plan_note = note_work_against_plan(user, prop.id, title, source) if job.status == "done" else ""
     where = f"unit {number} at {prop.name}" if number else prop.name
-    return {"ok": True, "reply": f"Saved {title} at {where}.{plan_note}", "job_id": job.id, "property_id": prop.id}
+    when = ""
+    if payload.get("worked_on"):
+        when = f"On {payload['worked_on']}, "
+    reply = f"{when}Saved {title} at {where}.{plan_note}"
+    if prop.address:
+        reply += f" Address: {prop.address}."
+    return {"ok": True, "reply": reply, "job_id": job.id, "property_id": prop.id, "unit_id": unit.id if unit else None}
+
+
+def _worked_stamp(value, tz_name: str | None):
+    raw = (str(value or "")).strip()[:10]
+    if not re.match(r"\d{4}-\d{2}-\d{2}$", raw):
+        return utcnow()
+    from datetime import datetime, time, timezone
+
+    from app.services.clock import zone
+
+    day = datetime.fromisoformat(raw).date()
+    local = datetime.combine(day, time(12, 0), tzinfo=zone(tz_name))
+    return local.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def apply_plan_day(user, payload, source) -> dict:

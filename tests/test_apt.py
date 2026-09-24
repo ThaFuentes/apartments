@@ -601,6 +601,47 @@ Lubbock — 2 outside compressor installs"""
         self.assertNotIn("Midland", address_from_listings(page, "Woodview", "Odessa", "TX"))
         self.assertEqual(address_from_listings(page, "Woodview", "Lubbock", "TX"), "")
 
+    def test_dated_work_and_appliance_questions(self):
+        from datetime import timezone
+
+        from app.models import Equipment
+        from app.services.clock import zone
+
+        user = self.owner()
+        filed = handle_message(
+            user,
+            "on the 19th of march this year I replaced the compressor at woodview odessa unit 804",
+            idempotency_key="mar19",
+        )
+        self.assertIn("804", filed["reply"])
+        self.assertIn("Woodview", filed["reply"])
+        from app.services.clock import local_today
+
+        year = local_today().year
+        self.assertIn(f"{year}-03-19", filed["reply"])
+        job = Job.query.one()
+        local = job.created_at.replace(tzinfo=timezone.utc).astimezone(zone("America/Chicago"))
+        self.assertEqual(local.date().isoformat(), f"{year}-03-19")
+        self.assertEqual(Unit.query.one().unit_number, "804")
+        prop = Property.query.filter(db.func.lower(Property.name) == "woodview").one()
+        self.assertEqual(prop.city.name, "Odessa")
+        placed = handle_message(
+            user,
+            "the whirlpool fridge is in unit 12 at madison sq lubbock",
+            idempotency_key="fridge",
+        )
+        self.assertIn("Whirlpool", placed["reply"])
+        self.assertIn("12", placed["reply"])
+        gear = Equipment.query.filter_by(kind="refrigerator").one()
+        self.assertEqual(gear.brand, "Whirlpool")
+        self.assertEqual(gear.unit.unit_number, "12")
+        who = handle_message(user, "who has a whirlpool fridge", idempotency_key="who-fridge")
+        self.assertIn("unit 12", who["reply"])
+        self.assertIn("Madison Sq", who["reply"])
+        newest = handle_message(user, "where did I put the most recent appliances", idempotency_key="newest")
+        self.assertIn("Whirlpool", newest["reply"])
+        self.assertIn("unit 12", newest["reply"])
+
     def test_its_at_saves_the_looked_up_address(self):
         user = self.owner()
         hit = {

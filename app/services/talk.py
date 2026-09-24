@@ -691,6 +691,143 @@ def _miles_numbers(text: str) -> dict | None:
 
 
 ITS_AT = re.compile(r"^(?:it(?:'s| is)|its)\s+at\s+(.+)$", re.I)
+_MONTHS = {
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+    "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+    "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
+}
+_MONTH_WORD = "|".join(_MONTHS)
+_WORK_VERB = re.compile(
+    r"\b(did|replaced|installed|fixed|repaired|changed|checked|inspected|cleaned|swapped|put in|worked on|completed)\b",
+    re.I,
+)
+
+
+def _spoken_date(text: str):
+    """Pull a calendar day out of a sentence and return the leftover words."""
+    raw = text or ""
+    year_now = local_today(None).year
+    found = re.search(
+        rf"\b(?:on\s+)?(?:the\s+)?(\d{{1,2}})(?:st|nd|rd|th)?\s+of\s+({_MONTH_WORD})(?:\s+(this year|(\d{{4}})))?\b",
+        raw,
+        re.I,
+    )
+    month = day = year = None
+    if found:
+        day = int(found.group(1))
+        month = _MONTHS[found.group(2).lower()]
+        year = int(found.group(4)) if found.group(4) else year_now
+    else:
+        found = re.search(
+            rf"\b(?:on\s+)?({_MONTH_WORD})\s+(\d{{1,2}})(?:st|nd|rd|th)?(?:\s*,?\s*(this year|(\d{{4}})))?\b",
+            raw,
+            re.I,
+        )
+        if found:
+            month = _MONTHS[found.group(1).lower()]
+            day = int(found.group(2))
+            year = int(found.group(4)) if found.group(4) else year_now
+        else:
+            found = re.search(r"\b(?:on\s+)?(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", raw)
+            if found:
+                month = int(found.group(1))
+                day = int(found.group(2))
+                if found.group(3):
+                    year = int(found.group(3))
+                    if year < 100:
+                        year += 2000
+                else:
+                    year = year_now
+    if not found or not month or not day:
+        return None, raw
+    try:
+        from datetime import date
+
+        when = date(year, month, day)
+    except ValueError:
+        return None, raw
+    rest = (raw[: found.start()] + " " + raw[found.end() :]).strip(" .,")
+    return when, rest
+
+
+def _place_and_unit(blob: str) -> dict:
+    from app.services.records import find_properties
+
+    number = _loose_unit(blob)
+    cleaned = blob
+    if number:
+        cleaned = re.sub(rf"\b(?:unit\s*)?#?{re.escape(number)}\b", " ", blob, flags=re.I)
+    cleaned = _clean_slot(cleaned)
+    slots = _slots_from_destination(cleaned)
+    name = slots.get("property_name") or slots.get("place") or ""
+    city = slots.get("city") or ""
+    region = slots.get("region") or ""
+    if name and not city:
+        found = find_properties(name)
+        if len(found) == 1 and found[0].city:
+            city = found[0].city.name
+            region = found[0].city.region or region
+    return {"property_name": name, "city": city, "region": region, "unit_number": number}
+
+
+def _backdated_work(text: str) -> dict | None:
+    when, rest = _spoken_date(text)
+    if not when or not _WORK_VERB.search(rest):
+        return None
+    at = re.search(r"\bat\s+(.+)$", rest, re.I)
+    if not at:
+        return None
+    title = _clean_slot(rest[: at.start()])
+    title = re.sub(r"^(?:i\s+)?(?:did|have done|had)\s+", "", title, flags=re.I).strip(" .")
+    if not title:
+        return None
+    place = _place_and_unit(at.group(1))
+    if not place.get("property_name") or not place.get("city"):
+        return None
+    from app.services.equipment import has_identity, parse_equipment
+
+    gear = parse_equipment(text)
+    payload = {
+        "property_name": place["property_name"],
+        "city": place["city"],
+        "region": place.get("region") or "",
+        "unit_number": place.get("unit_number") or "",
+        "title": title[:300],
+        "status": "done",
+        "worked_on": when.isoformat(),
+    }
+    if has_identity(gear) or gear.get("kind"):
+        payload["equipment"] = gear
+    return payload
+
+
+def _appliance_place(text: str) -> dict | None:
+    if _spoken_date(text)[0]:
+        return None
+    from app.services.equipment import parse_equipment
+
+    gear = parse_equipment(text)
+    if not (gear.get("kind") or gear.get("brand")):
+        return None
+    if not re.search(r"\b(is in|goes in|go in|put|belongs|has a|have a|in unit|at unit)\b", text or "", re.I):
+        return None
+    number = _loose_unit(text or "")
+    if not number:
+        return None
+    at = re.search(r"\bat\s+(.+)$", text or "", re.I)
+    place = _place_and_unit(at.group(1) if at else (text or ""))
+    place["unit_number"] = place.get("unit_number") or number
+    if not place.get("unit_number") or not place.get("property_name") or not place.get("city"):
+        return None
+    return {
+        "property_name": place["property_name"],
+        "city": place["city"],
+        "region": place.get("region") or "",
+        "unit_number": place["unit_number"],
+        "title": "",
+        "equipment": gear,
+    }
 
 
 def _named_place(text: str) -> dict | None:
@@ -707,14 +844,18 @@ def _named_place(text: str) -> dict | None:
 
 def _direct_action(user, text: str, key: str, source: str):
     """A finished sentence is the action. An older question does not get to ask it again."""
+    work = _backdated_work(text)
+    gear = None if work else _appliance_place(text)
     named = _named_place(text)
     plan = _plan_delete(text)
     miles = _miles_numbers(text)
-    if not named and not plan and not miles:
+    if not work and not gear and not named and not plan and not miles:
         return None
     _close_questions(user)
     from app.services.pending import commit_apply
 
+    if work or gear:
+        return commit_apply(user, "log_work", work or gear, source, key)
     if named:
         return commit_apply(user, "upsert_property", named, source, key)
     if plan:
@@ -770,7 +911,7 @@ def _is_fresh_command(text: str) -> bool:
         return True
     if REPORT.search(raw) or SETTINGS.search(raw) or DELETE.search(raw):
         return True
-    if _plan_delete(raw) or _miles_numbers(raw) or _named_place(raw):
+    if _plan_delete(raw) or _miles_numbers(raw) or _named_place(raw) or _backdated_work(raw) or _appliance_place(raw):
         return True
     return False
 
@@ -1033,8 +1174,6 @@ def _tidy_place(value: str) -> str:
     for word in (value or "").split():
         if word.lower() in STATES:
             words.append(STATES[word.lower()])
-        elif len(word) == 2 and word.isalpha():
-            words.append(word.upper())
         else:
             words.append(word.capitalize())
     return " ".join(words)
@@ -1235,6 +1374,19 @@ def _expense_payload(text: str) -> dict | None:
     }
 
 
+def _gear_line(item) -> str:
+    from app.models import Property
+
+    unit = item.unit.unit_number if item.unit else ""
+    prop = db.session.get(Property, item.property_id) if item.property_id else None
+    place = prop.name if prop else ""
+    city = prop.city.name if prop and prop.city else ""
+    bits = " ".join(bit for bit in (item.brand, item.size_label, item.kind) if bit)
+    where = ", ".join(bit for bit in (f"unit {unit}" if unit else "", place, city) if bit)
+    when = item.created_at.strftime("%b %d, %Y").replace(" 0", " ") if item.created_at else ""
+    return f"{where} — {bits}" + (f" — {when}" if when else "")
+
+
 def answer_record(user, text: str) -> dict | None:
     """Plain questions answered in the thread from her record."""
     from app.models import Equipment, PlanItem, Property
@@ -1270,6 +1422,36 @@ def answer_record(user, text: str) -> dict | None:
     if re.search(r"\b(my miles|how many miles|miles so far|miles have i|total miles)\b", low):
         total = traveled_total(user.id)
         return {"ok": True, "reply": f"You have {total} miles on the record."}
+    if re.search(r"\b(most recent applianc|newest applianc|latest applianc|where did i put)\b", low):
+        from app.models import Equipment
+
+        gear = (
+            Equipment.query.filter(Equipment.deleted_at.is_(None))
+            .order_by(Equipment.created_at.desc(), Equipment.id.desc())
+            .limit(8)
+            .all()
+        )
+        if not gear:
+            return {"ok": True, "reply": "No appliances are filed yet."}
+        return {"ok": True, "reply": "Newest appliances:\n" + "\n".join(_gear_line(item) for item in gear)}
+    if re.search(r"\b(who has|which unit|where is|where's|what unit has|who'?s got)\b", low):
+        from app.models import Equipment
+        from app.services.equipment import describe, parse_equipment
+
+        wanted = parse_equipment(text)
+        if wanted.get("kind") or wanted.get("brand"):
+            rows = Equipment.query.filter(Equipment.deleted_at.is_(None)).order_by(Equipment.id.desc()).all()
+            hits = []
+            for item in rows:
+                if wanted.get("brand") and wanted["brand"].lower() not in (item.brand or "").lower():
+                    continue
+                if wanted.get("kind") and wanted["kind"].lower() != (item.kind or "").lower():
+                    continue
+                hits.append(item)
+            label = describe(wanted) or "that"
+            if not hits:
+                return {"ok": True, "reply": f"Nothing filed matches {label}."}
+            return {"ok": True, "reply": f"{label}:\n" + "\n".join(_gear_line(item) for item in hits[:20])}
     if re.search(r"\b(what equipment|list equipment|show equipment|my equipment|equipment at|equipment in|my appliances)\b", low):
         gear = Equipment.query.filter(Equipment.deleted_at.is_(None)).order_by(Equipment.id.desc()).all()
         if not gear:
