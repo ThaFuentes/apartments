@@ -153,7 +153,13 @@ def _evolve_units():
     if "units" not in names:
         return
     have = {col["name"] for col in inspect(db.engine).get_columns("units")}
-    if "occupancy" in have:
+    statements = []
+    if "occupancy" not in have:
+        statements.append("ALTER TABLE units ADD COLUMN occupancy VARCHAR(20) NOT NULL DEFAULT ''")
+    if "building" not in have:
+        statements.append("ALTER TABLE units ADD COLUMN building VARCHAR(40) NOT NULL DEFAULT ''")
+    if not statements:
         return
     with db.engine.begin() as conn:
-        conn.execute(text("ALTER TABLE units ADD COLUMN occupancy VARCHAR(20) NOT NULL DEFAULT ''"))
+        for sql in statements:
+            conn.execute(text(sql))

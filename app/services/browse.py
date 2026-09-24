@@ -191,19 +191,38 @@ def place_groups(city_id: int | None = None, user=None) -> list[dict]:
     return groups
 
 
-def unit_cards(property_id: int, sort: str = "recent", query: str = "", show: str = "") -> dict:
+def _building_key(value: str) -> tuple:
+    text = (value or "").strip()
+    if text.isdigit():
+        return (0, int(text), "")
+    return (1, 0, text.lower())
+
+
+def unit_cards(property_id: int, sort: str = "recent", query: str = "", show: str = "", building: str = "") -> dict:
     from app.models import UnitTask
+    from app.services.board import building_label, clean_building
 
     units = Unit.query.filter_by(property_id=property_id).filter(Unit.deleted_at.is_(None)).all()
+    building_names = sorted({unit.building for unit in units if unit.building}, key=_building_key)
+    wanted = clean_building(building)
+    if wanted:
+        units = [unit for unit in units if clean_building(unit.building) == wanted]
     jobs = Job.query.filter_by(property_id=property_id).filter(Job.deleted_at.is_(None)).all()
-    needed = (
+    tasks = (
         UnitTask.query.filter_by(property_id=property_id)
-        .filter(UnitTask.deleted_at.is_(None), UnitTask.status == "needed")
+        .filter(UnitTask.deleted_at.is_(None))
         .all()
     )
     needed_by: dict[int, int] = {}
-    for task in needed:
-        needed_by[task.unit_id] = needed_by.get(task.unit_id, 0) + 1
+    parts_by: dict[int, int] = {}
+    vendors_by: dict[int, int] = {}
+    for task in tasks:
+        if task.status == "needed":
+            needed_by[task.unit_id] = needed_by.get(task.unit_id, 0) + 1
+            if task.kind == "part":
+                parts_by[task.unit_id] = parts_by.get(task.unit_id, 0) + 1
+        if task.kind == "vendor" or task.status == "vendored":
+            vendors_by[task.unit_id] = vendors_by.get(task.unit_id, 0) + 1
     gear = (
         Equipment.query.filter(Equipment.property_id == property_id, Equipment.deleted_at.is_(None))
         .order_by(Equipment.id.desc())
@@ -238,13 +257,54 @@ def unit_cards(property_id: int, sort: str = "recent", query: str = "", show: st
                 "last_title": unit_jobs[0].title if unit_jobs else "",
                 "job_count": len(unit_jobs),
                 "open_tasks": needed_by.get(unit.id, 0),
+                "part_count": parts_by.get(unit.id, 0),
+                "vendor_count": vendors_by.get(unit.id, 0),
+                "gear_count": len(gear_by.get(unit.id) or []),
                 "gear_lines": lines[:2],
                 "gear_more": max(len(lines) - 2, 0),
             }
         )
-    if sort == "number":
-        cards.sort(key=lambda row: unit_sort_key(row["unit"].unit_number))
-    else:
-        cards.sort(key=lambda row: (row["last"] is None, -(row["last"].timestamp() if row["last"] else 0), unit_sort_key(row["unit"].unit_number)))
+    def _inside(row):
+        if sort == "number":
+            return unit_sort_key(row["unit"].unit_number)
+        return (row["last"] is None, -(row["last"].timestamp() if row["last"] else 0), unit_sort_key(row["unit"].unit_number))
+
+    cards.sort(key=lambda row: (_building_key(row["unit"].building or ""), _inside(row)))
+    rollups: dict[str, dict] = {}
+    for card in cards:
+        key = card["unit"].building or ""
+        bucket = rollups.setdefault(
+            key,
+            {"units": 0, "equipment": 0, "parts": 0, "labor": 0, "vendors": 0},
+        )
+        bucket["units"] += 1
+        bucket["equipment"] += card["gear_count"]
+        bucket["parts"] += card["part_count"]
+        bucket["labor"] += card["job_count"]
+        bucket["vendors"] += card["vendor_count"]
+    has_buildings = any(card["unit"].building for card in cards)
+    previous = None
+    for card in cards:
+        key = card["unit"].building or ""
+        bucket = rollups[key]
+        bits = [f"{bucket['units']} units"]
+        if bucket["equipment"]:
+            bits.append(f"{bucket['equipment']} equipment")
+        if bucket["parts"]:
+            bits.append(f"{bucket['parts']} parts needed")
+        if bucket["vendors"]:
+            bits.append(f"{bucket['vendors']} vendored")
+        if bucket["labor"]:
+            bits.append(f"{bucket['labor']} labor")
+        card["building_label"] = building_label(key) or "No building"
+        card["show_head"] = has_buildings and key != previous
+        card["rollup"] = " · ".join(bits)
+        previous = key
     loose = sorted(jobs_by.get(None) or [], key=lambda row: row.created_at or _EMPTY, reverse=True)
-    return {"cards": cards, "loose_jobs": loose, "total": len(units)}
+    return {
+        "cards": cards,
+        "loose_jobs": loose,
+        "total": len(units),
+        "building_names": building_names,
+        "building": wanted,
+    }

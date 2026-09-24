@@ -12,6 +12,44 @@ from app.services.records import audit, fuzzy_properties, normalize_unit, proper
 PART_WORDS = ("fan", "fans", "blower", "blowers", "window unit", "motor")
 
 
+def clean_building(value: str) -> str:
+    text = re.sub(r"\s+", " ", (value or "").strip())
+    text = re.sub(r"^building\s+", "", text, flags=re.I).strip(" .")
+    return text[:40]
+
+
+def building_label(value: str) -> str:
+    text = clean_building(value)
+    if not text:
+        return ""
+    return f"Building {text}"
+
+
+def range_problem(text: str) -> str:
+    raw = (text or "").replace("\n", ",").replace(";", ",")
+    for chunk in raw.split(","):
+        span = re.fullmatch(r"#?\s*(\d+)\s*(?:-|–|—|to)\s*#?\s*(\d+)\s*[a-z]?\s*", chunk.strip(), re.I)
+        if not span:
+            continue
+        start, end = int(span.group(1)), int(span.group(2))
+        count = abs(end - start) + 1
+        if count > 200:
+            return f"{min(start, end)}–{max(start, end)} is {count} units. Add up to 200 at a time."
+    return ""
+
+
+def describe_numbers(numbers: list[str], verb: str) -> str:
+    if not numbers:
+        return ""
+    if len(numbers) >= 3 and all(number.isdigit() for number in numbers):
+        ints = [int(number) for number in numbers]
+        if ints == list(range(ints[0], ints[-1] + 1)):
+            return f"{verb} {ints[0]}–{ints[-1]} ({len(ints)} units)"
+    if len(numbers) > 12:
+        return f"{verb} {len(numbers)} units, {numbers[0]} through {numbers[-1]}"
+    return f"{verb} " + ", ".join(numbers)
+
+
 def expand_unit_numbers(text: str) -> list[str]:
     """101, 102, 104-110 and one number per line."""
     raw = (text or "").replace("\n", ",").replace(";", ",")
@@ -108,50 +146,81 @@ def resolve_property(hint: str = "", unit_number: str = "") -> tuple[Property | 
     return None, "Add the property first, then the units."
 
 
-def ensure_unit(prop: Property, number: str, user, source: str) -> tuple[Unit, bool]:
+def ensure_unit(prop: Property, number: str, user, source: str, building: str = "") -> tuple[Unit, str]:
     number = normalize_unit(number)
+    building = clean_building(building)
     row = (
         Unit.query.filter_by(property_id=prop.id, unit_number=number)
         .filter(Unit.deleted_at.is_(None))
         .first()
     )
     if row:
-        return row, False
+        if building and not row.building:
+            row.building = building
+            return row, "assigned"
+        if building and row.building != building:
+            return row, "other"
+        return row, "kept"
     row = Unit(
         property_id=prop.id,
         unit_number=number,
+        building=building,
         created_by_id=user.id,
         created_at=utcnow(),
     )
     db.session.add(row)
     db.session.flush()
-    audit(user.id, source, "create", "unit", row.id, {}, {"unit_number": number, "property_id": prop.id})
-    return row, True
+    audit(
+        user.id,
+        source,
+        "create",
+        "unit",
+        row.id,
+        {},
+        {"unit_number": number, "building": building, "property_id": prop.id},
+    )
+    return row, "created"
 
 
-def add_units(user, prop: Property, text: str, source: str) -> dict:
+def add_units(user, prop: Property, text: str, source: str, building: str = "") -> dict:
+    problem = range_problem(text)
+    if problem:
+        return {"ok": False, "reply": problem}
     numbers = expand_unit_numbers(text)
     if not numbers:
-        return {"ok": False, "reply": "Which unit numbers? You can say 101, 102, 104-110."}
-    made = []
-    already = []
+        return {"ok": False, "reply": "Which unit numbers? You can say 1000-1020."}
+    building = clean_building(building)
+    made, assigned, already, other = [], [], [], []
     for number in numbers:
-        _row, created = ensure_unit(prop, number, user, source)
-        (made if created else already).append(number)
+        row, status = ensure_unit(prop, number, user, source, building=building)
+        if status == "created":
+            made.append(number)
+        elif status == "assigned":
+            assigned.append(number)
+        elif status == "other":
+            other.append(f"{number} is in {building_label(row.building)}")
+        else:
+            already.append(number)
     bits = []
     if made:
-        bits.append("Added " + ", ".join(made))
+        bits.append(describe_numbers(made, "Added"))
+    if assigned:
+        bits.append(describe_numbers(assigned, "Moved"))
     if already:
-        bits.append("Already there: " + ", ".join(already))
+        bits.append("Already there: " + ", ".join(already[:12]))
+    if other:
+        bits.append("Left where they were: " + "; ".join(other[:8]))
+    where = building_label(building)
+    place = f"{where} at {prop.name}" if where else prop.name
     who = person_label(user.id)
-    reply = f"{' '.join(bits)} at {prop.name}."
+    reply = f"{' '.join(bits)} in {place}." if where else f"{' '.join(bits)} at {prop.name}."
     if who:
         reply += f" Saved by {who}."
-    if made:
+    if made or assigned:
         from app.services.access import announce
 
-        announce(prop.id, user.id, f"{who or 'Someone'} added units {', '.join(made)} at {prop.name}.", f"/properties/{prop.id}")
-    return {"ok": True, "reply": reply, "property_id": prop.id}
+        announce(prop.id, user.id, f"{who or 'Someone'} added units in {place}.", f"/properties/{prop.id}")
+    return {"ok": True, "reply": reply, "property_id": prop.id, "building": building, "created": len(made)}
 
 
 def set_occupancy(user, unit: Unit, occupancy: str, source: str) -> None:
@@ -270,11 +339,11 @@ def apply_unit_board(user, payload, source) -> dict:
         return {"ok": False, "reply": "Which property?"}
     who = person_label(user.id)
     if action == "add_units":
-        return add_units(user, prop, payload.get("units") or "", source)
+        return add_units(user, prop, payload.get("units") or "", source, building=payload.get("building") or "")
     number = normalize_unit(payload.get("unit_number") or "")
     if not number:
         return {"ok": False, "reply": "Which unit number?"}
-    unit, _created = ensure_unit(prop, number, user, source)
+    unit, _status = ensure_unit(prop, number, user, source)
     if action == "occupancy":
         occupancy = (payload.get("occupancy") or "").strip()
         words = {"occupied": "occupied", "make_ready": "a make ready", "vacant": "vacant"}

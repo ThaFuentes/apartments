@@ -589,12 +589,13 @@ def property_detail(property_id):
     show = request.args.get("show") or ""
     if show not in ("", "worked", "make_ready", "occupied", "needs"):
         show = ""
+    building = (request.args.get("building") or "").strip()
     from app.services.board import recent_changes
     from app.services.geo import city_parts, place_title
     from app.services.people import person_label
 
     city_name, state = city_parts(prop.city.name, prop.city.region) if prop.city else ("", "")
-    packed = unit_cards(prop.id, sort=sort, query=request.args.get("q") or "", show=show)
+    packed = unit_cards(prop.id, sort=sort, query=request.args.get("q") or "", show=show, building=building)
     return render_template(
         "property.html",
         prop=prop,
@@ -606,6 +607,8 @@ def property_detail(property_id):
         unit_total=packed["total"],
         sort=sort,
         show=show,
+        building=packed["building"],
+        building_names=packed["building_names"],
         changes=recent_changes(prop.id),
         who=person_label,
         editable=can_edit_property(current_user, prop.id),
@@ -661,7 +664,7 @@ def property_add_unit(property_id):
 
     prop = require_edit(current_user, db.session.get(Property, property_id))
     blob = (request.form.get("units") or request.form.get("unit_number") or "").strip()
-    result = add_units(current_user, prop, blob, "human")
+    result = add_units(current_user, prop, blob, "human", building=request.form.get("building") or "")
     db.session.commit()
     flash(result.get("reply") or "Type the unit numbers.", "ok" if result.get("ok") else "warn")
     return redirect(f"/properties/{property_id}")

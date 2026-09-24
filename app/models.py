@@ -138,6 +138,7 @@ class Unit(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
     unit_number = db.Column(db.String(32), nullable=False)
+    building = db.Column(db.String(40), nullable=False, default="")
     occupancy = db.Column(db.String(20), nullable=False, default="")
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     deleted_at = db.Column(db.DateTime, nullable=True)

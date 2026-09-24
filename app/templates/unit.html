@@ -5,6 +5,8 @@
   <p><a href="/properties/{{ unit.property_id }}">{{ unit.property.name }}</a></p>
   <div class="hero">
     <h1>Unit {{ unit.unit_number }}</h1>
+    {% if unit.building %}<p class="kicker">Building {{ unit.building }}</p>{% endif %}
+    <p class="hint">{{ gear|length }} equipment · {{ tasks.get('part', [])|length }} parts · {{ tasks.get('vendor', [])|length }} vendored · {{ jobs|length }} labor</p>
     <p class="lead">
       {% if unit.occupancy == 'occupied' %}Occupied — someone lives here.
       {% elif unit.occupancy == 'make_ready' %}Make ready — this one still needs work.

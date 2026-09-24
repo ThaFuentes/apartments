@@ -1283,6 +1283,36 @@ Lubbock — 2 outside compressor installs"""
         db.session.commit()
         self.assertEqual(home_board(user.id, user)["jobs"], [])
 
+    def test_a_building_range_creates_every_unit(self):
+        from app.services.board import expand_unit_numbers
+        from app.services.records import ensure_property
+
+        self.assertEqual(len(expand_unit_numbers("1000-1020")), 21)
+        self.assertEqual(expand_unit_numbers("1000-1020")[0], "1000")
+        self.assertEqual(expand_unit_numbers("1000-1020")[-1], "1020")
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.commit()
+        heard = handle_message(user, "add building 1 units 1000-1002 at woodview", idempotency_key="bldg")
+        self.assertIn("Building 1", heard["reply"])
+        self.assertIn("1000–1002", heard["reply"])
+        self.assertIn("3 units", heard["reply"])
+        rows = Unit.query.filter_by(property_id=prop.id).filter(Unit.deleted_at.is_(None)).order_by(Unit.unit_number).all()
+        self.assertEqual([row.unit_number for row in rows], ["1000", "1001", "1002"])
+        self.assertTrue(all(row.building == "1" for row in rows))
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        page = client.get(f"/properties/{prop.id}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Building 1", page.data)
+        self.assertIn(b"1000", page.data)
+        self.assertIn(b"3 units", page.data)
+        unit_page = client.get(f"/units/{rows[0].id}")
+        self.assertIn(b"Building 1", unit_page.data)
+        self.assertIn(b"equipment", unit_page.data)
+        self.assertIn(b"labor", unit_page.data)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -397,6 +397,31 @@ def _file_trip_plan(user, text: str, key: str, source: str):
 
 def _board_payload(text: str) -> dict | None:
     raw = (text or "").strip().rstrip(".")
+    built = re.search(
+        r"\b(?:add|create)\s+building\s+([a-z0-9][a-z0-9-]{0,20})\s+units?\s+(.+?)\s+(?:at|to|in|on)\s+([a-z][a-z0-9']{3,40})\s*$",
+        raw,
+        re.I,
+    )
+    if not built:
+        built = re.search(
+            r"\bbuilding\s+([a-z0-9][a-z0-9-]{0,20})\s+(?:at|in)\s+([a-z][a-z0-9']{3,40})\s+(?:is\s+)?units?\s+(.+)$",
+            raw,
+            re.I,
+        )
+        if built:
+            return {
+                "action": "add_units",
+                "building": built.group(1),
+                "property_hint": built.group(2),
+                "units": built.group(3),
+            }
+    if built:
+        return {
+            "action": "add_units",
+            "building": built.group(1),
+            "units": built.group(2),
+            "property_hint": built.group(3),
+        }
     added = re.search(
         r"\badd\s+units?\s+(.+?)\s+(?:at|to|on|in)\s+([a-z][a-z0-9']{3,40})\s*$",
         raw,

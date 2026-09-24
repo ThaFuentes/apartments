@@ -9,8 +9,10 @@
   {% if editable %}
   <form method="post" action="/properties/{{ prop.id }}/units" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Add units <textarea name="units" placeholder="101, 102, 104-110" required></textarea></label>
-    <button type="submit">Add units</button>
+    <label>Building <input name="building" placeholder="1" autocomplete="off"></label>
+    <label>Units <textarea name="units" placeholder="1000-1020" required></textarea></label>
+    <p class="hint">1000-1020 in building 1 creates every unit in that building.</p>
+    <button type="submit">Add these units</button>
   </form>
   {% endif %}
   <label class="find-unit">Find a unit
@@ -23,20 +25,31 @@
     <a href="?show=make_ready" {% if show == "make_ready" %}aria-current="page"{% endif %}>Make ready</a>
     <a href="?show=occupied" {% if show == "occupied" %}aria-current="page"{% endif %}>Occupied</a>
     <a href="?show=needs" {% if show == "needs" %}aria-current="page"{% endif %}>Needs work</a>
+    {% for name in building_names %}
+    <a href="?building={{ name }}" {% if building == name %}aria-current="page"{% endif %}>Building {{ name }}</a>
+    {% endfor %}
   </div>
   {% if not cards %}
   <p class="empty">No units logged here yet.</p>
   {% endif %}
   <div class="stack" id="unit-list">
     {% for card in cards %}
-    <article class="unit-card{% if card.unit.occupancy == 'occupied' %} occupied{% elif card.unit.occupancy == 'make_ready' %} make-ready{% endif %}" data-unit-card data-number="{{ card.unit.unit_number }}">
+    {% if card.show_head %}
+    <h2>{{ card.building_label }}</h2>
+    <p class="hint">{{ card.rollup }}</p>
+    {% endif %}
+    <article class="unit-card{% if card.unit.occupancy == 'occupied' %} occupied{% elif card.unit.occupancy == 'make_ready' %} make-ready{% endif %}" data-unit-card data-number="{{ card.unit.unit_number }}" data-building="{{ card.unit.building }}">
       <a href="/units/{{ card.unit.id }}"><strong>{{ card.unit.unit_number }}</strong></a>
       <span class="unit-meta">
+        {% if card.unit.building %}Building {{ card.unit.building }} · {% endif %}
         {% if card.unit.occupancy == 'occupied' %}Occupied{% elif card.unit.occupancy == 'make_ready' %}Make ready{% else %}Open{% endif %}
         {% if card.last %} · Last worked {{ card.last|apt_when }}{% else %} · Nothing logged yet{% endif %}
         {% if card.last_title %} · {{ card.last_title }}{% endif %}
-        {% if card.job_count > 1 %} · {{ card.job_count }} jobs{% endif %}
         {% if card.open_tasks %} · {{ card.open_tasks }} to do{% endif %}
+        {% if card.gear_count %} · {{ card.gear_count }} equipment{% endif %}
+        {% if card.part_count %} · {{ card.part_count }} parts{% endif %}
+        {% if card.vendor_count %} · {{ card.vendor_count }} vendored{% endif %}
+        {% if card.job_count %} · {{ card.job_count }} labor{% endif %}
       </span>
       {% if card.gear_lines %}
       <span class="unit-gear">{% for line in card.gear_lines %}{{ line }}{% if not loop.last %} · {% endif %}{% endfor %}{% if card.gear_more %} · {{ card.gear_more }} more{% endif %}</span>
