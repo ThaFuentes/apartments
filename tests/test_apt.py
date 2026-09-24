@@ -42,6 +42,7 @@ TABLES = [
     "unit_visits",
     "media",
     "shifts",
+    "plan_items",
     "trip_properties",
     "trips",
     "units",
@@ -333,6 +334,58 @@ class AptTests(unittest.TestCase):
         handle_message(user, "drove 10 miles back", idempotency_key="d")
         handle_message(user, "yes, save it", idempotency_key="dy")
         self.assertEqual(traveled_total(user.id), 96.0)
+
+    def test_day_plan_and_what_she_actually_did(self):
+        from app.models import PlanItem, Trip
+
+        user = self.owner()
+        plan = """Tuesday plan in Odessa
+Woodview — Work order: coil leak in 210, water on the floor, check the drain and the shutoff
+Brookview — AC install
+Madison Sq — employee eval
+Lubbock — 2 outside compressor installs"""
+        proposed = handle_message(user, plan, idempotency_key="plan")
+        self.assertIn("Not saved yet", proposed["reply"])
+        self.assertEqual(Trip.query.count(), 0)
+        saved = handle_message(user, "yes, save it", idempotency_key="plan-yes")
+        self.assertEqual(Trip.query.count(), 1)
+        self.assertEqual(PlanItem.query.count(), 4)
+        self.assertIn("Woodview", saved["reply"])
+        lubbock = PlanItem.query.join(PlanItem.property).filter(Property.name == "Lubbock").one()
+        self.assertEqual(lubbock.planned_qty, 2)
+        self.assertEqual(lubbock.status, "open")
+        wood = PlanItem.query.join(PlanItem.property).filter(Property.name == "Woodview").one()
+        self.assertIn("coil leak", wood.detail)
+
+        handle_message(
+            user,
+            "At Lubbock I installed 1 of 2 outside compressor installs. They only had equipment for one.",
+            idempotency_key="part",
+        )
+        partial = handle_message(user, "yes, save it", idempotency_key="part-yes")
+        db.session.refresh(lubbock)
+        self.assertEqual(lubbock.done_qty, 1)
+        self.assertEqual(lubbock.status, "partial")
+        self.assertIn("still open", partial["reply"].lower())
+        self.assertEqual(Job.query.filter_by(property_id=lubbock.property_id).count(), 1)
+
+        handle_message(user, "Brookview AC install is done", idempotency_key="brook")
+        handle_message(user, "yes, save it", idempotency_key="brook-yes")
+        brook = PlanItem.query.join(PlanItem.property).filter(Property.name == "Brookview").one()
+        self.assertEqual(brook.status, "done")
+
+        handle_message(user, "Madison Sq employee eval was closed by Dana", idempotency_key="mad")
+        handle_message(user, "yes, save it", idempotency_key="mad-yes")
+        madison = PlanItem.query.join(PlanItem.property).filter(Property.name == "Madison Sq").one()
+        self.assertEqual(madison.status, "closed_by_other")
+        self.assertEqual(madison.closed_by_name, "Dana")
+
+        handle_message(user, "Woodview work order is no longer needed", idempotency_key="wood")
+        handle_message(user, "yes, save it", idempotency_key="wood-yes")
+        db.session.refresh(wood)
+        self.assertEqual(wood.status, "not_needed")
+        still = PlanItem.query.filter(PlanItem.status.in_(("open", "partial"))).count()
+        self.assertEqual(still, 1)
 
 
 if __name__ == "__main__":

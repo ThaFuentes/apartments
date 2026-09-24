@@ -8,6 +8,36 @@
   <h2>Before you roll</h2>
   <pre class="note">{{ trip.checklist }}</pre>
   {% endif %}
+  <h2>Plan</h2>
+  {% if not items %}
+  <p class="empty">No work lined up yet. In chat: Tuesday plan in Odessa, then one line per stop. Woodview — the work order. Brookview — AC install.</p>
+  {% endif %}
+  {% for item in items %}
+  <article class="card">
+    <h3>{{ item.property.name }} — {{ item.title }}</h3>
+    <p>{{ status_line(item) }}{% if item.planned_qty > 1 and item.status == 'open' %} · {{ item.planned_qty }} planned{% endif %}</p>
+    {% if item.detail %}<pre class="note">{{ item.detail }}</pre>{% endif %}
+    {% if item.outcome_note and item.status != 'open' %}<p>{{ item.outcome_note }}</p>{% endif %}
+    {% if current_user.role != 'viewer' and item.status in ['open', 'partial'] %}
+    <form method="post" action="/plan-items/{{ item.id }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>What happened
+        <select name="status">
+          <option value="done">I did all of it</option>
+          <option value="partial">I did some, leave the rest open</option>
+          <option value="closed_by_other">Someone else closed it</option>
+          <option value="not_needed">No longer needed</option>
+          <option value="open">Leave it open</option>
+        </select>
+      </label>
+      <label>How many I did <input name="done_qty" inputmode="numeric" placeholder="{{ item.done_qty }}"></label>
+      <label>Closed by <input name="closed_by" placeholder="Name, if someone else finished it"></label>
+      <label>Note <input name="note" placeholder="They only had equipment for 1"></label>
+      <button type="submit">Update this plan line</button>
+    </form>
+    {% endif %}
+  </article>
+  {% endfor %}
   <h2>Stops</h2>
   <ul class="list">
     {% for link in links %}

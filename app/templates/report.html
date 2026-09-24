@@ -8,6 +8,16 @@
   {% if report.kind == 'company' %}
   <p>Company review copy. Jobs she went for, what got done, units, miles, and gas, food, and other.</p>
   {% endif %}
+  <h2>Plan and what happened</h2>
+  {% if snapshot.plan %}
+  <ul>
+    {% for row in snapshot.plan %}
+    <li>{{ row.property }}: planned {{ row.planned_qty }} {{ row.title }}. {{ row.result }}{% if row.note %} — {{ row.note }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No plan lines in this period.</p>
+  {% endif %}
   <h2>Went for and completed</h2>
   <ul>
     <li>Jobs on the week: {{ snapshot.totals.jobs_went }}</li>

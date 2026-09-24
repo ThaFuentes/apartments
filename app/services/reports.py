@@ -15,6 +15,7 @@ from app.models import (
     MileageLeg,
     Property,
     Report,
+    PlanItem,
     Trip,
     TripProperty,
     Unit,
@@ -24,6 +25,29 @@ from app.models import (
 from app.services.clock import local_today, money, utcnow, week_bounds
 
 KINDS = ("weekly", "company", "property", "adhoc")
+
+
+def _plan_lines(start, end) -> list[dict]:
+    from app.services.plan import status_line
+
+    rows = []
+    items = PlanItem.query.filter(PlanItem.deleted_at.is_(None)).all()
+    for item in items:
+        trip = item.trip
+        if not trip or not trip.starts_on or not (start <= trip.starts_on <= end):
+            continue
+        rows.append(
+            {
+                "property": item.property.name if item.property else "",
+                "title": item.title,
+                "planned_qty": item.planned_qty,
+                "done_qty": item.done_qty,
+                "status": item.status,
+                "result": status_line(item),
+                "note": item.outcome_note or "",
+            }
+        )
+    return rows
 
 
 def owner_profile() -> AssistantProfile | None:
@@ -293,6 +317,7 @@ def build_snapshot(
             "other": spend(week_exp, "other"),
             "lines": lines,
         },
+        "plan": _plan_lines(start, end),
         "handoffs": handoffs[:12],
         "followups": followups,
         "prior": {
@@ -360,7 +385,15 @@ def render_markdown(snapshot: dict) -> str:
             note = f" — {job['notes']}" if job.get("notes") else ""
             lines.append(f"- {unit}{job.get('title')} ({job.get('status')}){note}")
         lines.append("")
-    lines += ["## Miles", ""]
+    lines += ["## Plan and what happened", ""]
+    if snapshot.get("plan"):
+        for row in snapshot["plan"]:
+            lines.append(
+                f"- {row.get('property')}: planned {row.get('planned_qty')} {row.get('title')}. {row.get('result')}"
+            )
+    else:
+        lines.append("No plan lines in this period.")
+    lines += ["", "## Miles", ""]
     lines.append(f"Estimate {miles.get('estimate') or 0} miles.")
     if miles.get("actual"):
         lines.append(f"Actual {miles.get('actual')} miles.")

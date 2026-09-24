@@ -11,6 +11,16 @@
     <li><a href="/trips/{{ trip.id }}"><strong>{{ trip.title }}</strong> {{ trip.starts_on or '' }} · {{ trip.status }}{% if trip.miles_estimate %} · {{ trip.miles_estimate }} mi{% endif %}</a></li>
     {% endfor %}
   </ul>
+  <h2>Still on the plan</h2>
+  {% if not open_plan %}
+  <p>Nothing is waiting. A Tuesday plan stays here until you mark it done, leave it open, say someone else closed it, or say it is no longer needed.</p>
+  {% else %}
+  <ul class="list">
+    {% for item in open_plan %}
+    <li><a href="/trips/{{ item.trip_id }}">{{ item.property.name }} — {{ item.title }}</a> · {% if item.status == 'partial' %}did {{ item.done_qty }} of {{ item.planned_qty }}, rest open{% else %}open{% if item.planned_qty > 1 %}, {{ item.planned_qty }} planned{% endif %}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
   <h2>Follow-up</h2>
   {% if not followups %}
   <p>Nothing is waiting on a return visit.</p>

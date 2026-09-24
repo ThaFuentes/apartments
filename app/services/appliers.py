@@ -163,6 +163,10 @@ def apply_plan_trip(user, payload, source) -> dict:
         {},
         {"title": trip.title, "starts_on": starts_on.isoformat(), "property_id": prop.id, "miles_estimate": miles},
     )
+    if purpose:
+        from app.services.plan import ensure_plan_item
+
+        ensure_plan_item(trip, prop, purpose[:200], "", 1, user.id, source)
     miles_bit = f" About {miles} miles from home — you can change that." if miles is not None else " Miles are blank until the pin or home base is set. You can type them."
     pin_bit = " Pin is on the map." if prop.lat is not None else " No map pin yet. Add an address when you have it."
     return {
@@ -171,6 +175,18 @@ def apply_plan_trip(user, payload, source) -> dict:
         "trip_id": trip.id,
         "property_id": prop.id,
     }
+
+
+def apply_plan_day(user, payload, source) -> dict:
+    from app.services.plan import save_plan_day
+
+    return save_plan_day(user, payload, _src(source))
+
+
+def apply_plan_outcome(user, payload, source) -> dict:
+    from app.services.plan import apply_outcome
+
+    return apply_outcome(user, payload, _src(source))
 
 
 def apply_update_trip(user, payload, source) -> dict:
@@ -373,6 +389,11 @@ def apply_record_unit_visit(user, payload, source) -> dict:
         job_id = job.id
         db.session.add(JobEvent(job_id=job.id, body=title, actor_id=user.id, source=source, created_at=utcnow()))
         audit(user.id, source, "create", "job", job.id, {}, {"title": job.title, "unit": number, "status": job.status})
+        plan_note = ""
+        if job.status == "done":
+            from app.services.plan import note_work_against_plan
+
+            plan_note = note_work_against_plan(user, shift.property_id, title, source)
         if payload.get("media_id"):
             media = db.session.get(Media, int(payload["media_id"]))
             if media and media.user_id == user.id:
@@ -389,7 +410,7 @@ def apply_record_unit_visit(user, payload, source) -> dict:
     bit = f" {equip or title}." if (equip or title) else ""
     return {
         "ok": True,
-        "reply": f"{word} unit {number}.{bit}",
+        "reply": f"{word} unit {number}.{bit}{plan_note if title and status != 'skipped' else ''}",
         "unit_id": unit.id,
         "job_id": job_id,
         "visit_id": visit.id,
@@ -999,6 +1020,8 @@ def apply_update_settings(user, payload, source) -> dict:
 
 APPLIERS = {
     "plan_trip": apply_plan_trip,
+    "plan_day": apply_plan_day,
+    "plan_outcome": apply_plan_outcome,
     "update_trip": apply_update_trip,
     "upsert_property": apply_upsert_property,
     "record_unit_visit": apply_record_unit_visit,

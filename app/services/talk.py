@@ -231,6 +231,14 @@ def _summary(tool: str, payload: dict) -> tuple[str, str]:
             f"Stage a trip to {payload.get('property_name')} in {payload.get('city')}. Not saved yet.",
             "material",
         )
+    if tool == "plan_day":
+        from app.services.plan import summarize_plan
+
+        return (summarize_plan(payload), "material")
+    if tool == "plan_outcome":
+        from app.services.plan import summarize_outcome
+
+        return (summarize_outcome(payload), "material")
     if tool == "record_unit_visit":
         from app.services.equipment import describe
 
@@ -264,6 +272,21 @@ def interpret(user, text: str, key: str, source: str) -> dict:
     merged = _merge_open_question(user, text, key, source)
     if merged:
         return merged
+    profile = site_profile()
+    today = local_today(profile.timezone if profile else None)
+    from app.services.plan import parse_outcome_text, parse_plan_text, summarize_outcome, summarize_plan
+
+    planned = parse_plan_text(
+        text,
+        today,
+        profile.default_city if profile else "",
+        profile.default_region if profile else "",
+    )
+    if planned:
+        return propose(user, "plan_day", planned, summarize_plan(planned), "material", key, key, source)
+    outcome = parse_outcome_text(text) if not UNIT_JOB.search(text.strip()) else None
+    if outcome:
+        return propose(user, "plan_outcome", outcome, summarize_outcome(outcome), "material", key, key, source)
     going = GOING.search(text.strip())
     if going:
         return _plan_from_phrase(user, going, key, source)

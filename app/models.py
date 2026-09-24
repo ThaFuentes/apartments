@@ -173,6 +173,33 @@ class TripProperty(db.Model):
     property = db.relationship("Property")
 
 
+class PlanItem(db.Model):
+    """What she meant to do, kept next to what actually happened."""
+
+    __tablename__ = "plan_items"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    trip_id = db.Column(db.Integer, db.ForeignKey("trips.id", ondelete="CASCADE"), nullable=False)
+    property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    detail = db.Column(db.Text, nullable=False, default="")
+    planned_qty = db.Column(db.Integer, nullable=False, default=1)
+    done_qty = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(24), nullable=False, default="open")
+    outcome_note = db.Column(db.Text, nullable=False, default="")
+    closed_by_name = db.Column(db.String(120), nullable=False, default="")
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    source = db.Column(db.String(16), nullable=False, default="human")
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+    trip = db.relationship("Trip")
+    property = db.relationship("Property")
+
+
 class Shift(db.Model):
     """On-site context. The first unit/job write waits on confirmed=True."""
 

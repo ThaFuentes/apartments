@@ -4,7 +4,7 @@
 <section class="chat">
   <div class="thread" id="thread">
     {% if not messages %}
-    <p class="empty">Try: I'm going to Woodview Odessa Thursday for AC evals.</p>
+    <p class="empty">Try: Tuesday plan in Odessa. Then one line each — Woodview — work order, Brookview — AC install, Madison Sq — employee eval. Later, say what you actually did.</p>
     {% endif %}
     {% for msg in messages %}
     <p class="bubble {{ msg.role }}">{{ msg.body }}</p>

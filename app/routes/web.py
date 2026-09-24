@@ -331,9 +331,16 @@ def miles_save():
 def trips():
     if not _history_ok():
         abort(403)
+    from app.models import PlanItem
+
     rows = Trip.query.filter(Trip.deleted_at.is_(None)).order_by(Trip.starts_on.desc(), Trip.id.desc()).all()
     followups = Job.query.filter(Job.deleted_at.is_(None), Job.status.in_(("followup", "blocked"))).order_by(Job.id.desc()).all()
-    return render_template("trips.html", trips=rows, followups=followups)
+    open_plan = (
+        PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial")))
+        .order_by(PlanItem.id.asc())
+        .all()
+    )
+    return render_template("trips.html", trips=rows, followups=followups, open_plan=open_plan)
 
 
 @bp.get("/trips/<int:trip_id>")
@@ -344,8 +351,49 @@ def trip_detail(trip_id):
     trip = db.session.get(Trip, trip_id)
     if not trip or trip.deleted_at:
         abort(404)
+    from app.models import PlanItem
+    from app.services.plan import status_line
+
     links = TripProperty.query.filter_by(trip_id=trip.id).order_by(TripProperty.sort_order.asc()).all()
-    return render_template("trip.html", trip=trip, links=links)
+    items = (
+        PlanItem.query.filter_by(trip_id=trip.id)
+        .filter(PlanItem.deleted_at.is_(None))
+        .order_by(PlanItem.sort_order.asc(), PlanItem.id.asc())
+        .all()
+    )
+    return render_template("trip.html", trip=trip, links=links, items=items, status_line=status_line)
+
+
+@bp.post("/plan-items/<int:item_id>")
+@login_required
+def plan_mark(item_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.models import PlanItem
+    from app.services.pending import commit_apply
+
+    item = db.session.get(PlanItem, item_id)
+    if not item or item.deleted_at:
+        abort(404)
+    status = request.form.get("status") or "done"
+    payload = {
+        "item_id": item.id,
+        "status": status,
+        "note": request.form.get("note") or "",
+        "closed_by": request.form.get("closed_by") or "",
+    }
+    if request.form.get("done_qty"):
+        payload["done_qty"] = int(request.form.get("done_qty"))
+        payload["status"] = "partial"
+    result = commit_apply(
+        current_user,
+        "plan_outcome",
+        payload,
+        "human",
+        _key() or f"plan-{item_id}-{status}-{_new_key()}",
+    )
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect(f"/trips/{item.trip_id}")
 
 
 @bp.post("/trips/<int:trip_id>/miles")
