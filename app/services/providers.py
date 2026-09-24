@@ -237,7 +237,7 @@ def chat_with_tools(row, text: str, timeout: int = 25) -> dict:
     messages = [
         {
             "role": "system",
-            "content": "You help one regional manager. Her message starts with her record. Answer questions from that record in plain language, including why two properties match. Use tools to add, edit, or delete. delete_property and update_property take the property id. Do not say there is no matching job when she asked about a property.",
+            "content": "You help one regional manager. The message names you and says how to talk. Follow that name and tone. Her record is in the message. Answer questions from that record. Use tools to add, edit, or delete. delete_property and update_property take the property id. Do not say there is no matching job when she asked about a property.",
         },
         {"role": "user", "content": text},
     ]
@@ -336,6 +336,27 @@ def keys_for(user) -> list:
     return usable
 
 
+def voice_brief() -> str:
+    """Name and tone from Settings. This is what the chat is supposed to sound like."""
+    from app.services.records import site_profile
+
+    profile = site_profile()
+    name = ((profile.assistant_name if profile else "") or "Apt").strip() or "Apt"
+    tone = ((profile.tone if profile else "") or "").strip()
+    ask = ((profile.always_ask if profile else "") or "").strip()
+    voice = ((profile.report_voice if profile else "") or "").strip()
+    lines = [f"Your name is {name}. Use that name if you introduce yourself."]
+    if tone:
+        lines.append(f"Talk this way: {tone}.")
+    if ask:
+        lines.append(f"Always ask about: {ask}.")
+    else:
+        lines.append("Do not add extra questions.")
+    if voice:
+        lines.append(f"When a report is written, use this voice: {voice}.")
+    return "\n".join(lines)
+
+
 def record_brief() -> str:
     """What she already has, so the model can see duplicates instead of guessing."""
     from app.models import Equipment, Job, Property
@@ -369,7 +390,7 @@ def collect_tool_calls(user, text: str):
     rows = keys_for(user)
     if not rows:
         return None
-    prompt = record_brief() + "\n\nShe said: " + (text or "")
+    prompt = voice_brief() + "\n\n" + record_brief() + "\n\nShe said: " + (text or "")
     notes = []
     for row in rows:
         if getattr(row, "backoff_until", None) and row.backoff_until > utcnow():

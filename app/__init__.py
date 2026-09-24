@@ -193,6 +193,15 @@ def create_app() -> Flask:
         import secrets as _secrets
 
         chat_key = _secrets.token_hex(8)
+        assistant_name = "Apt"
+        try:
+            from app.services.records import site_profile
+
+            profile = site_profile()
+            if profile and (profile.assistant_name or "").strip():
+                assistant_name = profile.assistant_name.strip()
+        except Exception:
+            assistant_name = "Apt"
         return {
             "csrf_token": token,
             "SITE_MODE": "apt",
@@ -205,6 +214,7 @@ def create_app() -> Flask:
             "pending_n": pending_n,
             "chat_lines": chat_lines,
             "chat_key": chat_key,
+            "assistant_name": assistant_name,
             "drive": bool(request.cookies.get("apt_drive") == "1"),
         }
 

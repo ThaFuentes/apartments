@@ -1,9 +1,9 @@
-<div class="thread" id="thread">
+<div class="thread" id="thread" data-assistant="{{ assistant_name or 'Apt' }}">
   {% if not chat_lines %}
-  <p class="bubble assistant"><span class="who">Apt</span>Hi. Tell me a site, what you did, or ask what's on your record. I'll answer right here.</p>
+  <p class="bubble assistant"><span class="who">{{ assistant_name or "Apt" }}</span>Hi. I'm {{ assistant_name or "Apt" }}. Tell me a site, what you did, or ask what's on your record.</p>
   {% endif %}
   {% for msg in chat_lines %}
-  <p class="bubble {{ msg.role }}">{% if msg.role == 'assistant' %}<span class="who">Apt</span>{% endif %}{{ msg.body }}{% if msg.created_at %}<time>{{ msg.created_at|chat_clock }}</time>{% endif %}</p>
+  <p class="bubble {{ msg.role }}">{% if msg.role == 'assistant' %}<span class="who">{{ assistant_name or "Apt" }}</span>{% endif %}{{ msg.body }}{% if msg.created_at %}<time>{{ msg.created_at|chat_clock }}</time>{% endif %}</p>
   {% endfor %}
 </div>
 <form method="post" action="/chat" enctype="multipart/form-data" class="composer" id="composer">

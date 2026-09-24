@@ -8,25 +8,47 @@
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
-    <label>Assistant name <input name="assistant_name" value="{{ profile.assistant_name if profile else 'Apt' }}"></label>
-    <label>Tone <input name="tone" value="{{ profile.tone if profile else '' }}"></label>
-    <label>Always ask <textarea name="always_ask" rows="3">{{ profile.always_ask if profile else '' }}</textarea></label>
-    <label>Default city <input name="default_city" value="{{ profile.default_city if profile else '' }}"></label>
-    <label>Region <input name="default_region" value="{{ profile.default_region if profile else '' }}"></label>
-    <label>Your name on reports <input name="reporter_name" value="{{ current_user.display_name or current_user.username }}" placeholder="The person who prepared the report"></label>
-    <label>Company name <input name="company_name" value="{{ profile.company_name if profile else '' }}" placeholder="Shown on boss reports"></label>
-    <label>Report voice <input name="report_voice" value="{{ profile.report_voice if profile else '' }}"></label>
-    <label>Home base <input name="home_label" value="{{ profile.home_label if profile else '' }}"></label>
-    <label>Home latitude <input name="home_lat" value="{{ profile.home_lat if profile and profile.home_lat is not none else '' }}"></label>
-    <label>Home longitude <input name="home_lng" value="{{ profile.home_lng if profile and profile.home_lng is not none else '' }}"></label>
-    <label>Timezone <input name="timezone" value="{{ profile.timezone if profile else 'America/Chicago' }}"></label>
-    <h2>Email for reports</h2>
-    <p class="lead">This is the mailbox Apt uses to send a report. The password is saved encrypted. Leave it blank to keep the one already stored.</p>
-    <label>Mail server <input name="smtp_host" value="{{ profile.smtp_host if profile else '' }}" placeholder="smtp.gmail.com" autocomplete="off"></label>
-    <label>Port <input name="smtp_port" value="{{ profile.smtp_port if profile and profile.smtp_port else 587 }}" inputmode="numeric"></label>
-    <label>Username <input name="smtp_user" value="{{ profile.smtp_user if profile else '' }}" autocomplete="off"></label>
-    <label>Password <input name="smtp_password" type="password" autocomplete="new-password" placeholder="{% if profile and profile.smtp_password_ciphertext %}Saved. Type a new one to replace it{% else %}Mailbox password{% endif %}"></label>
-    <label>From address <input name="smtp_from" value="{{ profile.smtp_from if profile else '' }}" placeholder="reports@yourcompany.com" autocomplete="off"></label>
+    <details open>
+      <summary>Assistant</summary>
+      <div class="card stack">
+        <p class="lead">This is the chat. The name here is who answers. Tone is how that chat talks to you.</p>
+        <label>Name <input name="assistant_name" value="{{ profile.assistant_name if profile else 'Apt' }}"></label>
+        <label>How it talks <input name="tone" value="{{ profile.tone if profile else '' }}" placeholder="talking to my boss"></label>
+        <label>Always ask <textarea name="always_ask" rows="3" placeholder="Leave blank if it should not add questions">{{ profile.always_ask if profile else '' }}</textarea></label>
+      </div>
+    </details>
+    <details>
+      <summary>Places and home</summary>
+      <div class="card stack">
+        <p class="lead">Used when a new place has no city, and for miles from home.</p>
+        <label>Default city <input name="default_city" value="{{ profile.default_city if profile else '' }}"></label>
+        <label>Region <input name="default_region" value="{{ profile.default_region if profile else '' }}" placeholder="TX"></label>
+        <label>Home base <input name="home_label" value="{{ profile.home_label if profile else '' }}"></label>
+        <label>Home latitude <input name="home_lat" value="{{ profile.home_lat if profile and profile.home_lat is not none else '' }}"></label>
+        <label>Home longitude <input name="home_lng" value="{{ profile.home_lng if profile and profile.home_lng is not none else '' }}"></label>
+        <label>Timezone <input name="timezone" value="{{ profile.timezone if profile else 'America/Chicago' }}"></label>
+      </div>
+    </details>
+    <details>
+      <summary>Reports</summary>
+      <div class="card stack">
+        <p class="lead">Your name is who prepared the report. Report voice is how the written copy sounds. It does not change the chat.</p>
+        <label>Your name on reports <input name="reporter_name" value="{{ current_user.display_name or current_user.username }}"></label>
+        <label>Company name <input name="company_name" value="{{ profile.company_name if profile else '' }}"></label>
+        <label>Report voice <input name="report_voice" value="{{ profile.report_voice if profile else '' }}" placeholder="plain, for a company reader"></label>
+      </div>
+    </details>
+    <details>
+      <summary>Email for reports</summary>
+      <div class="card stack">
+        <p class="lead">The mailbox that sends a report. The password is saved encrypted. Leave it blank to keep the one already stored.</p>
+        <label>Mail server <input name="smtp_host" value="{{ profile.smtp_host if profile else '' }}" placeholder="smtp.gmail.com" autocomplete="off"></label>
+        <label>Port <input name="smtp_port" value="{{ profile.smtp_port if profile and profile.smtp_port else 587 }}" inputmode="numeric"></label>
+        <label>Username <input name="smtp_user" value="{{ profile.smtp_user if profile else '' }}" autocomplete="off"></label>
+        <label>Password <input name="smtp_password" type="password" autocomplete="new-password" placeholder="{% if profile and profile.smtp_password_ciphertext %}Saved. Type a new one to replace it{% else %}Mailbox password{% endif %}"></label>
+        <label>From address <input name="smtp_from" value="{{ profile.smtp_from if profile else '' }}" placeholder="reports@yourcompany.com" autocomplete="off"></label>
+      </div>
+    </details>
     <button type="submit">Save settings</button>
   </form>
   <h2>AI keys</h2>

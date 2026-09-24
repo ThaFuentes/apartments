@@ -167,7 +167,7 @@
     if (role === "assistant") {
       const who = document.createElement("span");
       who.className = "who";
-      who.textContent = "Apt";
+      who.textContent = (document.getElementById("thread") || {}).getAttribute("data-assistant") || "Apt";
       bubble.appendChild(who);
     }
     bubble.appendChild(document.createTextNode(text));

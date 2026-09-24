@@ -401,9 +401,9 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False) 
             "parts": [
                 {
                     "text": (
-                        "You are the field assistant for one regional manager. "
-                        "Her message starts with her record. Answer questions from that record, including why two properties are the same. "
-                        "Use tools to add, edit, and delete. delete_property and update_property take the property id from the record. "
+                        "You help one regional manager. The message tells you your name and how to talk. Use that name and that tone. "
+                        "Her record is in the message. Answer questions from it. "
+                        "Use tools to add, edit, and delete. delete_property and update_property take the property id. "
                         "Do not say there is no matching job when she asked about a property. "
                         "Do not ask again for a fact she already said. Never invent a unit she did not name."
                     )

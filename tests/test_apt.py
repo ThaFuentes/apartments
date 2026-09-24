@@ -698,6 +698,19 @@ Lubbock — 2 outside compressor installs"""
         )
         self.assertIn("Prepared by Maria Fuentes.", text)
 
+    def test_chat_uses_the_assistant_name(self):
+        from app.services.providers import voice_brief
+        from app.services.records import site_profile
+
+        self.owner()
+        profile = site_profile()
+        profile.assistant_name = "Christopher"
+        profile.tone = "talking to my boss"
+        db.session.commit()
+        heard = voice_brief()
+        self.assertIn("Your name is Christopher.", heard)
+        self.assertIn("talking to my boss", heard)
+
     def test_its_at_saves_the_looked_up_address(self):
         user = self.owner()
         hit = {
