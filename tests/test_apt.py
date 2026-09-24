@@ -1313,6 +1313,35 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn(b"equipment", unit_page.data)
         self.assertIn(b"labor", unit_page.data)
 
+    def test_one_sentence_makes_an_office_manager_for_those_properties(self):
+        from app.models import PropertyAccess
+        from app.services.people import find_user
+        from app.services.records import ensure_property
+
+        owner = self.owner()
+        wood = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        brook = ensure_property("Brookview", "Odessa", "Texas", owner.id)
+        madison = ensure_property("Madison Sq", "Lubbock", "Texas", owner.id)
+        db.session.commit()
+        heard = handle_message(
+            owner,
+            "create office manager jasmine who can edit units on woodview and brookview and be notified on woodview",
+            idempotency_key="office-j",
+        )
+        self.assertIn("office manager", heard["reply"])
+        self.assertIn("Woodview", heard["reply"])
+        self.assertIn("Brookview", heard["reply"])
+        self.assertIn("Temporary password", heard["reply"])
+        jasmine = find_user("jasmine")
+        self.assertEqual(jasmine.role, "field")
+        wood_row = PropertyAccess.query.filter_by(user_id=jasmine.id, property_id=wood.id).one()
+        brook_row = PropertyAccess.query.filter_by(user_id=jasmine.id, property_id=brook.id).one()
+        self.assertTrue(wood_row.can_edit)
+        self.assertTrue(wood_row.notify)
+        self.assertTrue(brook_row.can_edit)
+        self.assertFalse(brook_row.notify)
+        self.assertIsNone(PropertyAccess.query.filter_by(user_id=jasmine.id, property_id=madison.id).first())
+
 
 if __name__ == "__main__":
     unittest.main()

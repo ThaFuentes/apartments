@@ -250,11 +250,121 @@ def _online_address(place: dict) -> dict:
 
 def _role_word(word: str) -> str:
     word = (word or "").lower()
-    if word in ("employee", "field", "user"):
+    if word in ("employee", "field", "user", "office manager"):
         return "field"
     if word == "owner":
         return "owner"
     return "viewer"
+
+
+_ROLE_NAMES = r"office manager|employee|boss|viewer|owner|field"
+_STAFF_ROLE_FIRST = re.compile(
+    rf"\b(?:create|add|make)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?({_ROLE_NAMES})\s+(?:named\s+|called\s+|user\s+)?([a-z][a-z0-9._-]{{1,40}})",
+    re.I,
+)
+_STAFF_NAME_FIRST = re.compile(
+    rf"\b(?:create|add|make)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:user|login|person)\s+(?:named\s+|called\s+)?([a-z][a-z0-9._-]{{1,40}})\s+as\s+(?:an?\s+)?({_ROLE_NAMES})",
+    re.I,
+)
+
+
+def _staff_clauses(rest: str) -> list[tuple[str, list[str]]]:
+    rest = re.sub(r"^(?:who|that|she|he|they)\s+", "", (rest or "").strip(), flags=re.I)
+    rest = re.sub(r"^can\s+(?:do\s+)?(?:her\s+|his\s+|their\s+)?", "", rest, flags=re.I)
+    parts = re.split(
+        r"\s*,\s*|\s+and\s+(?=(?:also\s+)?(?:be\s+notified|see|edit|view|notify)\b)",
+        rest,
+        flags=re.I,
+    )
+    clauses = []
+    for part in parts:
+        part = part.strip(" .")
+        if not part:
+            continue
+        if re.search(r"\b(edit|change)\b", part, re.I):
+            mode = "edit"
+        elif re.search(r"\bnotif", part, re.I):
+            mode = "notify"
+        elif re.search(r"\b(see|view|read)\b", part, re.I):
+            mode = "see"
+        else:
+            mode = ""
+        place_text = re.sub(
+            r"^(?:also\s+)?(?:be\s+notified|see|edit|view|notify|change)(?:\s+units?)?(?:\s+(?:on|at|for))?\s*",
+            "",
+            part,
+            count=1,
+            flags=re.I,
+        )
+        place_text = re.sub(r"\b(permissions?|access|units?)\b", " ", place_text, flags=re.I)
+        hints = []
+        for bit in re.split(r"\s*,\s*|\s+and\s+", place_text):
+            hint = bit.strip(" .")
+            if len(re.sub(r"[^a-z0-9]", "", hint)) >= 4:
+                hints.append(hint)
+        if hints:
+            clauses.append((mode, hints))
+    return clauses
+
+
+def _staff_from_sentence(actor, text: str, key: str, source: str):
+    raw = (text or "").strip().rstrip(".")
+    named = _STAFF_NAME_FIRST.search(raw)
+    role_first = _STAFF_ROLE_FIRST.search(raw)
+    if named:
+        username, role_word, tail_at = named.group(1), named.group(2), named.end()
+    elif role_first:
+        role_word, username, tail_at = role_first.group(1), role_first.group(2), role_first.end()
+    else:
+        return None
+    if actor.role != "owner":
+        return {"ok": False, "reply": "Only the owner creates logins."}
+    role = _role_word(role_word)
+    office = role_word.lower() == "office manager"
+    title = "office manager" if office else "employee" if role == "field" else "boss" if role == "viewer" else "owner"
+    clauses = _staff_clauses(raw[tail_at:])
+    if office and not any(mode == "see" for mode, _hints in clauses):
+        clauses = [(mode or "edit", hints) for mode, hints in clauses]
+    from app.services.people import create_user, find_user
+    from app.services.access import grant_from_words
+
+    person = find_user(username)
+    generated = ""
+    if person:
+        opened = f"{person.display_name or person.username} already has a login."
+    else:
+        try:
+            person, generated = create_user(
+                username=username,
+                password=(PASSWORD.search(raw).group(1) if PASSWORD.search(raw) else ""),
+                display_name=username.replace(".", " ").replace("_", " ").title(),
+                role=role,
+                email=(EMAIL.search(raw).group(0) if EMAIL.search(raw) else None),
+                created_by=actor,
+                can_see_reports=bool(re.search(r"\breports?\b", raw, re.I)),
+                can_see_history=True,
+                can_see_live_map=bool(re.search(r"\b(live map|the map)\b", raw, re.I)),
+            )
+        except ValueError as exc:
+            return {"ok": False, "reply": str(exc)}
+        opened = f"{person.display_name} is {title}."
+    lines = [opened]
+    for mode, hints in clauses:
+        edit = True if mode == "edit" else False if mode == "see" else None
+        notify = True if mode == "notify" else None
+        if edit and person.role != "field":
+            lines.append(f"{person.display_name} can see properties, not edit them, while she is a boss.")
+            edit = False
+        for hint in hints:
+            result = grant_from_words(actor, person.username, hint, see=True, edit=edit, notify=notify)
+            if result.get("reply"):
+                lines.append(result["reply"])
+    if generated:
+        lines.append(f"Sign-in is {person.username}. Temporary password: {generated}.")
+    elif not clauses:
+        lines.append("Say which properties, like edit units on Woodview.")
+    db.session.commit()
+    return {"ok": True, "reply": " ".join(lines)}
 
 
 def _file_access(user, text: str, key: str, source: str):
@@ -309,6 +419,9 @@ def _file_access(user, text: str, key: str, source: str):
 
 
 def _person_to_add(user, text: str, key: str, source: str):
+    staff = _staff_from_sentence(user, text, key, source)
+    if staff:
+        return staff
     named = AS_ROLE.search(text or "")
     role_first = ADD_USER.search(text or "")
     if named:
