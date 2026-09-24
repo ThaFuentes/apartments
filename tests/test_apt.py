@@ -1558,7 +1558,7 @@ Lubbock — 2 outside compressor installs"""
         db.session.commit()
         tried = []
 
-        def fake(row, text, timeout=25):
+        def fake(row, text, timeout=25, history=None):
             tried.append(row.provider)
             if row.provider == "gemini":
                 return {"ok": False, "quota": True, "seconds": 30}
@@ -1576,7 +1576,7 @@ Lubbock — 2 outside compressor installs"""
         db.session.commit()
         tried.clear()
 
-        def all_down(row, text, timeout=25):
+        def all_down(row, text, timeout=25, history=None):
             tried.append(row.provider)
             return {"ok": False, "quota": True, "seconds": 30}
 
@@ -1644,6 +1644,43 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn("Updated", edited["reply"])
         db.session.refresh(wood)
         self.assertIn("4330 N Grandview", wood.address)
+
+    def test_the_model_sees_the_last_messages(self):
+        from app.models import ChatMessage
+
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.add(ChatMessage(user_id=user.id, role="user", body="create a property in lubbock", created_at=utcnow()))
+        db.session.add(ChatMessage(user_id=user.id, role="assistant", body="What's the street address?", created_at=utcnow()))
+        db.session.add(ChatMessage(user_id=user.id, role="user", body="4330 N Grandview Ave Lubbock Texas", created_at=utcnow()))
+        db.session.commit()
+        seen = {}
+
+        def fake(row, text, timeout=25, history=None):
+            seen["history"] = history or []
+            seen["text"] = text
+            return {"ok": True, "text": "What's the property name in Lubbock?", "calls": []}
+
+        with patch("app.services.providers.chat_with_tools", side_effect=fake):
+            heard = handle_message(user, "create property", idempotency_key="thread")
+        bodies = [turn["body"] for turn in seen["history"]]
+        self.assertIn("create a property in lubbock", bodies)
+        self.assertIn("4330 N Grandview Ave Lubbock Texas", bodies)
+        self.assertIn("create property", seen["text"])
+        self.assertNotIn("create property", "\n".join(bodies))
+        self.assertIn("name", heard["reply"].lower())
+        self.assertLessEqual(len(seen["history"]), 5)
 
 
 if __name__ == "__main__":

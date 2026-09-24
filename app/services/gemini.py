@@ -406,6 +406,8 @@ CHAT_RULES = (
     "Edit, change, or correct uses update_property on the property she already has. Do not create a second one. "
     "Delete all of a name removes every match. If several match and she did not say all, list them with the city. "
     "A typed street address is the address. Do not say you searched and could not find it. "
+    "The earlier messages are this same chat. Do not ask again for a city, address, or name she already gave. "
+    "When the apartment name and the city are both in the thread, call upsert_property once and include any street she already typed. "
     "Do not say there is no matching job unless she asked about a job."
 )
 
@@ -416,10 +418,10 @@ class QuotaError(Exception):
         self.seconds = seconds
 
 
-def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False) -> dict:
+def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False, contents: list | None = None) -> dict:
     url = f"{BASE}/models/{model}:generateContent"
     body: dict = {
-        "contents": [{"role": "user", "parts": parts}],
+        "contents": contents or [{"role": "user", "parts": parts}],
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1600},
     }
     if tools:
@@ -559,9 +561,27 @@ def read_nameplate(api_key: str, model: str, image: bytes, mime: str = "image/jp
     return parsed
 
 
-def complete(api_key: str, model: str, text: str, timeout: int = 25) -> dict:
+def _contents(history: list | None, text: str) -> list:
+    contents = []
+    for turn in history or []:
+        body = (turn.get("body") or "").strip()
+        if not body:
+            continue
+        role = "model" if turn.get("role") == "assistant" else "user"
+        if contents and contents[-1]["role"] == role:
+            contents[-1]["parts"][0]["text"] += "\n" + body
+        else:
+            contents.append({"role": role, "parts": [{"text": body}]})
+    if contents and contents[-1]["role"] == "user":
+        contents[-1]["parts"][0]["text"] += "\n" + text
+    else:
+        contents.append({"role": "user", "parts": [{"text": text}]})
+    return contents
+
+
+def complete(api_key: str, model: str, text: str, timeout: int = 25, history: list | None = None) -> dict:
     try:
-        return _generate(api_key, model, [{"text": text}], timeout, tools=True)
+        return _generate(api_key, model, [{"text": text}], timeout, tools=True, contents=_contents(history, text))
     except QuotaError as exc:
         return {"ok": False, "quota": True, "seconds": exc.seconds, "calls": [], "text": ""}
     except requests.RequestException as exc:

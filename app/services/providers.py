@@ -211,7 +211,39 @@ def _model(row) -> str:
     return models[0] if models else ""
 
 
-def chat_with_tools(row, text: str, timeout: int = 25) -> dict:
+def chat_history(user, current: str, limit: int = 5) -> list[dict]:
+    """The last few saved lines, not counting the message she just sent."""
+    from app.models import ChatMessage
+
+    rows = (
+        ChatMessage.query.filter_by(user_id=user.id)
+        .order_by(ChatMessage.id.desc())
+        .limit(limit + 1)
+        .all()
+    )
+    rows = list(reversed(rows))
+    if rows and rows[-1].role == "user" and (rows[-1].body or "").strip() == (current or "").strip():
+        rows = rows[:-1]
+    rows = rows[-limit:]
+    return [{"role": row.role, "body": (row.body or "")[:1500]} for row in rows]
+
+
+def _with_history(messages: list, history: list | None, text: str) -> list:
+    out = list(messages)
+    for turn in history or []:
+        body = (turn.get("body") or "").strip()
+        if not body:
+            continue
+        role = "assistant" if turn.get("role") == "assistant" else "user"
+        if out and out[-1]["role"] == role:
+            out[-1]["content"] += "\n" + body
+        else:
+            out.append({"role": role, "content": body})
+    out.append({"role": "user", "content": text})
+    return out
+
+
+def chat_with_tools(row, text: str, timeout: int = 25, history: list | None = None) -> dict:
     spec = provider_spec(row.provider)
     try:
         api_key = decrypt_text(row.secret_ciphertext)
@@ -231,16 +263,10 @@ def chat_with_tools(row, text: str, timeout: int = 25) -> dict:
                 db.session.commit()
         if not model:
             return {"ok": False, "error": resolved.get("error") or "No Gemini model."}
-        return gemini_complete(api_key, model, text, timeout=timeout)
+        return gemini_complete(api_key, model, text, timeout=timeout, history=history)
     if not model:
         return {"ok": False, "error": "Pick a model for this key."}
-    messages = [
-        {
-            "role": "system",
-            "content": CHAT_RULES,
-        },
-        {"role": "user", "content": text},
-    ]
+    messages = _with_history([{"role": "system", "content": CHAT_RULES}], history, text)
     try:
         if spec.get("kind") == "anthropic":
             return _anthropic_call(api_key, model, text, None, "", timeout)
@@ -404,6 +430,7 @@ def collect_tool_calls(user, text: str):
         + "Say who is logged in by using her words; the server stamps her login on the change.\n\nShe said: "
         + (text or "")
     )
+    history = chat_history(user, text)
     notes = []
     for row in rows:
         label = provider_spec(row.provider).get("label") or row.provider
@@ -411,7 +438,7 @@ def collect_tool_calls(user, text: str):
             notes.append(f"{label} is cooling down.")
             continue
         try:
-            result = chat_with_tools(row, prompt)
+            result = chat_with_tools(row, prompt, history=history)
         except Exception:
             notes.append(f"{label} did not answer.")
             continue
