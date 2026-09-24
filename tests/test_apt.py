@@ -45,6 +45,7 @@ TABLES = [
     "plan_items",
     "trip_properties",
     "trips",
+    "unit_tasks",
     "units",
     "properties",
     "cities",
@@ -1069,6 +1070,122 @@ Lubbock — 2 outside compressor installs"""
         self.assertEqual(washer.color, "white")
         self.assertEqual(dryer.notes, "")
         self.assertEqual(dryer.serial_number, "D1")
+
+    def test_a_trip_plan_does_not_turn_gas_into_a_place(self):
+        from app.models import PlanItem
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={
+                "ok": True,
+                "text": "Added Gas and the location.",
+                "calls": [
+                    {"name": "upsert_property", "args": {"property_name": "Gas", "city": "Midland"}},
+                    {"name": "upsert_property", "args": {"property_name": "Replace an AC", "city": "Odessa"}},
+                ],
+            },
+        ):
+            heard = handle_message(
+                user,
+                "create me a plan for a trip to woodview odessa to replace an ac and get gas in midland",
+                idempotency_key="plan-gas",
+            )
+        self.assertIn("Woodview", heard["reply"])
+        self.assertIn("Gas is a line on that plan", heard["reply"])
+        self.assertNotIn("Added Gas", heard["reply"])
+        names = [row.name.lower() for row in Property.query.filter(Property.deleted_at.is_(None)).all()]
+        self.assertEqual(names, ["woodview"])
+        self.assertNotIn("midland", [row.name.lower() for row in City.query.all()])
+        titles = [row.title.lower() for row in PlanItem.query.all()]
+        self.assertIn("gas", titles)
+        self.assertTrue(any("replace" in title for title in titles))
+
+    def test_units_make_ready_and_who_saved_it(self):
+        from app.models import Job, UnitTask
+        from app.services.browse import unit_cards
+        from app.services.people import find_user
+        from app.services.records import ensure_property
+
+        owner = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        added = handle_message(owner, "add employee jasmine", idempotency_key="add-jasmine")
+        self.assertIn("jasmine", added["reply"].lower())
+        self.assertIn("employee", added["reply"].lower())
+        jasmine = find_user("jasmine")
+        self.assertEqual(jasmine.role, "field")
+        self.assertEqual(jasmine.display_name, "Jasmine")
+        handle_message(owner, "add units 101, 102, 104-106 at woodview", idempotency_key="bulk")
+        numbers = sorted(row.unit_number for row in Unit.query.filter(Unit.deleted_at.is_(None)).all())
+        self.assertEqual(numbers, ["101", "102", "104", "105", "106"])
+        handle_message(owner, "804 is a make ready at woodview", idempotency_key="ready")
+        heard = handle_message(
+            jasmine,
+            "unit 12 at woodview is occupied. had an oncall emergency for ac brought a window unit",
+            idempotency_key="lived",
+        )
+        self.assertIn("Jasmine", heard["reply"])
+        ready = Unit.query.filter_by(unit_number="804").one()
+        lived = Unit.query.filter_by(unit_number="12").one()
+        self.assertEqual(ready.occupancy, "make_ready")
+        self.assertEqual(lived.occupancy, "occupied")
+        self.assertTrue(Job.query.filter_by(unit_id=lived.id).count() >= 1)
+        needs = handle_message(
+            jasmine,
+            "unit 804 at woodview needs carpet cleaned, paint, and replace bulbs",
+            idempotency_key="needs",
+        )
+        self.assertIn("Jasmine", needs["reply"])
+        tasks = UnitTask.query.filter_by(unit_id=ready.id).all()
+        self.assertEqual(sorted(row.title for row in tasks), ["carpet cleaned", "paint", "replace bulbs"])
+        self.assertTrue(all(row.created_by_id == jasmine.id and row.status == "needed" for row in tasks))
+        handle_message(jasmine, "carpet is done in 804 at woodview", idempotency_key="carpet-done")
+        carpet = UnitTask.query.filter_by(unit_id=ready.id, title="carpet cleaned").one()
+        paint = UnitTask.query.filter_by(unit_id=ready.id, title="paint").one()
+        self.assertEqual(carpet.status, "done")
+        self.assertEqual(carpet.done_by_id, jasmine.id)
+        self.assertEqual(paint.status, "needed")
+        handle_message(
+            jasmine,
+            "vendored the compressor at woodview 804 to Joe's AC",
+            idempotency_key="vendor",
+        )
+        vendor = UnitTask.query.filter_by(unit_id=ready.id, kind="vendor").one()
+        self.assertEqual(vendor.vendor, "Joe's AC")
+        self.assertEqual(vendor.created_by_id, jasmine.id)
+        other = UnitTask.query.filter_by(unit_id=lived.id, kind="vendor").all()
+        self.assertEqual(other, [])
+        cards = unit_cards(ready.property_id, show="make_ready")
+        self.assertEqual([card["unit"].unit_number for card in cards["cards"]], ["804"])
+        worked = unit_cards(ready.property_id, show="worked")
+        self.assertIn("12", [card["unit"].unit_number for card in worked["cards"]])
+        self.assertNotIn("101", [card["unit"].unit_number for card in worked["cards"]])
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        page = client.get(f"/properties/{ready.property_id}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"make-ready", page.data)
+        self.assertIn(b"occupied", page.data)
+        self.assertIn(b"Jasmine", page.data)
+        unit_page = client.get(f"/units/{ready.id}")
+        self.assertIn(b"carpet cleaned", unit_page.data)
+        self.assertIn(b"Joe", unit_page.data)
+        self.assertIn(b"Make ready", unit_page.data)
 
 
 if __name__ == "__main__":

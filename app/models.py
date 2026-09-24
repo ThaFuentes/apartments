@@ -138,11 +138,35 @@ class Unit(db.Model):
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
     unit_number = db.Column(db.String(32), nullable=False)
+    occupancy = db.Column(db.String(20), nullable=False, default="")
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     deleted_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 
     property = db.relationship("Property")
+
+
+class UnitTask(db.Model):
+    """One thing this unit needs, or one thing already done on it."""
+
+    __tablename__ = "unit_tasks"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    unit_id = db.Column(db.Integer, db.ForeignKey("units.id", ondelete="CASCADE"), nullable=False)
+    kind = db.Column(db.String(20), nullable=False, default="task")
+    title = db.Column(db.String(200), nullable=False, default="")
+    status = db.Column(db.String(20), nullable=False, default="needed")
+    vendor = db.Column(db.String(160), nullable=False, default="")
+    notes = db.Column(db.Text, nullable=False, default="")
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    done_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    done_at = db.Column(db.DateTime, nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    unit = db.relationship("Unit")
 
 
 class Trip(db.Model):

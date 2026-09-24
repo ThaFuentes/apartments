@@ -237,7 +237,7 @@ def chat_with_tools(row, text: str, timeout: int = 25) -> dict:
     messages = [
         {
             "role": "system",
-            "content": "You help one regional manager. The message names you and says how to talk. When she says to add a property, call upsert_property with the exact name and city she said. Never substitute a different property. Do not call query_record for an add. Do not say there is no matching job unless she asked about a job.",
+            "content": "You help one regional manager. The message names you and says how to talk. When she says to add a property, call upsert_property with the exact name and city she said. Never substitute a different property. A plan or a trip plan is plan_trip, not a new property. Gas, fuel, and meals are never properties. Do not call query_record for an add. Do not say there is no matching job unless she asked about a job.",
         },
         {"role": "user", "content": text},
     ]
@@ -397,7 +397,11 @@ def collect_tool_calls(user, text: str):
         + "\n\n"
         + record_brief()
         + "\n\nEach appliance is its own card on one unit. A serial, style, or note belongs to that one item. "
-        + "A washer in unit 26 does not share a note with any other washer.\n\nShe said: "
+        + "A washer in unit 26 does not share a note with any other washer. "
+        + "A trip plan is a plan. Gas is a line on that plan, not a place. "
+        + "Make-ready units and occupied units are statuses on that unit. "
+        + "A note, task, or vendor on one unit stays on that unit. "
+        + "Say who is logged in by using her words; the server stamps her login on the change.\n\nShe said: "
         + (text or "")
     )
     notes = []

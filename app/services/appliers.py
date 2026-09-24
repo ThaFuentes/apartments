@@ -32,6 +32,7 @@ from app.services.records import (
     dumps,
     ensure_property,
     find_properties,
+    not_a_property,
     job_status,
     match_unit,
     normalize_unit,
@@ -106,6 +107,8 @@ def apply_plan_trip(user, payload, source) -> dict:
     source = _src(source)
     name = (payload.get("property_name") or "").strip()
     city = (payload.get("city") or "").strip()
+    if not_a_property(name):
+        return {"ok": False, "reply": "Gas stays on the trip plan. Tell me the apartment, not the gas stop."}
     if not name or not city:
         return {"ok": False, "reply": "I need a property and a city. Try: I'm going to Woodview Odessa Thursday for AC evals."}
     profile = site_profile()
@@ -525,6 +528,8 @@ def apply_upsert_property(user, payload, source) -> dict:
     source = _src(source)
     name = (payload.get("property_name") or "").strip()
     city = (payload.get("city") or "").strip()
+    if not_a_property(name):
+        return {"ok": False, "reply": f"{name} stays on the trip plan. It is not a place."}
     if not name or not city:
         return {"ok": False, "reply": "Tell me the property and the city."}
     profile = site_profile()
@@ -1702,11 +1707,14 @@ def apply_update_settings(user, payload, source) -> dict:
     return {"ok": True, "reply": "Settings saved: " + ", ".join(changed) + "."}
 
 
+from app.services.board import apply_unit_board
+
 APPLIERS = {
     "plan_trip": apply_plan_trip,
     "plan_day": apply_plan_day,
     "log_work": apply_log_work,
     "note_equipment": apply_note_equipment,
+    "unit_board": apply_unit_board,
     "plan_outcome": apply_plan_outcome,
     "clear_plan": apply_clear_plan,
     "delete_property": apply_delete_property,

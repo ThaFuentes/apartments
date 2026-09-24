@@ -7,7 +7,7 @@ from datetime import date
 from app.builddb.builddb import db
 from app.models import Job, JobEvent, PlanItem, Property, Trip, TripProperty
 from app.services.clock import WEEKDAYS, local_today, next_named_day, utcnow
-from app.services.records import audit, ensure_property, find_properties, site_profile
+from app.services.records import audit, ensure_property, find_properties, not_a_property, site_profile
 
 DAY_WORD = "|".join(WEEKDAYS) + "|today|tomorrow"
 PLAN_HEADER = re.compile(
@@ -301,13 +301,25 @@ def save_plan_day(user, payload: dict, source: str) -> dict:
         created_trip = True
         audit(user.id, source, "create", "trip", trip.id, {}, {"title": trip.title, "starts_on": starts_on.isoformat()})
     added = []
+    last_prop = None
     for stop in stops:
         city = (stop.get("city") or (profile.default_city if profile else "") or "").strip()
         region = (stop.get("region") or (profile.default_region if profile else "") or "").strip()
         name = (stop.get("property_name") or "").strip()
         if not name or not city:
             continue
+        if not_a_property(name):
+            detail = " ".join((item.get("title") or "") for item in (stop.get("items") or [])).strip()
+            if last_prop:
+                ensure_plan_item(trip, last_prop, "Gas", detail or name, 1, user.id, source)
+                added.append(f"Gas stays on the plan at {last_prop.name}, not as a place")
+            else:
+                line = "Gas" + (f" — {detail}" if detail else "")
+                trip.checklist = ((trip.checklist or "").rstrip() + "\n" + line).strip()
+                added.append("Gas stays on the plan, not as a place")
+            continue
         prop = ensure_property(name, city, region, user.id, source=source)
+        last_prop = prop
         _add_stop(trip, prop, None)
         items = stop.get("items") or []
         if not items:

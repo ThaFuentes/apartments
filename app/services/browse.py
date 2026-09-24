@@ -148,9 +148,19 @@ def place_groups(city_id: int | None = None) -> list[dict]:
     return groups
 
 
-def unit_cards(property_id: int, sort: str = "recent", query: str = "") -> dict:
+def unit_cards(property_id: int, sort: str = "recent", query: str = "", show: str = "") -> dict:
+    from app.models import UnitTask
+
     units = Unit.query.filter_by(property_id=property_id).filter(Unit.deleted_at.is_(None)).all()
     jobs = Job.query.filter_by(property_id=property_id).filter(Job.deleted_at.is_(None)).all()
+    needed = (
+        UnitTask.query.filter_by(property_id=property_id)
+        .filter(UnitTask.deleted_at.is_(None), UnitTask.status == "needed")
+        .all()
+    )
+    needed_by: dict[int, int] = {}
+    for task in needed:
+        needed_by[task.unit_id] = needed_by.get(task.unit_id, 0) + 1
     gear = (
         Equipment.query.filter(Equipment.property_id == property_id, Equipment.deleted_at.is_(None))
         .order_by(Equipment.id.desc())
@@ -169,6 +179,14 @@ def unit_cards(property_id: int, sort: str = "recent", query: str = "") -> dict:
         if needle and needle not in (unit.unit_number or "").lower():
             continue
         unit_jobs = sorted(jobs_by.get(unit.id) or [], key=lambda row: row.created_at or _EMPTY, reverse=True)
+        if show == "worked" and not unit_jobs:
+            continue
+        if show == "make_ready" and (unit.occupancy or "") != "make_ready":
+            continue
+        if show == "occupied" and (unit.occupancy or "") != "occupied":
+            continue
+        if show == "needs" and not needed_by.get(unit.id):
+            continue
         lines = [gear_blurb(item) for item in (gear_by.get(unit.id) or [])]
         cards.append(
             {
@@ -176,6 +194,7 @@ def unit_cards(property_id: int, sort: str = "recent", query: str = "") -> dict:
                 "last": unit_jobs[0].created_at if unit_jobs else None,
                 "last_title": unit_jobs[0].title if unit_jobs else "",
                 "job_count": len(unit_jobs),
+                "open_tasks": needed_by.get(unit.id, 0),
                 "gear_lines": lines[:2],
                 "gear_more": max(len(lines) - 2, 0),
             }

@@ -70,7 +70,11 @@ STATES = {
     "ks": "Kansas",
 }
 ADD_USER = re.compile(
-    r"\b(?:add|invite|give)\s+(?:my\s+)?(?:a\s+)?(viewer|boss|user|field|read-only|readonly)\s+([a-z0-9][a-z0-9._-]{1,40})",
+    r"\b(?:add|invite|give)\s+(?:my\s+)?(?:a\s+|an\s+)?(employee|viewer|boss|user|field|owner|read-only|readonly)\s+([a-z0-9][a-z0-9._-]{1,40})",
+    re.I,
+)
+AS_ROLE = re.compile(
+    r"\b(?:add|invite)\s+(?:login\s+)?([a-z0-9][a-z0-9._-]{1,40})\s+as\s+(?:an?\s+)?(employee|boss|owner|viewer|field)\b",
     re.I,
 )
 GIVE_BOSS = re.compile(r"\bgive my boss\b|\bread-only access\b", re.I)
@@ -192,6 +196,11 @@ def _calls_she_asked(text: str, calls: list) -> list:
             args = {}
         if name == "query_record" and adding:
             continue
+        if name == "upsert_property":
+            from app.services.records import not_a_property
+
+            if not_a_property(args.get("property_name") or "") or _is_trip_plan(text):
+                continue
         if name in ("upsert_property", "plan_trip", "delete_property", "update_property", "log_work"):
             mentioned = (args.get("property_name") or args.get("match_name") or "").strip().lower()
             if mentioned and mentioned not in low and mentioned.split()[0] not in low:
@@ -239,6 +248,226 @@ def _online_address(place: dict) -> dict:
     return {"ok": True, "reply": f"{name} in {city} is {found['address']}. That's from the web, not from your sites."}
 
 
+def _role_word(word: str) -> str:
+    word = (word or "").lower()
+    if word in ("employee", "field", "user"):
+        return "field"
+    if word == "owner":
+        return "owner"
+    return "viewer"
+
+
+def _person_to_add(user, text: str, key: str, source: str):
+    named = AS_ROLE.search(text or "")
+    role_first = ADD_USER.search(text or "")
+    if named:
+        return _offer_login(user, text, named.group(2), named.group(1), key, source)
+    if role_first or GIVE_BOSS.search(text or ""):
+        return _user_offer(user, text, role_first, key, source)
+    return None
+
+
+def _is_trip_plan(text: str) -> bool:
+    raw = text or ""
+    if not re.search(r"\bplan\b", raw, re.I):
+        return False
+    if re.search(r"\b(delete|remove|cancel|clear)\b", raw, re.I) and re.search(r"\bplan\b", raw, re.I):
+        return False
+    return bool(re.search(r"\b(trip|drive|going|gonna|visit)\b", raw, re.I) or re.search(r"\b(create|make|build|give)\b", raw, re.I))
+
+
+def _plan_slots(text: str) -> dict | None:
+    raw = text or ""
+    gas = ""
+    if re.search(r"\b(gas|fuel)\b", raw, re.I):
+        where = re.search(r"\bgas(?:\s+in\s+([A-Za-z][A-Za-z .'-]{2,30}))?", raw, re.I)
+        city = _clean_slot(where.group(1)) if where and where.group(1) else ""
+        gas = f"in {city}" if city else "on the way"
+        raw = re.sub(
+            r"\b(?:and\s+)?(?:get|getting|stop for|fill up(?: for)?|grab)?\s*gas(?:\s+in\s+[A-Za-z][A-Za-z .'-]{2,30})?",
+            " ",
+            raw,
+            flags=re.I,
+        )
+    purpose = ""
+    purpose_match = re.search(
+        r"\b(?:to|for)\s+((?:replace|fix|install|check|do|change|look at|work on|swap)\b.+)$",
+        raw,
+        re.I,
+    )
+    if purpose_match:
+        purpose = _clean_slot(purpose_match.group(1))
+        raw = raw[: purpose_match.start()]
+    dest = re.search(r"\btrip\s+to\s+(.+)$", raw, re.I)
+    if not dest:
+        dest = re.search(r"\b(?:going|gonna|headed)\s+to\s+(.+)$", raw, re.I)
+    if not dest:
+        return {"gas": gas, "purpose": purpose} if gas or purpose else None
+    slots = _slots_from_destination(dest.group(1).strip(" ."))
+    if purpose and not slots.get("purpose"):
+        slots["purpose"] = purpose
+    if gas:
+        slots["gas"] = gas
+    from app.services.records import not_a_property
+
+    if not_a_property(slots.get("property_name") or ""):
+        slots["property_name"] = ""
+    if not_a_property(slots.get("place") or ""):
+        slots["place"] = ""
+    return slots
+
+
+def _remember_gas(user, trip_id: int, property_id: int, detail: str, source: str) -> None:
+    from app.models import Property, Trip
+    from app.services.plan import ensure_plan_item
+
+    trip = db.session.get(Trip, int(trip_id))
+    prop = db.session.get(Property, int(property_id))
+    if not trip or not prop:
+        return
+    ensure_plan_item(trip, prop, "Gas", detail, 1, user.id, source)
+    if "Gas" not in (trip.checklist or ""):
+        trip.checklist = ((trip.checklist or "").rstrip() + "\nGas").strip()
+    db.session.commit()
+
+
+def _file_trip_plan(user, text: str, key: str, source: str):
+    if not _is_trip_plan(text):
+        return None
+    slots = _plan_slots(text) or {}
+    if not (slots.get("property_name") or slots.get("place") or slots.get("city")):
+        return {
+            "ok": True,
+            "reply": "Where should I plan the trip? Tell me the property and the city. Gas stays on the plan, not as a place.",
+        }
+    _close_questions(user)
+    return _file_outing(user, slots, key, source)
+
+
+def _board_payload(text: str) -> dict | None:
+    raw = (text or "").strip().rstrip(".")
+    added = re.search(
+        r"\badd\s+units?\s+(.+?)\s+(?:at|to|on|in)\s+([a-z][a-z0-9']{3,40})\s*$",
+        raw,
+        re.I,
+    )
+    if added:
+        return {"action": "add_units", "units": added.group(1), "property_hint": added.group(2)}
+    vendor = re.search(
+        r"\bvendor(?:ed)?(?:\s+out)?\s+(?:the\s+)?(.+?)\s+(?:at|in)\s+([a-z][a-z0-9']{3,40})\s+(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)(?:\s+to\s+(.+))?$",
+        raw,
+        re.I,
+    )
+    if vendor:
+        return {
+            "action": "vendor",
+            "title": _clean_slot(vendor.group(1)),
+            "property_hint": vendor.group(2),
+            "unit_number": vendor.group(3),
+            "vendor": _clean_slot(vendor.group(4) or ""),
+        }
+    order = re.search(
+        r"\bwork\s+order\s+(?:for\s+)?(?:a\s+)?(.+?)\s+in\s+(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)\s+(?:at|in)\s+([a-z][a-z0-9']{3,40})",
+        raw,
+        re.I,
+    )
+    if order:
+        return {
+            "action": "work_order",
+            "title": _clean_slot(order.group(1)),
+            "unit_number": order.group(2),
+            "property_hint": order.group(3),
+        }
+    done = re.search(
+        r"\b(.+?)\s+(?:is\s+)?done\s+in\s+(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)\s+(?:at|in)\s+([a-z][a-z0-9']{3,40})",
+        raw,
+        re.I,
+    )
+    if done:
+        return {
+            "action": "done",
+            "title": _clean_slot(done.group(1)),
+            "unit_number": done.group(2),
+            "property_hint": done.group(3),
+        }
+    needs = re.search(
+        r"\b(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)\s+(?:at|in)\s+([a-z][a-z0-9']{3,40})\s+needs?\s+(.+)$",
+        raw,
+        re.I,
+    )
+    if not needs:
+        needs = re.search(
+            r"\b(?:in|at)\s+([a-z][a-z0-9']{3,40})\s+(?:apartment|apt|unit)\s+#?\s*([0-9]{1,6}[a-z]?)\s+needs?\s+(.+)$",
+            raw,
+            re.I,
+        )
+        if needs:
+            return {
+                "action": "needs",
+                "property_hint": needs.group(1),
+                "unit_number": needs.group(2),
+                "titles": needs.group(3),
+            }
+    elif needs:
+        return {
+            "action": "needs",
+            "unit_number": needs.group(1),
+            "property_hint": needs.group(2),
+            "titles": needs.group(3),
+        }
+    occupied = re.search(
+        r"\b(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)\s+is\s+(?:a\s+|an\s+)?(occupied|make[\s-]?ready|vacant)(?:\s+(?:at|in)\s+([a-z][a-z0-9']{3,40}))?",
+        raw,
+        re.I,
+    )
+    if not occupied:
+        occupied = re.search(
+            r"\b(?:make|mark)\s+(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)\s+(?:at|in)\s+([a-z][a-z0-9']{3,40})\s+(?:a\s+)?make[\s-]?ready\b",
+            raw,
+            re.I,
+        )
+        if occupied:
+            word = "make_ready"
+            number, hint = occupied.group(1), occupied.group(2)
+        else:
+            occupied = re.search(
+                r"\b(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)\s+(?:at|in)\s+([a-z][a-z0-9']{3,40})\s+is\s+(?:a\s+|an\s+)?(occupied|make[\s-]?ready|vacant)\b",
+                raw,
+                re.I,
+            )
+            if not occupied:
+                return None
+            number, hint, word = occupied.group(1), occupied.group(2), occupied.group(3)
+    else:
+        number, word, hint = occupied.group(1), occupied.group(2), occupied.group(3) or ""
+    status = re.sub(r"[\s-]+", "_", word.lower())
+    if status == "make_ready":
+        status = "make_ready"
+    work = re.search(r"\b(had\s+.+)$", raw, re.I)
+    payload = {
+        "action": "occupancy",
+        "unit_number": number,
+        "property_hint": hint,
+        "occupancy": "" if status == "vacant" else ("make_ready" if status.startswith("make") else status),
+    }
+    if work:
+        payload["work_title"] = _clean_slot(work.group(1))
+    return payload
+
+
+def _file_unit_board(user, text: str, key: str, source: str):
+    from app.services.board import split_needs
+    from app.services.pending import commit_apply
+
+    payload = _board_payload(text)
+    if not payload:
+        return None
+    if payload.get("action") == "needs" and isinstance(payload.get("titles"), str):
+        payload["titles"] = split_needs(payload["titles"])
+    _close_questions(user)
+    return commit_apply(user, "unit_board", payload, source, key)
+
+
 def _from_model(user, text: str, key: str, source: str):
     """Her words go to the saved model. A web address lookup is answered from the web."""
     from app.services.pending import commit_apply
@@ -250,6 +479,15 @@ def _from_model(user, text: str, key: str, source: str):
     wanted = _address_she_wants(text)
     if wanted:
         return _online_address(wanted)
+    person = _person_to_add(user, text, key, source)
+    if person:
+        return person
+    planned = _file_trip_plan(user, text, key, source)
+    if planned:
+        return planned
+    board = _file_unit_board(user, text, key, source)
+    if board:
+        return board
     noted = _file_item_note(user, text, key, source)
     if noted:
         return noted
@@ -483,6 +721,15 @@ def _file_named_unit(user, text: str, key: str, source: str):
 
 
 def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:
+    person = _person_to_add(user, text, key, source)
+    if person:
+        return person
+    planned = _file_trip_plan(user, text, key, source)
+    if planned:
+        return planned
+    board = _file_unit_board(user, text, key, source)
+    if board:
+        return board
     noted = _file_item_note(user, text, key, source)
     if noted:
         if note:
@@ -746,6 +993,7 @@ def _ask_trip(user, slots: dict, key: str, source: str, row, question: str) -> d
         "when": slots.get("when") or "",
         "place": slots.get("place") or "",
         "miles_estimate": slots.get("miles_estimate"),
+        "gas": slots.get("gas") or "",
         "day_stated": bool(slots.get("when")),
         "needs_answer": True,
         "waiting_for": "trip",
@@ -857,6 +1105,9 @@ def _file_outing(user, slots: dict, key: str, source: str, row=None) -> dict:
     from app.services.pending import commit_apply
 
     result = commit_apply(user, "plan_trip", payload, source, key)
+    if result.get("ok") and slots.get("gas") and result.get("trip_id") and result.get("property_id"):
+        _remember_gas(user, result["trip_id"], result["property_id"], slots["gas"], source)
+        result["reply"] = (result.get("reply") or "").rstrip() + " Gas is a line on that plan, not a new place."
     if row is not None and result.get("ok"):
         fresh = db.session.get(PendingAction, row.id)
         if fresh:
@@ -879,7 +1130,7 @@ def _answer_trip(user, row, text: str, key: str, source: str) -> dict:
     heard = any(extra.get(field) for field in ("property_name", "city", "region", "purpose", "when", "place")) or extra.get("miles_estimate") is not None
     if not heard:
         return {"ok": True, "reply": row.summary or "Which property?"}
-    for field in ("property_name", "city", "region", "purpose", "when", "place"):
+    for field in ("property_name", "city", "region", "purpose", "when", "place", "gas"):
         if extra.get(field):
             payload[field] = extra[field]
     if extra.get("miles_estimate") is not None:
@@ -2071,16 +2322,8 @@ def _merge_open_question(user, text, key, source) -> dict | None:
     return _commit_waiting(user, row, "log_expense", payload, key, source)
 
 
-def _user_offer(user, text, match, key, source) -> dict:
-    if match:
-        role_word = match.group(1).lower()
-        username = match.group(2)
-    else:
-        role_word = "viewer"
-        username = "boss"
-    role = "viewer" if role_word in ("viewer", "boss", "read-only", "readonly") else "field" if role_word in ("user", "field") else "viewer"
-    if role_word == "user":
-        role = "field"
+def _offer_login(user, text, role_word: str, username: str, key: str, source: str) -> dict:
+    role = _role_word(role_word)
     email = EMAIL.search(text)
     password = PASSWORD.search(text)
     payload = {
@@ -2096,6 +2339,16 @@ def _user_offer(user, text, match, key, source) -> dict:
     from app.services.pending import commit_apply
 
     return commit_apply(user, "invite_viewer", payload, source, key)
+
+
+def _user_offer(user, text, match, key, source) -> dict:
+    if match:
+        role_word = match.group(1).lower()
+        username = match.group(2)
+    else:
+        role_word = "viewer"
+        username = "boss"
+    return _offer_login(user, text, role_word, username, key, source)
 
 
 def _settings_payload(text: str) -> dict:

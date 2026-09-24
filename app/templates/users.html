@@ -3,7 +3,7 @@
 {% block main %}
 <section class="sheet">
   <h1>People</h1>
-  <p class="lead">Add a boss or an employee who helps her. Their email can stay blank. They still sign in with a username.</p>
+  <p class="lead">Add a login for each person. Jasmine signs in as herself, and every unit, task, and job she saves is stamped with her name.</p>
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">

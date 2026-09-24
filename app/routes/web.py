@@ -586,10 +586,15 @@ def property_detail(property_id):
     sort = request.args.get("sort") or "recent"
     if sort not in ("recent", "number"):
         sort = "recent"
+    show = request.args.get("show") or ""
+    if show not in ("", "worked", "make_ready", "occupied", "needs"):
+        show = ""
+    from app.services.board import recent_changes
     from app.services.geo import city_parts, place_title
+    from app.services.people import person_label
 
     city_name, state = city_parts(prop.city.name, prop.city.region) if prop.city else ("", "")
-    packed = unit_cards(prop.id, sort=sort, query=request.args.get("q") or "")
+    packed = unit_cards(prop.id, sort=sort, query=request.args.get("q") or "", show=show)
     return render_template(
         "property.html",
         prop=prop,
@@ -600,6 +605,9 @@ def property_detail(property_id):
         loose_jobs=packed["loose_jobs"],
         unit_total=packed["total"],
         sort=sort,
+        show=show,
+        changes=recent_changes(prop.id),
+        who=person_label,
         msg_key=_new_key(),
     )
 
@@ -649,26 +657,15 @@ def property_delete(property_id):
 def property_add_unit(property_id):
     if current_user.role == "viewer":
         abort(403)
-    from app.services.records import normalize_unit
+    from app.services.board import add_units
 
     prop = db.session.get(Property, property_id)
     if not prop or prop.deleted_at:
         abort(404)
-    number = normalize_unit(request.form.get("unit_number") or "")
-    if not number:
-        flash("Type a unit number.", "warn")
-        return redirect(f"/properties/{property_id}")
-    existing = (
-        Unit.query.filter_by(property_id=prop.id, unit_number=number)
-        .filter(Unit.deleted_at.is_(None))
-        .first()
-    )
-    if existing:
-        flash(f"Unit {number} is already on this property.", "warn")
-        return redirect(f"/properties/{property_id}")
-    db.session.add(Unit(property_id=prop.id, unit_number=number, created_at=utcnow()))
+    blob = (request.form.get("units") or request.form.get("unit_number") or "").strip()
+    result = add_units(current_user, prop, blob, "human")
     db.session.commit()
-    flash(f"Added unit {number}.", "ok")
+    flash(result.get("reply") or "Type the unit numbers.", "ok" if result.get("ok") else "warn")
     return redirect(f"/properties/{property_id}")
 
 
@@ -735,7 +732,9 @@ def unit_detail(unit_id):
     events = {}
     for job in jobs:
         events[job.id] = JobEvent.query.filter_by(job_id=job.id).order_by(JobEvent.id.asc()).all()
+    from app.services.board import task_groups
     from app.services.equipment import kind_choices, kind_label
+    from app.services.people import person_label
 
     last = jobs[0].created_at if jobs else (visits[0].started_at if visits else None)
     return render_template(
@@ -747,6 +746,8 @@ def unit_detail(unit_id):
         gear=gear,
         gear_kinds=kind_choices(),
         kind_label=kind_label,
+        tasks=task_groups(unit.id),
+        who=person_label,
         last=last,
     )
 
@@ -771,6 +772,92 @@ def unit_equipment(unit_id):
     label = kind_label(row.kind) if row else "equipment"
     flash(f"Saved the {label or 'equipment'} in unit {unit.unit_number}.", "ok")
     return redirect(f"/units/{unit.id}")
+
+
+@bp.post("/units/<int:unit_id>/occupancy")
+@login_required
+def unit_occupancy(unit_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.services.board import set_occupancy
+
+    unit = db.session.get(Unit, unit_id)
+    if not unit or unit.deleted_at:
+        abort(404)
+    occupancy = (request.form.get("occupancy") or "").strip()
+    if occupancy not in ("occupied", "make_ready", ""):
+        occupancy = ""
+    set_occupancy(current_user, unit, occupancy, "human")
+    db.session.commit()
+    word = {"occupied": "occupied", "make_ready": "a make ready"}.get(occupancy, "cleared")
+    flash(f"Unit {unit.unit_number} is {word}.", "ok")
+    return redirect(f"/units/{unit.id}")
+
+
+@bp.post("/units/<int:unit_id>/tasks")
+@login_required
+def unit_task_add(unit_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.services.board import add_needed
+
+    unit = db.session.get(Unit, unit_id)
+    if not unit or unit.deleted_at:
+        abort(404)
+    title = (request.form.get("title") or "").strip()
+    if not title:
+        flash("Say what this unit needs.", "warn")
+        return redirect(f"/units/{unit.id}")
+    kind = (request.form.get("kind") or "task").strip()
+    if kind not in ("task", "part", "work_order", "vendor"):
+        kind = "task"
+    add_needed(
+        current_user,
+        unit,
+        [title],
+        "human",
+        kind=kind,
+        vendor=request.form.get("vendor") or "",
+        notes=request.form.get("notes") or "",
+    )
+    db.session.commit()
+    flash(f"Saved on unit {unit.unit_number}.", "ok")
+    return redirect(f"/units/{unit.id}")
+
+
+@bp.post("/tasks/<int:task_id>/done")
+@login_required
+def task_done(task_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.models import UnitTask
+
+    row = db.session.get(UnitTask, task_id)
+    if not row or row.deleted_at:
+        abort(404)
+    row.status = "done"
+    row.done_by_id = current_user.id
+    row.done_at = utcnow()
+    db.session.commit()
+    flash(f"Done: {row.title}.", "ok")
+    return redirect(f"/units/{row.unit_id}")
+
+
+@bp.post("/tasks/<int:task_id>/delete")
+@login_required
+def task_delete(task_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.models import UnitTask
+
+    row = db.session.get(UnitTask, task_id)
+    if not row or row.deleted_at:
+        abort(404)
+    row.deleted_at = utcnow()
+    unit_id = row.unit_id
+    db.session.commit()
+    flash("Removed that item.", "ok")
+    return redirect(f"/units/{unit_id}")
 
 
 def _equipment_form() -> dict:

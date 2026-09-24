@@ -12,7 +12,8 @@
     <a href="/reports">Reports <span>→</span></a>
     <a href="/map">Map <span>→</span></a>
     {% if current_user.role == 'owner' %}
-    <a href="/settings">Settings and people <span>→</span></a>
+    <a href="/users">Logins <span>→</span></a>
+    <a href="/settings">Settings <span>→</span></a>
     {% endif %}
   </div>
   <form method="post" action="/drive" class="card stack">

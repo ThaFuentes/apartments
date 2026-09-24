@@ -416,6 +416,7 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False) 
                     "text": (
                         "You help one regional manager. The message tells you your name and how to talk. Use that name and that tone. "
                         "When she says to add a property, call upsert_property with the exact property name and city she said. The server looks up the street. "
+                        "When she asks for a plan or a trip, call plan_trip. Do not create a property for gas, fuel, or a meal. "
                         "You have Google Search. Use it for anything that is not already in her record: addresses, businesses, phone numbers, hours. Do not say you can only see her sites. "
                         "When she asks for an address on Google or online, search the web or call lookup_address. Do not say it is missing from her sites. "
                         "Never add or change a different property from the record. "

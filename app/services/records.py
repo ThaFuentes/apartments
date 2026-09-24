@@ -141,6 +141,16 @@ def ensure_city(name: str, region: str, actor_id: int | None, source: str = "hum
     return row
 
 
+def not_a_property(name: str) -> bool:
+    """Gas, fuel, and meals are stops on a plan. They are not apartment properties."""
+    low = " ".join(re.sub(r"[^a-z ]", " ", (name or "").lower()).split())
+    if not low:
+        return False
+    if low in {"gas", "fuel", "gasoline", "lunch", "dinner", "breakfast", "food", "snack", "coffee"}:
+        return True
+    return bool(re.fullmatch(r"(get |getting |stop for |fill up |filling up |grab )?(gas|fuel|gasoline)", low))
+
+
 def find_properties(name: str, city_name: str = "") -> list[Property]:
     name = (name or "").strip()
     if not name:

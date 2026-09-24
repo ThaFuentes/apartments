@@ -5,31 +5,38 @@
   <p><a href="/places{% if prop.city_id %}/{{ prop.city_id }}{% endif %}">{{ city_name }}{% if state_name %}, {{ state_name }}{% endif %}</a></p>
   <h1>{{ place_name }}</h1>
   <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} here.</p>
+  <p class="hint">Green is a make ready. Blue is occupied, someone living there.</p>
   {% if current_user.role != 'viewer' %}
   <form method="post" action="/properties/{{ prop.id }}/units" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Add a unit <input name="unit_number" autocomplete="off" placeholder="804" required></label>
-    <button type="submit">Add unit</button>
+    <label>Add units <textarea name="units" placeholder="101, 102, 104-110" required></textarea></label>
+    <button type="submit">Add units</button>
   </form>
   {% endif %}
   <label class="find-unit">Find a unit
     <input data-unit-find autocomplete="off" inputmode="text" placeholder="804">
   </label>
   <div class="unit-tools">
-    <a href="?sort=recent" {% if sort == "recent" %}aria-current="page"{% endif %}>Most recent</a>
-    <a href="?sort=number" {% if sort == "number" %}aria-current="page"{% endif %}>Unit number</a>
+    <a href="?sort=recent" {% if sort == "recent" and not show %}aria-current="page"{% endif %}>Most recent</a>
+    <a href="?sort=number" {% if sort == "number" and not show %}aria-current="page"{% endif %}>Unit number</a>
+    <a href="?show=worked&sort=recent" {% if show == "worked" %}aria-current="page"{% endif %}>Had work</a>
+    <a href="?show=make_ready" {% if show == "make_ready" %}aria-current="page"{% endif %}>Make ready</a>
+    <a href="?show=occupied" {% if show == "occupied" %}aria-current="page"{% endif %}>Occupied</a>
+    <a href="?show=needs" {% if show == "needs" %}aria-current="page"{% endif %}>Needs work</a>
   </div>
   {% if not cards %}
   <p class="empty">No units logged here yet.</p>
   {% endif %}
   <div class="stack" id="unit-list">
     {% for card in cards %}
-    <article class="unit-card" data-unit-card data-number="{{ card.unit.unit_number }}">
+    <article class="unit-card{% if card.unit.occupancy == 'occupied' %} occupied{% elif card.unit.occupancy == 'make_ready' %} make-ready{% endif %}" data-unit-card data-number="{{ card.unit.unit_number }}">
       <a href="/units/{{ card.unit.id }}"><strong>{{ card.unit.unit_number }}</strong></a>
       <span class="unit-meta">
-        {% if card.last %}Last worked {{ card.last|apt_when }}{% else %}Nothing logged yet{% endif %}
+        {% if card.unit.occupancy == 'occupied' %}Occupied{% elif card.unit.occupancy == 'make_ready' %}Make ready{% else %}Open{% endif %}
+        {% if card.last %} · Last worked {{ card.last|apt_when }}{% else %} · Nothing logged yet{% endif %}
         {% if card.last_title %} · {{ card.last_title }}{% endif %}
         {% if card.job_count > 1 %} · {{ card.job_count }} jobs{% endif %}
+        {% if card.open_tasks %} · {{ card.open_tasks }} to do{% endif %}
       </span>
       {% if card.gear_lines %}
       <span class="unit-gear">{% for line in card.gear_lines %}{{ line }}{% if not loop.last %} · {% endif %}{% endfor %}{% if card.gear_more %} · {{ card.gear_more }} more{% endif %}</span>
@@ -49,6 +56,17 @@
     {% endfor %}
   </div>
   <p class="empty" data-unit-empty hidden>No unit matches.</p>
+  {% if changes %}
+  <h2>Who changed what</h2>
+  <ul class="list">
+    {% for row in changes %}
+    <li>
+      <strong>{{ row.what }}</strong>
+      <span class="hint">{{ row.who or "Someone" }}{% if row.where %} · {{ row.where }}{% endif %} · {{ row.when|apt_when }} · {{ row.kind }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
   {% if loose_jobs %}
   <h2>Not on a unit</h2>
   <ul class="list">

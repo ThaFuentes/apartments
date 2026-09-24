@@ -61,6 +61,7 @@ def init_db(app):
         _evolve_credentials()
         _evolve_mail()
         _evolve_equipment()
+        _evolve_units()
         _say("[apt] MariaDB schema ready")
 
 
@@ -139,3 +140,20 @@ def _evolve_equipment():
     with db.engine.begin() as conn:
         for sql in statements:
             conn.execute(text(sql))
+
+
+def _evolve_units():
+    """Occupied and make-ready live on the unit row."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    if "units" not in names:
+        return
+    have = {col["name"] for col in inspect(db.engine).get_columns("units")}
+    if "occupancy" in have:
+        return
+    with db.engine.begin() as conn:
+        conn.execute(text("ALTER TABLE units ADD COLUMN occupancy VARCHAR(20) NOT NULL DEFAULT ''"))

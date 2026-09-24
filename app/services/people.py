@@ -31,6 +31,15 @@ def clean_username(value) -> str:
     return text
 
 
+def person_label(user_id: int | None) -> str:
+    if not user_id:
+        return ""
+    person = db.session.get(User, int(user_id))
+    if not person:
+        return ""
+    return (person.display_name or person.username or "").strip()
+
+
 def find_user(username: str) -> User | None:
     text = (username or "").strip()
     if not text:
