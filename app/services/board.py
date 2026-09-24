@@ -147,12 +147,25 @@ def add_units(user, prop: Property, text: str, source: str) -> dict:
     reply = f"{' '.join(bits)} at {prop.name}."
     if who:
         reply += f" Saved by {who}."
+    if made:
+        from app.services.access import announce
+
+        announce(prop.id, user.id, f"{who or 'Someone'} added units {', '.join(made)} at {prop.name}.", f"/properties/{prop.id}")
     return {"ok": True, "reply": reply, "property_id": prop.id}
 
 
 def set_occupancy(user, unit: Unit, occupancy: str, source: str) -> None:
     before = unit.occupancy or ""
     unit.occupancy = occupancy
+    from app.services.access import announce
+
+    words = {"occupied": "occupied", "make_ready": "a make ready", "": "cleared"}
+    announce(
+        unit.property_id,
+        user.id,
+        f"{person_label(user.id) or 'Someone'} marked unit {unit.unit_number} {words.get(occupancy, occupancy or 'updated')}.",
+        f"/units/{unit.id}",
+    )
     audit(
         user.id,
         source,
@@ -191,6 +204,16 @@ def add_needed(user, unit: Unit, titles: list[str], source: str, kind: str = "",
             {"title": row.title, "kind": row.kind, "unit_id": unit.id, "property_id": unit.property_id},
         )
         rows.append(row)
+    if rows:
+        from app.services.access import announce
+
+        names = ", ".join(row.title for row in rows)
+        announce(
+            unit.property_id,
+            user.id,
+            f"{person_label(user.id) or 'Someone'} updated unit {unit.unit_number}: {names}.",
+            f"/units/{unit.id}",
+        )
     return rows
 
 
@@ -217,6 +240,14 @@ def complete_task(user, unit: Unit, hint: str, source: str) -> tuple[UnitTask | 
     best.status = "done"
     best.done_by_id = user.id
     best.done_at = utcnow()
+    from app.services.access import announce
+
+    announce(
+        unit.property_id,
+        user.id,
+        f"{person_label(user.id) or 'Someone'} finished {best.title} on unit {unit.unit_number}.",
+        f"/units/{unit.id}",
+    )
     audit(
         user.id,
         source,

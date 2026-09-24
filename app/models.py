@@ -169,6 +169,28 @@ class UnitTask(db.Model):
     unit = db.relationship("Unit")
 
 
+class PropertyAccess(db.Model):
+    """Which locations a login can see, edit, and be told about."""
+
+    __tablename__ = "property_access"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "property_id", name="uq_access_user_property"),
+        _OPTS,
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    can_edit = db.Column(db.Boolean, nullable=False, default=False)
+    notify = db.Column(db.Boolean, nullable=False, default=False)
+    pinned = db.Column(db.Boolean, nullable=False, default=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    user = db.relationship("User")
+    property = db.relationship("Property")
+
+
 class Trip(db.Model):
     __tablename__ = "trips"
     __table_args__ = _OPTS

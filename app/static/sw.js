@@ -1,4 +1,4 @@
-const CACHE = "apt-shell-2";
+const CACHE = "apt-shell-3";
 const SHELL = ["/static/offline.html", "/static/css/apt.css", "/static/js/apt.js"];
 
 self.addEventListener("install", function (event) {

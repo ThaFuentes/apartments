@@ -13,7 +13,7 @@
   <title>{% block title %}Apt{% endblock %}</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=15">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=16">
 </head>
 <body class="{% if drive %}drive{% endif %} {% block body_class %}{% endblock %}" data-share="{{ '1' if share.on else '0' }}">
   <div class="intro" id="apt-intro" hidden>
@@ -44,6 +44,11 @@
     <p class="share-banner">Sharing your location{% if share.viewers %} with {{ share.viewers }}{% endif %}{% if not share.fresh %} · waiting for a fresh pin{% endif %}</p>
     {% endif %}
   </header>
+  <div id="apt-install" class="install" hidden>
+    <p>Install Apt on this phone so it opens like an app.</p>
+    <button type="button" id="apt-install-go">Install</button>
+    <button type="button" id="apt-install-skip" class="quiet">Not now</button>
+  </div>
   <main>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -79,6 +84,6 @@
     {% endif %}
   </nav>
   {% endif %}
-  <script src="{{ url_for('static', filename='js/apt.js') }}?v=15"></script>
+  <script src="{{ url_for('static', filename='js/apt.js') }}?v=16"></script>
 </body>
 </html>

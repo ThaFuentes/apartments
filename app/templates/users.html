@@ -44,6 +44,28 @@
     <label class="check"><input type="checkbox" name="active" value="1" {% if person.active %}checked{% endif %}> Active</label>
     <button type="submit">Update</button>
   </form>
+  {% if person.role != 'owner' %}
+  <form method="post" action="/users/{{ person.id }}/access" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>Properties for {{ person.display_name or person.username }}</h3>
+    <p class="hint">She only sees the ones you tick. Edit units is for an employee at that property. Notify tells her when a unit there changes.</p>
+    {% for prop in properties %}
+    {% set row = access.get((person.id, prop.id)) %}
+    <fieldset class="stack">
+      <legend>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</legend>
+      <label class="check"><input type="checkbox" name="see-{{ prop.id }}" value="1" {% if row %}checked{% endif %}> See</label>
+      {% if person.role == 'field' %}
+      <label class="check"><input type="checkbox" name="edit-{{ prop.id }}" value="1" {% if row and row.can_edit %}checked{% endif %}> Edit units</label>
+      {% endif %}
+      <label class="check"><input type="checkbox" name="notify-{{ prop.id }}" value="1" {% if row and row.notify %}checked{% endif %}> Notify when units change</label>
+    </fieldset>
+    {% endfor %}
+    {% if not properties %}
+    <p class="empty">Add a property first.</p>
+    {% endif %}
+    <button type="submit">Save property access</button>
+  </form>
+  {% endif %}
   {% endfor %}
 </section>
 {% endblock %}

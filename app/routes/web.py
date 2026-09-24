@@ -158,7 +158,7 @@ def home():
         return redirect("/reports")
     from app.services.browse import home_board
 
-    return render_template("home.html", board=home_board(current_user.id), msg_key=_new_key())
+    return render_template("home.html", board=home_board(current_user.id, current_user), msg_key=_new_key())
 
 
 @bp.post("/sites")
@@ -557,7 +557,7 @@ def places():
         abort(403)
     from app.services.browse import place_groups
 
-    return render_template("places.html", groups=place_groups(), city=None)
+    return render_template("places.html", groups=place_groups(user=current_user), city=None)
 
 
 @bp.get("/places/<int:city_id>")
@@ -570,7 +570,7 @@ def city_detail(city_id):
         abort(404)
     from app.services.browse import place_groups
 
-    return render_template("places.html", groups=place_groups(city.id), city=city)
+    return render_template("places.html", groups=place_groups(city.id, user=current_user), city=city)
 
 
 @bp.get("/properties/<int:property_id>")
@@ -578,9 +578,9 @@ def city_detail(city_id):
 def property_detail(property_id):
     if not _history_ok():
         abort(403)
-    prop = db.session.get(Property, property_id)
-    if not prop or prop.deleted_at:
-        abort(404)
+    from app.services.access import can_edit_property, require_see
+
+    prop = require_see(current_user, db.session.get(Property, property_id))
     from app.services.browse import unit_cards
 
     sort = request.args.get("sort") or "recent"
@@ -608,6 +608,7 @@ def property_detail(property_id):
         show=show,
         changes=recent_changes(prop.id),
         who=person_label,
+        editable=can_edit_property(current_user, prop.id),
         msg_key=_new_key(),
     )
 
@@ -655,13 +656,10 @@ def property_delete(property_id):
 @bp.post("/properties/<int:property_id>/units")
 @login_required
 def property_add_unit(property_id):
-    if current_user.role == "viewer":
-        abort(403)
+    from app.services.access import require_edit
     from app.services.board import add_units
 
-    prop = db.session.get(Property, property_id)
-    if not prop or prop.deleted_at:
-        abort(404)
+    prop = require_edit(current_user, db.session.get(Property, property_id))
     blob = (request.form.get("units") or request.form.get("unit_number") or "").strip()
     result = add_units(current_user, prop, blob, "human")
     db.session.commit()
@@ -672,13 +670,9 @@ def property_add_unit(property_id):
 @bp.post("/units/<int:unit_id>")
 @login_required
 def unit_rename(unit_id):
-    if current_user.role == "viewer":
-        abort(403)
     from app.services.records import normalize_unit
 
-    unit = db.session.get(Unit, unit_id)
-    if not unit or unit.deleted_at:
-        abort(404)
+    unit = _editable_unit(unit_id)
     number = normalize_unit(request.form.get("unit_number") or "")
     if not number:
         flash("Type a unit number.", "warn")
@@ -700,11 +694,7 @@ def unit_rename(unit_id):
 @bp.post("/units/<int:unit_id>/delete")
 @login_required
 def unit_delete(unit_id):
-    if current_user.role == "viewer":
-        abort(403)
-    unit = db.session.get(Unit, unit_id)
-    if not unit or unit.deleted_at:
-        abort(404)
+    unit = _editable_unit(unit_id)
     unit.deleted_at = utcnow()
     db.session.commit()
     flash(f"Removed unit {unit.unit_number}.", "ok")
@@ -716,9 +706,12 @@ def unit_delete(unit_id):
 def unit_detail(unit_id):
     if not _history_ok():
         abort(403)
+    from app.services.access import can_edit_property, require_see
+
     unit = db.session.get(Unit, unit_id)
     if not unit or unit.deleted_at:
         abort(404)
+    require_see(current_user, unit.property)
     from app.models import Equipment
 
     visits = UnitVisit.query.filter_by(unit_id=unit.id).order_by(UnitVisit.id.desc()).all()
@@ -748,18 +741,25 @@ def unit_detail(unit_id):
         kind_label=kind_label,
         tasks=task_groups(unit.id),
         who=person_label,
+        editable=can_edit_property(current_user, unit.property_id),
         last=last,
     )
+
+
+def _editable_unit(unit_id: int):
+    from app.services.access import require_edit
+
+    unit = db.session.get(Unit, unit_id)
+    if not unit or unit.deleted_at:
+        abort(404)
+    require_edit(current_user, unit.property)
+    return unit
 
 
 @bp.post("/units/<int:unit_id>/equipment")
 @login_required
 def unit_equipment(unit_id):
-    if current_user.role == "viewer":
-        abort(403)
-    unit = db.session.get(Unit, unit_id)
-    if not unit or unit.deleted_at:
-        abort(404)
+    unit = _editable_unit(unit_id)
     piece = _equipment_form()
     if not any(piece.values()):
         flash("Say what the equipment is, or its brand, model, serial, or a note.", "warn")
@@ -777,13 +777,9 @@ def unit_equipment(unit_id):
 @bp.post("/units/<int:unit_id>/occupancy")
 @login_required
 def unit_occupancy(unit_id):
-    if current_user.role == "viewer":
-        abort(403)
     from app.services.board import set_occupancy
 
-    unit = db.session.get(Unit, unit_id)
-    if not unit or unit.deleted_at:
-        abort(404)
+    unit = _editable_unit(unit_id)
     occupancy = (request.form.get("occupancy") or "").strip()
     if occupancy not in ("occupied", "make_ready", ""):
         occupancy = ""
@@ -797,13 +793,9 @@ def unit_occupancy(unit_id):
 @bp.post("/units/<int:unit_id>/tasks")
 @login_required
 def unit_task_add(unit_id):
-    if current_user.role == "viewer":
-        abort(403)
     from app.services.board import add_needed
 
-    unit = db.session.get(Unit, unit_id)
-    if not unit or unit.deleted_at:
-        abort(404)
+    unit = _editable_unit(unit_id)
     title = (request.form.get("title") or "").strip()
     if not title:
         flash("Say what this unit needs.", "warn")
@@ -828,13 +820,12 @@ def unit_task_add(unit_id):
 @bp.post("/tasks/<int:task_id>/done")
 @login_required
 def task_done(task_id):
-    if current_user.role == "viewer":
-        abort(403)
     from app.models import UnitTask
 
     row = db.session.get(UnitTask, task_id)
     if not row or row.deleted_at:
         abort(404)
+    _editable_unit(row.unit_id)
     row.status = "done"
     row.done_by_id = current_user.id
     row.done_at = utcnow()
@@ -846,13 +837,12 @@ def task_done(task_id):
 @bp.post("/tasks/<int:task_id>/delete")
 @login_required
 def task_delete(task_id):
-    if current_user.role == "viewer":
-        abort(403)
     from app.models import UnitTask
 
     row = db.session.get(UnitTask, task_id)
     if not row or row.deleted_at:
         abort(404)
+    _editable_unit(row.unit_id)
     row.deleted_at = utcnow()
     unit_id = row.unit_id
     db.session.commit()
@@ -876,8 +866,6 @@ def _equipment_form() -> dict:
 @bp.post("/equipment/<int:gear_id>")
 @login_required
 def equipment_update(gear_id):
-    if current_user.role == "viewer":
-        abort(403)
     from app.models import Equipment
     from app.services.equipment import kind_label
     from app.services.records import audit
@@ -885,6 +873,7 @@ def equipment_update(gear_id):
     row = db.session.get(Equipment, gear_id)
     if not row or row.deleted_at or not row.unit_id:
         abort(404)
+    _editable_unit(row.unit_id)
     before = {
         "kind": row.kind,
         "brand": row.brand,
@@ -911,13 +900,12 @@ def equipment_update(gear_id):
 @bp.post("/equipment/<int:gear_id>/delete")
 @login_required
 def equipment_delete(gear_id):
-    if current_user.role == "viewer":
-        abort(403)
     from app.models import Equipment
 
     row = db.session.get(Equipment, gear_id)
-    if not row or row.deleted_at:
+    if not row or row.deleted_at or not row.unit_id:
         abort(404)
+    _editable_unit(row.unit_id)
     unit_id = row.unit_id
     row.deleted_at = utcnow()
     db.session.commit()
@@ -1440,8 +1428,44 @@ def users():
         result = commit_apply(current_user, "invite_viewer", payload, "human", _key() or _new_key())
         flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
         return redirect("/users")
+    from app.models import Property, PropertyAccess
+
     people = User.query.order_by(User.id.asc()).all()
-    return render_template("users.html", people=people, msg_key=_new_key())
+    properties = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
+    access = {(row.user_id, row.property_id): row for row in PropertyAccess.query.all()}
+    return render_template("users.html", people=people, properties=properties, access=access, msg_key=_new_key())
+
+
+@bp.post("/users/<int:user_id>/access")
+@owner_required
+def user_access(user_id):
+    from app.models import Property
+    from app.services.access import set_access
+
+    person = db.session.get(User, user_id)
+    if not person or person.role == "owner":
+        abort(404)
+    props = Property.query.filter(Property.deleted_at.is_(None)).all()
+    for prop in props:
+        see = request.form.get(f"see-{prop.id}") == "1"
+        edit = request.form.get(f"edit-{prop.id}") == "1"
+        notify = request.form.get(f"notify-{prop.id}") == "1"
+        set_access(current_user, person, prop, see=see, edit=edit and see, notify=notify and see)
+    db.session.commit()
+    flash("Property access saved.", "ok")
+    return redirect("/users")
+
+
+@bp.post("/properties/<int:property_id>/pin")
+@login_required
+def property_pin(property_id):
+    from app.services.access import pin_property, require_see
+
+    prop = require_see(current_user, db.session.get(Property, property_id))
+    reply = pin_property(current_user, prop, request.form.get("pinned") == "1")
+    db.session.commit()
+    flash(reply, "ok")
+    return redirect("/places")
 
 
 @bp.post("/users/<int:user_id>")

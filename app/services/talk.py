@@ -257,6 +257,57 @@ def _role_word(word: str) -> str:
     return "viewer"
 
 
+def _file_access(user, text: str, key: str, source: str):
+    raw = (text or "").strip().rstrip(".")
+    if re.search(r"\b(units?|make ready|occupied|washer|dryer)\b", raw, re.I) and not re.search(r"\b(pin|give|let|allow|notify)\b", raw, re.I):
+        return None
+    pin = re.search(r"^(?:please\s+)?(un)?pin\s+(.+)$", raw, re.I)
+    if pin:
+        from app.services.access import pin_property
+        from app.services.records import fuzzy_properties
+
+        matches = fuzzy_properties(pin.group(2))
+        if user.role != "owner":
+            from app.services.access import can_see_property
+
+            matches = [prop for prop in matches if can_see_property(user, prop.id)]
+        if len(matches) != 1:
+            return {"ok": True, "reply": "Which property should I pin?"} if not matches else {"ok": True, "reply": "Which one?\n" + "\n".join(prop.name for prop in matches[:8])}
+        reply = pin_property(user, matches[0], pin.group(1) is None)
+        db.session.commit()
+        return {"ok": True, "reply": reply}
+    grant = re.search(
+        r"\b(?:give|let|allow)\s+([a-z0-9][a-z0-9._-]{1,40})\s+(?:(see|edit|notify)\s+)?(?:units\s+at\s+|about\s+)?(.+)$",
+        raw,
+        re.I,
+    )
+    if not grant:
+        grant = re.search(r"\b([a-z0-9][a-z0-9._-]{1,40})\s+can\s+(see|edit)\s+(.+)$", raw, re.I)
+        if grant:
+            username, mode, hint = grant.group(1), grant.group(2), grant.group(3)
+        else:
+            heard = re.search(r"\bnotify\s+([a-z0-9][a-z0-9._-]{1,40})\s+(?:about|when|on)\s+(.+)$", raw, re.I)
+            if not heard:
+                return None
+            username, mode, hint = heard.group(1), "notify", heard.group(2)
+    else:
+        username, mode, hint = grant.group(1), (grant.group(2) or "see"), grant.group(3)
+    from app.services.access import grant_from_words
+
+    mode = (mode or "see").lower()
+    result = grant_from_words(
+        user,
+        username,
+        hint,
+        see=True,
+        edit=True if mode == "edit" else None,
+        notify=True if mode == "notify" else None,
+    )
+    if result.get("ok"):
+        db.session.commit()
+    return result
+
+
 def _person_to_add(user, text: str, key: str, source: str):
     named = AS_ROLE.search(text or "")
     role_first = ADD_USER.search(text or "")
@@ -482,6 +533,9 @@ def _from_model(user, text: str, key: str, source: str):
     person = _person_to_add(user, text, key, source)
     if person:
         return person
+    access = _file_access(user, text, key, source)
+    if access:
+        return access
     planned = _file_trip_plan(user, text, key, source)
     if planned:
         return planned
@@ -724,6 +778,9 @@ def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:
     person = _person_to_add(user, text, key, source)
     if person:
         return person
+    access = _file_access(user, text, key, source)
+    if access:
+        return access
     planned = _file_trip_plan(user, text, key, source)
     if planned:
         return planned

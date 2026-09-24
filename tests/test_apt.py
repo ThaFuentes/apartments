@@ -47,6 +47,7 @@ TABLES = [
     "trips",
     "unit_tasks",
     "units",
+    "property_access",
     "properties",
     "cities",
     "api_credentials",
@@ -1186,6 +1187,75 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn(b"carpet cleaned", unit_page.data)
         self.assertIn(b"Joe", unit_page.data)
         self.assertIn(b"Make ready", unit_page.data)
+
+    def test_a_login_only_sees_assigned_properties(self):
+        from app.models import Notice, PropertyAccess
+        from app.services.browse import place_groups
+        from app.services.records import ensure_property
+
+        owner = self.owner()
+        wood = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        madison = ensure_property("Madison Sq", "Lubbock", "Texas", owner.id)
+        db.session.commit()
+        handle_message(owner, "add employee jasmine", idempotency_key="emp-j")
+        granted = handle_message(owner, "give jasmine woodview", idempotency_key="see-w")
+        self.assertIn("Woodview", granted["reply"])
+        edited = handle_message(owner, "let jasmine edit units at woodview", idempotency_key="edit-w")
+        self.assertIn("edit", edited["reply"])
+        told = handle_message(owner, "notify jasmine about woodview", idempotency_key="note-w")
+        self.assertIn("notified", told["reply"])
+        pinned = handle_message(owner, "pin madison sq", idempotency_key="pin-m")
+        self.assertIn("pinned", pinned["reply"])
+        groups = place_groups(user=owner)
+        self.assertEqual(groups[0]["city"], "Pinned")
+        self.assertEqual(groups[0]["places"][0]["name"], "Madison Sq")
+        from werkzeug.security import generate_password_hash
+
+        jasmine = User.query.filter_by(username="jasmine").one()
+        jasmine.password_hash = generate_password_hash("field-pass")
+        db.session.commit()
+        hers = place_groups(user=jasmine)
+        names = [place["name"] for group in hers for place in group["places"]]
+        self.assertEqual(names, ["Woodview"])
+        self.assertTrue(PropertyAccess.query.filter_by(user_id=jasmine.id, property_id=wood.id, can_edit=True, notify=True).one())
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "jasmine", "password": "field-pass"})
+        hidden = client.get(f"/properties/{madison.id}")
+        self.assertEqual(hidden.status_code, 404)
+        shown = client.get(f"/properties/{wood.id}")
+        self.assertEqual(shown.status_code, 200)
+        self.assertIn(b"Add units", shown.data)
+        blocked = client.get("/places")
+        self.assertIn(b"Woodview", blocked.data)
+        self.assertNotIn(b"Madison", blocked.data)
+        boss_client = APP.test_client()
+        boss_client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        boss_client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with boss_client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        db.session.commit()
+        saved = boss_client.post(
+            f"/properties/{wood.id}/units",
+            data={"csrf_token": token, "units": "12"},
+            follow_redirects=True,
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertIn(b"Added", saved.data)
+        from app.services.board import add_units
+
+        add_units(owner, wood, "15", "human")
+        db.session.commit()
+        note = Notice.query.filter_by(user_id=jasmine.id, kind="unit-change").order_by(Notice.id.desc()).first()
+        self.assertIsNotNone(note)
+        self.assertIn("15", note.body)
+        self.assertIn("Woodview", note.body)
+        page = boss_client.get("/")
+        self.assertIn(b"apt-install", page.data)
+        self.assertIn(b"Install Apt", page.data)
+        manifest = APP.test_client().get("/manifest.webmanifest")
+        self.assertEqual(manifest.status_code, 200)
+        self.assertIn(b"standalone", manifest.data)
 
 
 if __name__ == "__main__":

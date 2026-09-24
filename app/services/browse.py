@@ -28,26 +28,36 @@ def gear_blurb(item: Equipment) -> str:
     return text or "Equipment"
 
 
-def home_board(user_id: int) -> dict:
+def home_board(user_id: int, user=None) -> dict:
     """The numbers and lists on the home dashboard."""
     from app.models import PlanItem
+    from app.services.access import access_map, sees_all
     from app.services.clock import local_today
     from app.services.miles import traveled_total
 
     today = local_today()
-    groups = place_groups()
+    groups = place_groups(user=user)
     places = []
     for group in groups:
+        if group.get("pinned"):
+            continue
         for place in group["places"]:
             places.append({**place, "city_label": group["city"]})
-    places.sort(key=lambda row: (row["last"] is None, -(row["last"].timestamp() if row["last"] else 0), row["name"].lower()))
-    been = [row for row in places if row["last"]][:5]
+    places.sort(key=lambda row: (row.get("pinned") is not True, row["last"] is None, -(row["last"].timestamp() if row["last"] else 0), row["name"].lower()))
+    pinned = []
+    for group in groups:
+        if group.get("pinned"):
+            pinned.extend({**place, "city_label": "Pinned"} for place in group["places"])
+    been = (pinned + [row for row in places if row["last"]])[:5]
+    allowed = None if user is None or sees_all(user) else set(access_map(user))
     open_items = (
         PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial")))
         .order_by(PlanItem.id.desc())
         .limit(6)
         .all()
     )
+    if allowed is not None:
+        open_items = [item for item in open_items if item.property_id in allowed]
     plan = []
     for item in open_items:
         prop = item.property
@@ -64,12 +74,15 @@ def home_board(user_id: int) -> dict:
                 "trip_id": item.trip_id,
             }
         )
-    jobs = Job.query.filter(Job.deleted_at.is_(None)).order_by(Job.created_at.desc(), Job.id.desc()).limit(6).all()
+    job_query = Job.query.filter(Job.deleted_at.is_(None))
+    if allowed is not None:
+        job_query = job_query.filter(Job.property_id.in_(allowed or {0}))
+    jobs = job_query.order_by(Job.created_at.desc(), Job.id.desc()).limit(6).all()
     miles = traveled_total(user_id)
     return {
         "today": today,
-        "place_count": len(places),
-        "open_count": PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial"))).count(),
+        "place_count": len(places) + len(pinned),
+        "open_count": len(open_items) if allowed is not None else PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial"))).count(),
         "miles": int(miles) if float(miles).is_integer() else miles,
         "places": been or places[:5],
         "plan": plan,
@@ -77,11 +90,15 @@ def home_board(user_id: int) -> dict:
     }
 
 
-def place_groups(city_id: int | None = None) -> list[dict]:
+def place_groups(city_id: int | None = None, user=None) -> list[dict]:
     from app.models import City
+    from app.services.access import access_map, sees_all
     from app.services.geo import city_parts
 
     props = Property.query.filter(Property.deleted_at.is_(None)).all()
+    mine = access_map(user) if user is not None else {}
+    if user is not None and not sees_all(user):
+        props = [prop for prop in props if prop.id in mine]
     if city_id:
         anchor = db.session.get(City, city_id)
         if anchor:
@@ -131,6 +148,7 @@ def place_groups(city_id: int | None = None) -> list[dict]:
             (city_name.lower(), state.lower()),
             {"city": label, "city_id": prop.city_id, "places": []},
         )
+        access = mine.get(prop.id)
         bucket["places"].append(
             {
                 "id": prop.id,
@@ -138,13 +156,26 @@ def place_groups(city_id: int | None = None) -> list[dict]:
                 "unit_count": unit_counts.get(prop.id, 0),
                 "last": last,
                 "last_title": title,
+                "pinned": bool(access and access.pinned),
+                "sort_order": access.sort_order if access else 0,
             }
         )
+    pinned = []
     groups = sorted(grouped.values(), key=lambda row: row["city"].lower())
     for group in groups:
-        group["places"].sort(
-            key=lambda row: (row["last"] is None, -(row["last"].timestamp() if row["last"] else 0), row["name"].lower())
-        )
+        stay = []
+        for place in group["places"]:
+            if place["pinned"]:
+                pinned.append(place)
+            else:
+                stay.append(place)
+        stay.sort(key=lambda row: (row["last"] is None, -(row["last"].timestamp() if row["last"] else 0), row["name"].lower()))
+        group["places"] = stay
+        group["pinned"] = False
+    groups = [group for group in groups if group["places"]]
+    if pinned:
+        pinned.sort(key=lambda row: (row["sort_order"], row["name"].lower()))
+        groups.insert(0, {"city": "Pinned", "city_id": None, "places": pinned, "pinned": True})
     return groups
 
 

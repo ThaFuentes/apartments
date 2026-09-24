@@ -6,7 +6,7 @@
   <h1>{{ place_name }}</h1>
   <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} here.</p>
   <p class="hint">Green is a make ready. Blue is occupied, someone living there.</p>
-  {% if current_user.role != 'viewer' %}
+  {% if editable %}
   <form method="post" action="/properties/{{ prop.id }}/units" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Add units <textarea name="units" placeholder="101, 102, 104-110" required></textarea></label>
@@ -41,7 +41,7 @@
       {% if card.gear_lines %}
       <span class="unit-gear">{% for line in card.gear_lines %}{{ line }}{% if not loop.last %} · {% endif %}{% endfor %}{% if card.gear_more %} · {{ card.gear_more }} more{% endif %}</span>
       {% endif %}
-      {% if current_user.role != 'viewer' %}
+      {% if editable %}
       <form method="post" action="/units/{{ card.unit.id }}" class="inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input name="unit_number" value="{{ card.unit.unit_number }}" aria-label="Unit number">
@@ -75,7 +75,7 @@
     {% endfor %}
   </ul>
   {% endif %}
-  {% if current_user.role != 'viewer' %}
+  {% if editable %}
   <h2>Edit</h2>
   <form method="post" class="card stack" action="/properties/{{ prop.id }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

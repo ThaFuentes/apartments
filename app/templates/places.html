@@ -10,15 +10,16 @@
   <p class="lead">Open a location to see the units, what was done, and the equipment.</p>
   {% endif %}
   {% if not groups %}
-  <p class="empty">No places yet. Add one on Home.</p>
+  <p class="empty">{% if current_user.role == 'owner' %}No places yet. Add one on Home.{% else %}No properties are on this login yet.{% endif %}</p>
   {% endif %}
   {% for group in groups %}
   {% if not city %}<h2>{{ group.city }}</h2>{% endif %}
   <div class="stack">
     {% for place in group.places %}
-    <a class="unit-card" href="/properties/{{ place.id }}">
-      <strong>{{ place.name }}</strong>
+    <article class="unit-card{% if place.pinned %} pinned{% endif %}">
+      <a href="/properties/{{ place.id }}"><strong>{{ place.name }}</strong></a>
       <span class="unit-meta">
+        {% if place.pinned %}Pinned · {% endif %}
         {% if place.unit_count %}
         {{ place.unit_count }} unit{% if place.unit_count != 1 %}s{% endif %}
         {% if place.last %} · last {{ place.last|apt_when }}{% endif %}
@@ -27,7 +28,14 @@
         No units logged yet
         {% endif %}
       </span>
-    </a>
+      {% if current_user.role != 'viewer' %}
+      <form method="post" action="/properties/{{ place.id }}/pin">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="pinned" value="{{ '0' if place.pinned else '1' }}">
+        <button type="submit" class="quiet">{{ 'Unpin' if place.pinned else 'Pin to top' }}</button>
+      </form>
+      {% endif %}
+    </article>
     {% endfor %}
   </div>
   {% endfor %}

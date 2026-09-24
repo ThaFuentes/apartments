@@ -12,7 +12,7 @@
       {% if last %} Last worked {{ last|apt_when }}.{% endif %}
     </p>
   </div>
-  {% if current_user.role != 'viewer' %}
+  {% if editable %}
   <form method="post" action="/units/{{ unit.id }}/occupancy" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit" name="occupancy" value="make_ready" class="ready">Make ready</button>
@@ -31,7 +31,7 @@
     <h3>{{ item.title }}</h3>
     <p class="hint">{{ item.status }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}{% if item.status == 'done' and who(item.done_by_id) %} · done by {{ who(item.done_by_id) }}{% endif %}</p>
     {% if item.notes %}<p>{{ item.notes }}</p>{% endif %}
-    {% if current_user.role != 'viewer' and item.status == 'needed' %}
+    {% if editable and item.status == 'needed' %}
     <form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>
     {% endif %}
   </article>
@@ -42,7 +42,7 @@
   <article class="card">
     <h3>{{ item.title }}</h3>
     <p class="hint">{{ item.status }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}</p>
-    {% if current_user.role != 'viewer' and item.status == 'needed' %}
+    {% if editable and item.status == 'needed' %}
     <form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>
     {% endif %}
   </article>
@@ -55,7 +55,7 @@
   <article class="card">
     <h3>{{ item.title }}</h3>
     <p class="hint">{{ item.status }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}</p>
-    {% if current_user.role != 'viewer' and item.status == 'needed' %}
+    {% if editable and item.status == 'needed' %}
     <form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>
     {% endif %}
   </article>
@@ -73,7 +73,7 @@
   <p class="empty">Nothing is vendored out from this unit.</p>
   {% endfor %}
 
-  {% if current_user.role != 'viewer' %}
+  {% if editable %}
   <details>
     <summary>Add something this unit needs</summary>
     <form method="post" action="/units/{{ unit.id }}/tasks" class="card stack">
@@ -113,7 +113,7 @@
         · Added {{ item.created_at|apt_when }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}
       </p>
       {% if item.notes %}<p class="gear-note">{{ item.notes }}</p>{% else %}<p class="hint">No note on this one.</p>{% endif %}
-      {% if current_user.role != 'viewer' %}
+      {% if editable %}
       <details>
         <summary>Update this {{ kind_label(item.kind) or "item" }}</summary>
         <form method="post" action="/equipment/{{ item.id }}" class="card stack">
@@ -144,7 +144,7 @@
     {% endfor %}
   </div>
   {% endif %}
-  {% if current_user.role != 'viewer' %}
+  {% if editable %}
   <details>
     <summary>Add equipment</summary>
     <form method="post" action="/units/{{ unit.id }}/equipment" class="card stack">
