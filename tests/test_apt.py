@@ -711,6 +711,45 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn("Your name is Christopher.", heard)
         self.assertIn("talking to my boss", heard)
 
+    def test_add_woodview_ignores_a_wrong_model_tool(self):
+        from app.services.talk import _place_she_named
+
+        said = "can you add woodview to my list and look up the address? ITs woodview odessa texas"
+        place = _place_she_named(said)
+        self.assertEqual(place["property_name"], "Woodview")
+        self.assertEqual(place["city"], "Odessa")
+        self.assertEqual(place["region"], "TX")
+        self.assertIsNone(_place_she_named("i said add a property please pay attention"))
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        hit = {
+            "address": "4330 N Grandview Ave, Odessa, TX",
+            "lat": 31.89,
+            "lng": -102.35,
+            "label": "Woodview",
+        }
+        with patch("app.services.providers.gemini_complete", return_value={"ok": True, "text": "", "calls": [{"name": "query_record", "args": {"question": "woodview"}}]}), patch(
+            "app.services.appliers.lookup_place", return_value=hit
+        ):
+            heard = handle_message(user, said, idempotency_key="add-wood")
+        self.assertIn("Woodview", heard["reply"])
+        self.assertIn("4330 N Grandview", heard["reply"])
+        self.assertNotIn("matching job", heard["reply"])
+        self.assertNotIn("Madison", heard["reply"])
+        prop = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertEqual(prop.name, "Woodview")
+        self.assertEqual(prop.city.name, "Odessa")
+
     def test_its_at_saves_the_looked_up_address(self):
         user = self.owner()
         hit = {

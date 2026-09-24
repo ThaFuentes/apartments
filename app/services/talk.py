@@ -139,26 +139,84 @@ def route(user, text: str, key: str, source: str) -> dict:
     return _local_fallback(user, text, key, source, "")
 
 
+def _place_she_named(text: str) -> dict | None:
+    """The property and city in her sentence, when she asked to add it."""
+    raw = (text or "").strip()
+    if not re.search(r"\b(add|create|save|put|look\s*up|lookup)\b", raw, re.I):
+        return None
+    tail = re.search(r"\bit(?:'s|s| is)\s+(.+)$", raw, re.I)
+    blob = tail.group(1).strip(" .?") if tail else ""
+    if not blob:
+        cleaned = re.sub(r"^.*?\b(?:add|create|save|put)\s+", "", raw, count=1, flags=re.I)
+        cleaned = re.split(r"\b(?:and|look\s*up|lookup|to my|please)\b", cleaned, maxsplit=1, flags=re.I)[0]
+        blob = cleaned.strip(" .?")
+    if not blob:
+        return None
+    slots = _slots_from_destination(blob)
+    name = slots.get("property_name") or slots.get("place") or ""
+    city = slots.get("city") or ""
+    region = slots.get("region") or ""
+    if name and not city:
+        named = re.search(
+            rf"\b({re.escape(name)})\s+([a-z][a-z .'-]{{2,40}}?)\s+(texas|tx|oklahoma|ok|new mexico|nm)\b",
+            raw,
+            re.I,
+        )
+        if named:
+            city = _tidy_place(named.group(2))
+            region = STATES.get(named.group(3).lower(), named.group(3).upper())
+    if not name or not city:
+        return None
+    generic = {"a", "the", "property", "properties", "place", "places", "site", "sites", "list", "address", "street", "name", "number", "it"}
+    if name.lower() in generic or city.lower() in generic:
+        return None
+    return {"property_name": name, "city": city, "region": region}
+
+
+def _calls_she_asked(text: str, calls: list) -> list:
+    """Drop a tool that names a property she did not say."""
+    low = (text or "").lower()
+    kept = []
+    adding = bool(re.search(r"\b(add|create|save|put|look\s*up|lookup)\b", low))
+    for call in calls:
+        name = (call.get("name") or "").strip()
+        args = call.get("args") or {}
+        if not isinstance(args, dict):
+            args = {}
+        if name == "query_record" and adding:
+            continue
+        if name in ("upsert_property", "plan_trip", "delete_property", "update_property", "log_work"):
+            mentioned = (args.get("property_name") or args.get("match_name") or "").strip().lower()
+            if mentioned and mentioned not in low and mentioned.split()[0] not in low:
+                continue
+        kept.append(call)
+    return kept
+
+
 def _from_model(user, text: str, key: str, source: str):
-    """The saved model answers first. Local phrases run only when it has nothing to say."""
+    """Her words go to the saved model. Local phrases run only when she has no key."""
+    from app.services.pending import commit_apply
     from app.services.providers import collect_tool_calls
 
     heard = collect_tool_calls(user, text)
     if not heard:
         return None
+    place = _place_she_named(text)
+    if place:
+        _close_questions(user)
+        return commit_apply(user, "upsert_property", place, source, key)
     note = (heard.get("note") or "").strip()
-    calls = heard.get("calls") or []
+    calls = _calls_she_asked(text, heard.get("calls") or [])
     if calls:
-        result = _from_calls(user, calls, key, source, note)
-        return result
+        return _from_calls(user, calls, key, source, note)
     prose = (heard.get("text") or "").strip()
     if prose:
         if note:
-            prose = note + " " + prose
+            prose = f"{note} {prose}"
         return {"ok": True, "reply": prose}
     if note:
-        return _local_fallback(user, text, key, source, note)
-    return None
+        return {"ok": False, "reply": note, "quota": True}
+    return {"ok": False, "reply": "I didn't get an answer. Say that again."}
 
 
 def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:

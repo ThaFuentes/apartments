@@ -237,7 +237,7 @@ def chat_with_tools(row, text: str, timeout: int = 25) -> dict:
     messages = [
         {
             "role": "system",
-            "content": "You help one regional manager. The message names you and says how to talk. Follow that name and tone. Her record is in the message. Answer questions from that record. Use tools to add, edit, or delete. delete_property and update_property take the property id. Do not say there is no matching job when she asked about a property.",
+            "content": "You help one regional manager. The message names you and says how to talk. When she says to add a property, call upsert_property with the exact name and city she said. Never substitute a different property. Do not call query_record for an add. Do not say there is no matching job unless she asked about a job.",
         },
         {"role": "user", "content": text},
     ]
