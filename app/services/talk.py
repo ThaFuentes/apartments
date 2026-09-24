@@ -515,11 +515,20 @@ def _person_to_add(user, text: str, key: str, source: str):
 
 def _is_trip_plan(text: str) -> bool:
     raw = text or ""
-    if not re.search(r"\bplan\b", raw, re.I):
-        return False
     if re.search(r"\b(delete|remove|cancel|clear)\b", raw, re.I) and re.search(r"\bplan\b", raw, re.I):
         return False
-    return bool(re.search(r"\b(trip|drive|going|gonna|visit)\b", raw, re.I) or re.search(r"\b(create|make|build|give)\b", raw, re.I))
+    return bool(re.search(r"\b(plan|schedule|itinerary)\b", raw, re.I))
+
+
+def _plan_purpose(text: str) -> tuple[str, str]:
+    match = re.search(
+        r"\b(?:to|for)\s+((?:replace|fix|install|check|do|change|look at|work on|swap)\b.+)$",
+        text or "",
+        re.I,
+    )
+    if not match:
+        return text or "", ""
+    return (text or "")[: match.start()], _clean_slot(match.group(1))
 
 
 def _plan_slots(text: str) -> dict | None:
@@ -535,21 +544,19 @@ def _plan_slots(text: str) -> dict | None:
             raw,
             flags=re.I,
         )
-    purpose = ""
-    purpose_match = re.search(
-        r"\b(?:to|for)\s+((?:replace|fix|install|check|do|change|look at|work on|swap)\b.+)$",
-        raw,
-        re.I,
-    )
-    if purpose_match:
-        purpose = _clean_slot(purpose_match.group(1))
-        raw = raw[: purpose_match.start()]
     dest = re.search(r"\btrip\s+to\s+(.+)$", raw, re.I)
     if not dest:
-        dest = re.search(r"\b(?:going|gonna|headed)\s+to\s+(.+)$", raw, re.I)
+        dest = re.search(r"\b(?:going|gonna|headed|go)\s+to\s+(.+)$", raw, re.I)
     if not dest:
-        return {"gas": gas, "purpose": purpose} if gas or purpose else None
-    slots = _slots_from_destination(dest.group(1).strip(" ."))
+        dest = re.search(r"\bplan\b(?:\s+\w+){0,8}\s+(?:for|at)\s+(.+)$", raw, re.I)
+    if not dest:
+        dest = re.search(r"\bat\s+([a-z][a-z0-9' ]{2,60})$", raw, re.I)
+    if not dest:
+        return {"gas": gas} if gas else None
+    body, purpose = _plan_purpose(dest.group(1).strip(" ."))
+    if not body:
+        return {"gas": gas, "purpose": purpose} or None
+    slots = _slots_from_destination(body)
     if purpose and not slots.get("purpose"):
         slots["purpose"] = purpose
     if gas:
@@ -580,11 +587,37 @@ def _remember_gas(user, trip_id: int, property_id: int, detail: str, source: str
 def _file_trip_plan(user, text: str, key: str, source: str):
     if not _is_trip_plan(text):
         return None
+    from app.services.clock import local_today
+    from app.services.pending import commit_apply
+    from app.services.plan import parse_plan_text
+    from app.services.records import fuzzy_properties, site_profile
+
+    profile = site_profile()
+    today = local_today(profile.timezone if profile else None)
+    planned = parse_plan_text(
+        text,
+        today,
+        profile.default_city if profile else "",
+        profile.default_region if profile else "",
+    )
+    if planned and planned.get("stops"):
+        _close_questions(user)
+        return commit_apply(user, "plan_day", planned, source, key)
     slots = _plan_slots(text) or {}
+    hint = slots.get("property_name") or slots.get("place") or ""
+    if hint:
+        matches = fuzzy_properties(hint)
+        if len(matches) == 1:
+            prop = matches[0]
+            slots["property_name"] = prop.name
+            slots["place"] = ""
+            if prop.city and not slots.get("city"):
+                slots["city"] = prop.city.name
+                slots["region"] = prop.city.region or slots.get("region") or ""
     if not (slots.get("property_name") or slots.get("place") or slots.get("city")):
         return {
             "ok": True,
-            "reply": "Where should I plan the trip? Tell me the property and the city. Gas stays on the plan, not as a place.",
+            "reply": "Where should I plan this? Tell me the property and the city. I will make the plan, not a new property.",
         }
     _close_questions(user)
     return _file_outing(user, slots, key, source)
@@ -747,12 +780,13 @@ def _from_model(user, text: str, key: str, source: str):
     heard = collect_tool_calls(user, text)
     if not heard:
         return None
-    given = _given_property_address(text)
-    if given:
-        return _save_given_address(user, given, key, source)
-    wanted = _address_she_wants(text)
-    if wanted:
-        return _online_address(wanted)
+    if not _is_trip_plan(text):
+        given = _given_property_address(text)
+        if given:
+            return _save_given_address(user, given, key, source)
+        wanted = _address_she_wants(text)
+        if wanted:
+            return _online_address(wanted)
     person = _person_to_add(user, text, key, source)
     if person:
         return person
@@ -784,7 +818,7 @@ def _from_model(user, text: str, key: str, source: str):
         _close_questions(user)
         return commit_apply(user, "upsert_property", named, source, key)
     place = _place_she_named(text)
-    if place:
+    if place and not _is_trip_plan(text):
         _close_questions(user)
         return commit_apply(user, "upsert_property", place, source, key)
     note = (heard.get("note") or "").strip()

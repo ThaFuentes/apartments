@@ -1372,6 +1372,46 @@ Lubbock — 2 outside compressor installs"""
         self.assertEqual(prop.city.name, "Odessa")
         self.assertEqual(prop.city.region, "Texas")
 
+    def test_make_me_a_plan_files_a_plan_not_a_new_property(self):
+        from app.models import PlanItem, Trip
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={
+                "ok": True,
+                "text": "Added Woodview.",
+                "calls": [{"name": "upsert_property", "args": {"property_name": "Woodview", "city": "Odessa"}}],
+            },
+        ):
+            heard = handle_message(
+                user,
+                "make me a plan for woodview odessa to replace an ac",
+                idempotency_key="plan-not-place",
+            )
+            bare = handle_message(user, "make me a plan", idempotency_key="plan-where")
+        self.assertIn("trip", heard["reply"].lower())
+        self.assertIn("Woodview", heard["reply"])
+        self.assertNotIn("Added Woodview", heard["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        self.assertEqual(Trip.query.filter(Trip.deleted_at.is_(None)).count(), 1)
+        self.assertTrue(any("replace" in (item.title or "").lower() for item in PlanItem.query.all()))
+        self.assertIn("plan", bare["reply"].lower())
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
