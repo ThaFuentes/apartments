@@ -15,10 +15,16 @@ def unit_sort_key(number: str) -> tuple:
 
 
 def gear_blurb(item: Equipment) -> str:
-    bits = [item.brand, item.size_label, item.kind]
+    from app.services.equipment import kind_label
+
+    bits = [item.brand, item.style, item.color, item.size_label, kind_label(item.kind)]
     text = " ".join(bit for bit in bits if bit).strip()
     if item.model_number:
         text = f"{text} {item.model_number}".strip()
+    if item.serial_number:
+        text = f"{text} SN {item.serial_number}".strip()
+    if item.notes:
+        text = f"{text} — {item.notes[:60]}".strip()
     return text or "Equipment"
 
 
@@ -72,10 +78,21 @@ def home_board(user_id: int) -> dict:
 
 
 def place_groups(city_id: int | None = None) -> list[dict]:
-    query = Property.query.filter(Property.deleted_at.is_(None))
+    from app.models import City
+    from app.services.geo import city_parts
+
+    props = Property.query.filter(Property.deleted_at.is_(None)).all()
     if city_id:
-        query = query.filter(Property.city_id == city_id)
-    props = query.all()
+        anchor = db.session.get(City, city_id)
+        if anchor:
+            want = city_parts(anchor.name, anchor.region)
+            props = [
+                prop
+                for prop in props
+                if prop.city and city_parts(prop.city.name, prop.city.region) == want
+            ]
+        else:
+            props = []
     if not props:
         return []
     ids = [prop.id for prop in props]
@@ -94,11 +111,10 @@ def place_groups(city_id: int | None = None) -> list[dict]:
     grouped: dict[int, dict] = {}
     for prop in props:
         city = prop.city
-        from app.services.geo import state_name
+        from app.services.geo import city_parts, place_title
 
-        label = city.name if city else "No city"
-        if city and city.region:
-            label = f"{label}, {state_name(city.region)}"
+        city_name, state = city_parts(city.name, city.region) if city else ("", "")
+        label = ", ".join(bit for bit in (city_name, state) if bit) or "No city"
         prop_jobs = jobs_by.get(prop.id) or []
         prop_visits = visits_by.get(prop.id) or []
         latest_job = max(prop_jobs, key=lambda row: row.created_at or _EMPTY) if prop_jobs else None
@@ -112,13 +128,13 @@ def place_groups(city_id: int | None = None) -> list[dict]:
             last = latest_visit.started_at
             title = latest_visit.note or ""
         bucket = grouped.setdefault(
-            prop.city_id or 0,
+            (city_name.lower(), state.lower()),
             {"city": label, "city_id": prop.city_id, "places": []},
         )
         bucket["places"].append(
             {
                 "id": prop.id,
-                "name": prop.name,
+                "name": place_title(prop.name, city_name, state),
                 "unit_count": unit_counts.get(prop.id, 0),
                 "last": last,
                 "last_title": title,

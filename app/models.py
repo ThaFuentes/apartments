@@ -340,6 +340,8 @@ class Equipment(db.Model):
     model_number = db.Column(db.String(80), nullable=False, default="")
     serial_number = db.Column(db.String(80), nullable=False, default="")
     size_label = db.Column(db.String(40), nullable=False, default="")
+    style = db.Column(db.String(80), nullable=False, default="")
+    color = db.Column(db.String(40), nullable=False, default="")
     notes = db.Column(db.Text, nullable=False, default="")
     confidence = db.Column(db.Float, nullable=True)
     source = db.Column(db.String(16), nullable=False, default="human")

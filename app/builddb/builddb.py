@@ -60,6 +60,7 @@ def init_db(app):
         db.create_all()
         _evolve_credentials()
         _evolve_mail()
+        _evolve_equipment()
         _say("[apt] MariaDB schema ready")
 
 
@@ -110,6 +111,29 @@ def _evolve_mail():
         statements.append("ALTER TABLE assistant_profiles ADD COLUMN smtp_from VARCHAR(200) NOT NULL DEFAULT ''")
     if "smtp_password_ciphertext" not in have:
         statements.append("ALTER TABLE assistant_profiles ADD COLUMN smtp_password_ciphertext TEXT NULL")
+    if not statements:
+        return
+    with db.engine.begin() as conn:
+        for sql in statements:
+            conn.execute(text(sql))
+
+
+def _evolve_equipment():
+    """Style and color live on each appliance, not on the kind."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    if "equipment" not in names:
+        return
+    have = {col["name"] for col in inspect(db.engine).get_columns("equipment")}
+    statements = []
+    if "style" not in have:
+        statements.append("ALTER TABLE equipment ADD COLUMN style VARCHAR(80) NOT NULL DEFAULT ''")
+    if "color" not in have:
+        statements.append("ALTER TABLE equipment ADD COLUMN color VARCHAR(40) NOT NULL DEFAULT ''")
     if not statements:
         return
     with db.engine.begin() as conn:

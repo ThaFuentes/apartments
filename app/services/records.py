@@ -126,9 +126,9 @@ def find_city(name: str, region: str = "") -> City | None:
 
 
 def ensure_city(name: str, region: str, actor_id: int | None, source: str = "human") -> City:
-    from app.services.geo import state_name
+    from app.services.geo import city_parts
 
-    region = state_name(region)
+    name, region = city_parts(name, region)
     row = find_city(name, region)
     if row:
         if region and row.region != region:
@@ -151,6 +151,48 @@ def find_properties(name: str, city_name: str = "") -> list[Property]:
     return q.order_by(Property.id.asc()).all()
 
 
+def fuzzy_properties(hint: str) -> list[Property]:
+    """brookv matches Brookview. A short name does not have to be typed exactly."""
+    from app.services.geo import city_parts, place_title
+
+    hint = re.sub(r"[^a-z0-9 ]", "", (hint or "").lower()).strip()
+    if len(hint) < 4:
+        return []
+    scored = []
+    for prop in Property.query.filter(Property.deleted_at.is_(None)).all():
+        city_name, state = city_parts(prop.city.name, prop.city.region) if prop.city else ("", "")
+        title = place_title(prop.name, city_name, state).lower()
+        score = 0
+        if hint == title:
+            score = 100
+        elif title.startswith(hint):
+            score = 90
+        elif hint.startswith(title) and len(title) >= 4:
+            score = 80
+        elif hint in title or title in hint:
+            score = 70
+        if score:
+            scored.append((score, prop))
+    if not scored:
+        return []
+    best = max(score for score, _prop in scored)
+    return [prop for score, prop in scored if score >= best]
+
+
+def _same_place(prop: Property, title: str, city_name: str, region: str) -> bool:
+    from app.services.geo import city_parts, place_title
+
+    if not prop.city:
+        return False
+    have_city, have_state = city_parts(prop.city.name, prop.city.region)
+    if have_city.lower() != (city_name or "").lower():
+        return False
+    if region and have_state and have_state.lower() != region.lower():
+        return False
+    shown = place_title(prop.name, have_city, have_state)
+    return shown.lower() == title.lower() or prop.name.lower() == title.lower()
+
+
 def ensure_property(
     name: str,
     city_name: str,
@@ -161,9 +203,23 @@ def ensure_property(
     lng=None,
     source: str = "human",
 ) -> Property:
-    found = find_properties(name, city_name)
+    from app.services.geo import city_parts, place_title
+
+    city_name, region = city_parts(city_name or name, region)
+    title = place_title(name, city_name, region) or (name or "").strip()
+    found = [
+        prop
+        for prop in Property.query.filter(Property.deleted_at.is_(None)).all()
+        if _same_place(prop, title, city_name, region)
+    ]
+    if not found:
+        found = find_properties(title, city_name)
     if found:
         prop = found[0]
+        city = ensure_city(city_name, region, actor_id, source)
+        if prop.name != title or prop.city_id != city.id:
+            prop.name = title
+            prop.city = city
         changed = False
         before = {"address": prop.address, "lat": prop.lat, "lng": prop.lng}
         if address and address != prop.address:
@@ -187,7 +243,7 @@ def ensure_property(
     city = ensure_city(city_name, region, actor_id, source)
     prop = Property(
         city_id=city.id,
-        name=name.strip(),
+        name=title[:160],
         address=(address or "").strip(),
         lat=lat,
         lng=lng,

@@ -380,8 +380,10 @@ def record_brief() -> str:
         lines.append(f"job {job.id}: {job.title} at property {job.property_id}")
     gear = Equipment.query.filter(Equipment.deleted_at.is_(None)).order_by(Equipment.id.desc()).limit(6).all()
     for item in gear:
-        bits = " ".join(bit for bit in (item.brand, item.kind) if bit)
-        lines.append(f"appliance {item.id}: {bits} unit {item.unit_id or '-'} property {item.property_id}")
+        bits = " ".join(bit for bit in (item.brand, item.style, item.kind, item.serial_number) if bit)
+        unit = item.unit.unit_number if item.unit else "-"
+        note = f" note: {item.notes[:80]}" if item.notes else ""
+        lines.append(f"appliance {item.id}: {bits} unit {unit} property {item.property_id}{note}")
     return "\n".join(lines)[:3500]
 
 
@@ -390,7 +392,14 @@ def collect_tool_calls(user, text: str):
     rows = keys_for(user)
     if not rows:
         return None
-    prompt = voice_brief() + "\n\n" + record_brief() + "\n\nShe said: " + (text or "")
+    prompt = (
+        voice_brief()
+        + "\n\n"
+        + record_brief()
+        + "\n\nEach appliance is its own card on one unit. A serial, style, or note belongs to that one item. "
+        + "A washer in unit 26 does not share a note with any other washer.\n\nShe said: "
+        + (text or "")
+    )
     notes = []
     for row in rows:
         if getattr(row, "backoff_until", None) and row.backoff_until > utcnow():

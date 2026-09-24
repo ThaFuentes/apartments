@@ -2,9 +2,16 @@
 {% block title %}{{ prop.name }}{% endblock %}
 {% block main %}
 <section class="sheet">
-  <p><a href="/places{% if prop.city_id %}/{{ prop.city_id }}{% endif %}">{{ prop.city.name if prop.city else "Places" }}{% if prop.city and prop.city.region %}, {{ prop.city.region|full_state }}{% endif %}</a></p>
-  <h1>{{ prop.name }}</h1>
-  <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} logged here.</p>
+  <p><a href="/places{% if prop.city_id %}/{{ prop.city_id }}{% endif %}">{{ city_name }}{% if state_name %}, {{ state_name }}{% endif %}</a></p>
+  <h1>{{ place_name }}</h1>
+  <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} here.</p>
+  {% if current_user.role != 'viewer' %}
+  <form method="post" action="/properties/{{ prop.id }}/units" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Add a unit <input name="unit_number" autocomplete="off" placeholder="804" required></label>
+    <button type="submit">Add unit</button>
+  </form>
+  {% endif %}
   <label class="find-unit">Find a unit
     <input data-unit-find autocomplete="off" inputmode="text" placeholder="804">
   </label>
@@ -17,8 +24,8 @@
   {% endif %}
   <div class="stack" id="unit-list">
     {% for card in cards %}
-    <a class="unit-card" href="/units/{{ card.unit.id }}" data-unit-card data-number="{{ card.unit.unit_number }}">
-      <strong>{{ card.unit.unit_number }}</strong>
+    <article class="unit-card" data-unit-card data-number="{{ card.unit.unit_number }}">
+      <a href="/units/{{ card.unit.id }}"><strong>{{ card.unit.unit_number }}</strong></a>
       <span class="unit-meta">
         {% if card.last %}Last worked {{ card.last|apt_when }}{% else %}Nothing logged yet{% endif %}
         {% if card.last_title %} · {{ card.last_title }}{% endif %}
@@ -27,7 +34,18 @@
       {% if card.gear_lines %}
       <span class="unit-gear">{% for line in card.gear_lines %}{{ line }}{% if not loop.last %} · {% endif %}{% endfor %}{% if card.gear_more %} · {{ card.gear_more }} more{% endif %}</span>
       {% endif %}
-    </a>
+      {% if current_user.role != 'viewer' %}
+      <form method="post" action="/units/{{ card.unit.id }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input name="unit_number" value="{{ card.unit.unit_number }}" aria-label="Unit number">
+        <button type="submit" class="quiet">Save number</button>
+      </form>
+      <form method="post" action="/units/{{ card.unit.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="ghost">Delete unit</button>
+      </form>
+      {% endif %}
+    </article>
     {% endfor %}
   </div>
   <p class="empty" data-unit-empty hidden>No unit matches.</p>
@@ -44,9 +62,9 @@
   <form method="post" class="card stack" action="/properties/{{ prop.id }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="edit-{{ msg_key }}">
-    <label>Name <input name="name" value="{{ prop.name }}" required></label>
-    <label>City <input name="city" value="{{ prop.city.name if prop.city else '' }}" required></label>
-    <label>State <input name="region" value="{{ prop.city.region|full_state if prop.city else '' }}"></label>
+    <label>Name <input name="name" value="{{ place_name }}" required></label>
+    <label>City <input name="city" value="{{ city_name }}" required></label>
+    <label>State <input name="region" value="{{ state_name }}"></label>
     <label>Address <input name="address" value="{{ prop.address }}"></label>
     <button type="submit">Save</button>
   </form>

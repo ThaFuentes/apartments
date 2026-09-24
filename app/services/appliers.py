@@ -306,7 +306,9 @@ def apply_log_work(user, payload, source) -> dict:
     )
     title = (payload.get("title") or "").strip()
     equipment = payload.get("equipment") if isinstance(payload.get("equipment"), dict) else {}
-    has_gear = any((equipment.get(key) or "").strip() for key in ("kind", "brand", "model", "serial", "size"))
+    extra_gear = [item for item in (payload.get("equipment_items") or []) if isinstance(item, dict)]
+    pieces = _gear_pieces(equipment, extra_gear)
+    has_gear = bool(pieces)
     if not title and not has_gear:
         return {"ok": False, "reply": "What did you do there?"}
     number = normalize_unit(payload.get("unit_number") or "")
@@ -331,14 +333,13 @@ def apply_log_work(user, payload, source) -> dict:
     if not title:
         from app.services.equipment import describe
 
-        if has_gear and unit:
-            _save_equipment(user, {"equipment": equipment}, unit, None, prop.id, source)
-            gear_row = Equipment.query.filter_by(unit_id=unit.id).order_by(Equipment.id.desc()).first()
-            if gear_row:
-                gear_row.created_at = stamp
+        saved, warnings = _file_pieces(user, pieces, unit, None, prop.id, source, stamp)
         where = f"unit {number} at {prop.name}" if number else prop.name
         city = prop.city.name if prop.city else ""
-        line = f"{describe(equipment)} is on {where}" + (f" in {city}" if city else "") + "."
+        names = " and ".join(bit for bit in (describe(_piece_view(row)) for row in saved) if bit)
+        line = f"{names or 'That'} is on {where}" + (f" in {city}" if city else "") + "."
+        if warnings:
+            line += " " + " ".join(warnings)
         if prop.address:
             line += f" Address: {prop.address}."
         return {"ok": True, "reply": line, "property_id": prop.id, "unit_id": unit.id if unit else None}
@@ -357,11 +358,7 @@ def apply_log_work(user, payload, source) -> dict:
     db.session.add(job)
     db.session.flush()
     db.session.add(JobEvent(job_id=job.id, body=title, actor_id=user.id, source=source, created_at=stamp))
-    if has_gear and unit:
-        _save_equipment(user, {"equipment": equipment}, unit, job, prop.id, source)
-        gear_row = Equipment.query.filter_by(unit_id=unit.id).order_by(Equipment.id.desc()).first()
-        if gear_row:
-            gear_row.created_at = stamp
+    saved, warnings = _file_pieces(user, pieces, unit, job, prop.id, source, stamp)
     audit(user.id, source, "create", "job", job.id, {}, {"title": job.title, "property_id": prop.id, "unit": number, "worked_on": payload.get("worked_on") or ""})
     from app.services.plan import note_work_against_plan
 
@@ -371,6 +368,15 @@ def apply_log_work(user, payload, source) -> dict:
     if payload.get("worked_on"):
         when = f"On {payload['worked_on']}, "
     reply = f"{when}Saved {title} at {where}.{plan_note}"
+    if saved:
+        from app.services.equipment import describe, kind_label
+
+        names = []
+        for row in saved:
+            names.append(describe(_piece_view(row)) or kind_label(row.kind) or "equipment")
+        reply += " Filed " + " and ".join(names) + "."
+    if warnings:
+        reply += " " + " ".join(warnings)
     if prop.address:
         reply += f" Address: {prop.address}."
     return {"ok": True, "reply": reply, "job_id": job.id, "property_id": prop.id, "unit_id": unit.id if unit else None}
@@ -764,45 +770,249 @@ def apply_log_expense(user, payload, source) -> dict:
     return {"ok": True, "reply": f"Filed {kind} {money(cents)}{odo}", "expense_id": row.id}
 
 
-def _save_equipment(user, payload, unit, job, property_id, source) -> None:
-    eq = payload.get("equipment") or {}
-    if not isinstance(eq, dict):
-        return
-    if not any((eq.get(key) or "").strip() for key in ("kind", "brand", "model", "serial", "size")):
-        return
-    from app.services.equipment import describe
+_PIECE_KEYS = ("kind", "brand", "model", "serial", "size", "style", "color", "notes", "note")
 
-    row = Equipment(
-        property_id=property_id,
-        unit_id=unit.id if unit else None,
-        job_id=job.id if job else None,
-        media_id=int(payload["media_id"]) if payload.get("media_id") else None,
-        kind=(eq.get("kind") or "")[:80],
-        brand=(eq.get("brand") or "")[:80],
-        model_number=(eq.get("model") or "")[:80],
-        serial_number=(eq.get("serial") or "")[:80],
-        size_label=(eq.get("size") or "")[:40],
-        notes=describe(eq)[:2000],
-        confidence=float(eq["confidence"]) if eq.get("confidence") not in (None, "") else None,
-        source=source,
-        created_by_id=user.id,
-        created_at=utcnow(),
-    )
-    db.session.add(row)
+
+def _clip(value, limit: int) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def _piece_filled(eq: dict) -> bool:
+    return any(_clip(eq.get(key), 2000) for key in _PIECE_KEYS)
+
+
+def _gear_pieces(equipment: dict, extra: list) -> list[dict]:
+    pieces = []
+    if isinstance(equipment, dict) and _piece_filled(equipment):
+        pieces.append(equipment)
+    for item in extra:
+        if isinstance(item, dict) and _piece_filled(item):
+            pieces.append(item)
+    return pieces
+
+
+def _piece_view(row) -> dict:
+    return {
+        "kind": row.kind,
+        "brand": row.brand,
+        "style": row.style,
+        "color": row.color,
+        "size": row.size_label,
+        "model": row.model_number,
+        "serial": row.serial_number,
+    }
+
+
+def _same_kind(rows, kind: str) -> list:
+    wanted = kind.lower()
+    return [row for row in rows if (row.kind or "").lower() == wanted]
+
+
+def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool = False):
+    """Save one appliance on this unit. A note never spreads to other units or other cards."""
+    eq = piece or {}
+    if not isinstance(eq, dict) or not _piece_filled(eq):
+        return None, []
+    kind = _clip(eq.get("kind"), 80)
+    brand = _clip(eq.get("brand"), 80)
+    model = _clip(eq.get("model") or eq.get("model_number"), 80)
+    serial = _clip(eq.get("serial") or eq.get("serial_number"), 80).upper()
+    size = _clip(eq.get("size") or eq.get("size_label"), 40)
+    style = _clip(eq.get("style"), 80)
+    color = _clip(eq.get("color"), 40)
+    note = _clip(eq.get("notes") if eq.get("notes") is not None else eq.get("note"), 2000)
+    query = Equipment.query.filter(Equipment.deleted_at.is_(None), Equipment.property_id == property_id)
+    if unit is not None:
+        query = query.filter(Equipment.unit_id == unit.id)
+    else:
+        query = query.filter(Equipment.unit_id.is_(None))
+    rows = query.all()
+    target = None
+    ambiguous = []
+    if serial:
+        target = next((row for row in rows if (row.serial_number or "").upper() == serial), None)
+        if target is None and kind and not force_new:
+            blanks = [row for row in _same_kind(rows, kind) if not (row.serial_number or "").strip()]
+            if len(blanks) == 1:
+                target = blanks[0]
+    elif kind and not force_new:
+        same = _same_kind(rows, kind)
+        if model:
+            hits = [row for row in same if (row.model_number or "").upper() == model.upper()]
+            if len(hits) == 1:
+                target = hits[0]
+            elif len(hits) > 1:
+                ambiguous = hits
+        elif len(same) == 1:
+            only = same[0]
+            different_brand = brand and only.brand and only.brand.lower() != brand.lower()
+            if not different_brand:
+                target = only
+        elif len(same) > 1:
+            ambiguous = same
+    if ambiguous:
+        return None, ambiguous
+    created = target is None
+    if created:
+        row = Equipment(
+            property_id=property_id,
+            unit_id=unit.id if unit else None,
+            job_id=job.id if job else None,
+            kind=kind,
+            brand=brand,
+            model_number=model,
+            serial_number=serial,
+            size_label=size,
+            style=style,
+            color=color,
+            notes=note,
+            confidence=float(eq["confidence"]) if eq.get("confidence") not in (None, "") else None,
+            source=source,
+            created_by_id=user.id,
+            created_at=utcnow(),
+        )
+        db.session.add(row)
+    else:
+        row = target
+        if kind:
+            row.kind = kind
+        if brand:
+            row.brand = brand
+        if model:
+            row.model_number = model
+        if serial:
+            row.serial_number = serial
+        if size:
+            row.size_label = size
+        if style:
+            row.style = style
+        if color:
+            row.color = color
+        if note:
+            row.notes = note
+        if job and not row.job_id:
+            row.job_id = job.id
     if job:
-        line = describe(eq)
+        from app.services.equipment import describe
+
+        line = describe(_piece_view(row) if not created else {
+            "kind": kind,
+            "brand": brand,
+            "style": style,
+            "color": color,
+            "size": size,
+            "model": model,
+            "serial": serial,
+        })
+        if note and note not in line:
+            line = f"{line}. Note: {note}".strip(". ")
         if line and line not in (job.detail or ""):
             job.detail = (job.detail + "\n" + line).strip()
     db.session.flush()
     audit(
         user.id,
         source,
-        "create",
+        "create" if created else "update",
         "equipment",
         row.id,
         {},
-        {"kind": row.kind, "brand": row.brand, "model": row.model_number, "serial": row.serial_number, "unit_id": row.unit_id},
+        {
+            "kind": row.kind,
+            "brand": row.brand,
+            "model": row.model_number,
+            "serial": row.serial_number,
+            "style": row.style,
+            "notes": row.notes,
+            "unit_id": row.unit_id,
+        },
     )
+    row._apt_created = created
+    return row, []
+
+
+def _file_pieces(user, pieces, unit, job, property_id, source, stamp):
+    saved = []
+    warnings = []
+    if not unit:
+        return saved, warnings
+    for piece in pieces:
+        row, ambiguous = file_piece(user, piece, unit, job, property_id, source)
+        if ambiguous:
+            kind = _clip(piece.get("kind"), 80) or "appliances"
+            warnings.append(
+                f"Unit {unit.unit_number} already has {len(ambiguous)} {kind} cards. Say the serial so the note stays on one."
+            )
+            continue
+        if row is None:
+            continue
+        if getattr(row, "_apt_created", False):
+            row.created_at = stamp
+        saved.append(row)
+    return saved, warnings
+
+
+def _save_equipment(user, payload, unit, job, property_id, source) -> None:
+    eq = payload.get("equipment") or {}
+    if not isinstance(eq, dict):
+        return
+    media_id = int(payload["media_id"]) if payload.get("media_id") else None
+    row, _ambiguous = file_piece(user, eq, unit, job, property_id, source)
+    if row is not None and media_id and not row.media_id:
+        row.media_id = media_id
+
+
+def apply_note_equipment(user, payload, source) -> dict:
+    """A note, serial, or style for one appliance in one unit."""
+    source = _src(source)
+    prop = db.session.get(Property, int(payload.get("property_id") or 0))
+    if not prop or prop.deleted_at:
+        return {"ok": False, "reply": "Which property is this?"}
+    number = normalize_unit(payload.get("unit_number") or "")
+    if not number:
+        return {"ok": False, "reply": "Which unit number?"}
+    exact, near = match_unit(prop.id, number)
+    if near and not exact and not payload.get("force_new"):
+        return {
+            "ok": False,
+            "needs_answer": True,
+            "reply": f"{number} is close to unit {near.unit_number} at {prop.name}. Use {near.unit_number}, or say it's a new unit.",
+        }
+    if exact:
+        unit = exact
+    else:
+        unit = Unit(property_id=prop.id, unit_number=number, created_by_id=user.id, created_at=utcnow())
+        db.session.add(unit)
+        db.session.flush()
+        audit(user.id, source, "create", "unit", unit.id, {}, {"unit_number": number, "property_id": prop.id})
+    piece = payload.get("equipment") if isinstance(payload.get("equipment"), dict) else {}
+    row, ambiguous = file_piece(user, piece, unit, None, prop.id, source)
+    kind = _clip(piece.get("kind"), 80) or "appliance"
+    from app.services.equipment import kind_label
+
+    label = kind_label(kind) or kind
+    if ambiguous:
+        bits = []
+        for item in ambiguous:
+            name = " ".join(bit for bit in (item.brand, item.style, item.model_number, item.serial_number or "no serial") if bit)
+            bits.append(name or label)
+        return {
+            "ok": True,
+            "reply": f"Unit {number} at {prop.name} has {len(ambiguous)} {label} cards. Say the serial. " + "; ".join(bits),
+            "unit_id": unit.id,
+        }
+    if row is None:
+        return {"ok": False, "reply": "Tell me which appliance, and the note or serial."}
+    shown = kind_label(row.kind) or row.kind or label
+    bits = [f"Updated the {shown} in unit {number} at {prop.name}."]
+    if row.serial_number:
+        bits.append(f"Serial {row.serial_number}.")
+    if row.style:
+        bits.append(f"Style {row.style}.")
+    if row.model_number:
+        bits.append(f"Model {row.model_number}.")
+    if row.notes:
+        bits.append(f"Note: {row.notes}.")
+    return {"ok": True, "reply": " ".join(bits), "equipment_id": row.id, "unit_id": unit.id}
 
 
 def apply_log_odometer(user, payload, source) -> dict:
@@ -1496,6 +1706,7 @@ APPLIERS = {
     "plan_trip": apply_plan_trip,
     "plan_day": apply_plan_day,
     "log_work": apply_log_work,
+    "note_equipment": apply_note_equipment,
     "plan_outcome": apply_plan_outcome,
     "clear_plan": apply_clear_plan,
     "delete_property": apply_delete_property,

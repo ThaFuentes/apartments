@@ -168,15 +168,22 @@ def build_snapshot(
             )
             plate_bits = []
             for plate in plates:
-                bit = plate.notes or describe_equipment(
+                label = describe_equipment(
                     {
                         "kind": plate.kind,
                         "brand": plate.brand,
+                        "style": plate.style,
+                        "color": plate.color,
                         "model": plate.model_number,
                         "serial": plate.serial_number,
                         "size": plate.size_label,
                     }
                 )
+                note = (plate.notes or "").strip()
+                if note and note != label and label not in note:
+                    bit = f"{label}. Note: {note}".strip(". ") if label else note
+                else:
+                    bit = note or label
                 if bit and bit not in plate_bits:
                     plate_bits.append(bit)
             notes = job.detail or ""

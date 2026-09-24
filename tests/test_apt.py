@@ -675,7 +675,11 @@ Lubbock — 2 outside compressor installs"""
         user = self.owner()
         handle_message(user, "it's at woodview odessa texas", idempotency_key="add-w")
         self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
-        removed = handle_message(user, "delete woodview", idempotency_key="del-w")
+        asked = handle_message(user, "delete woodview", idempotency_key="del-w")
+        self.assertIn("Say yes", asked["reply"])
+        self.assertIn("Woodview", asked["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        removed = handle_message(user, "yes", idempotency_key="del-yes")
         self.assertIn("Removed", removed["reply"])
         self.assertIn("Woodview", removed["reply"])
         self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
@@ -824,6 +828,78 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn("Texas", saved.address)
         self.assertNotIn("TX", saved.address)
 
+    def test_odessa_properties_share_one_city(self):
+        from app.models import City
+        from app.services.browse import place_groups
+
+        user = self.owner()
+        first = City(name="Odessa", region="Texas", created_at=utcnow())
+        second = City(name="Odessa", region="TX", created_at=utcnow())
+        third = City(name="Odessa, Texas", region="Texas", created_at=utcnow())
+        db.session.add_all([first, second, third])
+        db.session.flush()
+        for city, name in ((first, "Woodview"), (second, "brookview odessa tx"), (third, "Madison Sq")):
+            db.session.add(
+                Property(city_id=city.id, name=name, address="", notes="", created_by_id=user.id, created_at=utcnow())
+            )
+        db.session.commit()
+        groups = place_groups()
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["city"], "Odessa, Texas")
+        self.assertEqual(
+            sorted(place["name"] for place in groups[0]["places"]),
+            ["Brookview", "Madison Sq", "Woodview"],
+        )
+
+    def test_brookview_odessa_texas_is_not_the_whole_name(self):
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        first = ensure_property("brookview odessa texas", "odessa", "tx", user.id)
+        db.session.commit()
+        self.assertEqual(first.name, "Brookview")
+        self.assertEqual(first.city.name, "Odessa")
+        self.assertEqual(first.city.region, "Texas")
+        again = ensure_property("Brookview", "Odessa, Texas", "Texas", user.id)
+        db.session.commit()
+        self.assertEqual(again.id, first.id)
+        spelled = ensure_property("Brookview", "Odessa", "Texas", user.id)
+        self.assertEqual(spelled.id, first.id)
+
+    def test_brookv_files_washer_and_dryer_on_unit_26(self):
+        from app.models import Equipment
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Brookview", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={"ok": True, "text": "Which property is this? Log unit 26: Unit maintenance. Not saved yet.", "calls": []},
+        ):
+            heard = handle_message(
+                user,
+                "in brookv apartment 26 i added a washer and drier",
+                idempotency_key="wash-26",
+            )
+        self.assertIn("26", heard["reply"])
+        self.assertIn("Brookview", heard["reply"])
+        self.assertNotIn("Not saved", heard["reply"])
+        self.assertNotIn("Which property", heard["reply"])
+        unit = Unit.query.filter_by(unit_number="26").one()
+        kinds = sorted(row.kind for row in Equipment.query.filter_by(unit_id=unit.id).all())
+        self.assertEqual(kinds, ["dryer", "washer"])
+
     def test_its_at_saves_the_looked_up_address(self):
         user = self.owner()
         hit = {
@@ -840,6 +916,159 @@ Lubbock — 2 outside compressor installs"""
         self.assertEqual(prop.city.region, "Texas")
         self.assertEqual(prop.address, hit["address"])
         self.assertAlmostEqual(prop.lat, 31.88)
+
+    def test_a_note_stays_on_one_washer(self):
+        from app.models import Equipment
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Brookview", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={"ok": True, "text": "Which property is this? Not saved yet.", "calls": []},
+        ):
+            handle_message(user, "in brookv apartment 12 i added a washer and a stove", idempotency_key="both")
+            heard = handle_message(
+                user,
+                "in brookview apartment 26 the washer note knob broken",
+                idempotency_key="knob",
+            )
+        self.assertIn("26", heard["reply"])
+        self.assertIn("knob broken", heard["reply"])
+        self.assertNotIn("Not saved", heard["reply"])
+        unit12 = Unit.query.filter_by(unit_number="12").one()
+        unit26 = Unit.query.filter_by(unit_number="26").one()
+        washer12 = Equipment.query.filter_by(unit_id=unit12.id, kind="washer").one()
+        washer26 = Equipment.query.filter_by(unit_id=unit26.id, kind="washer").one()
+        stove = Equipment.query.filter_by(unit_id=unit12.id, kind="range").one()
+        self.assertEqual(washer26.notes, "knob broken")
+        self.assertEqual(washer12.notes, "")
+        self.assertEqual(stove.notes, "")
+        self.assertNotEqual(washer26.id, washer12.id)
+        self.assertNotEqual(stove.id, washer12.id)
+
+        other = Unit(property_id=prop.id, unit_number="30", created_at=utcnow())
+        db.session.add(other)
+        db.session.flush()
+        db.session.add(
+            Equipment(
+                property_id=prop.id,
+                unit_id=unit26.id,
+                kind="washer",
+                brand="GE",
+                serial_number="SN-B",
+                created_by_id=user.id,
+                created_at=utcnow(),
+            )
+        )
+        db.session.add(
+            Equipment(
+                property_id=prop.id,
+                unit_id=other.id,
+                kind="washer",
+                brand="Maytag",
+                serial_number="SN-OTHER",
+                notes="untouched",
+                created_by_id=user.id,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={"ok": True, "text": "Noted on every washer.", "calls": []},
+        ):
+            vague = handle_message(user, "in brookv apartment 26 the washer note door leaks", idempotency_key="which")
+            picked = handle_message(
+                user,
+                "in brookv apartment 26 the washer serial SN-B style top-load note door leaks",
+                idempotency_key="one",
+            )
+        self.assertIn("2 washer", vague["reply"])
+        self.assertIn("serial", vague["reply"].lower())
+        self.assertEqual(washer26.notes, "knob broken")
+        picked_row = Equipment.query.filter_by(serial_number="SN-B").one()
+        self.assertEqual(picked_row.notes, "door leaks")
+        self.assertEqual(picked_row.style, "top-load")
+        self.assertEqual(washer26.notes, "knob broken")
+        self.assertEqual(Equipment.query.filter_by(unit_id=other.id).one().notes, "untouched")
+
+    def test_unit_page_updates_one_appliance(self):
+        from app.models import Equipment
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        unit = Unit(property_id=prop.id, unit_number="8", created_at=utcnow())
+        db.session.add(unit)
+        db.session.flush()
+        washer = Equipment(
+            property_id=prop.id,
+            unit_id=unit.id,
+            kind="washer",
+            brand="Whirlpool",
+            serial_number="W1",
+            created_by_id=user.id,
+            created_at=utcnow(),
+        )
+        dryer = Equipment(
+            property_id=prop.id,
+            unit_id=unit.id,
+            kind="dryer",
+            brand="Whirlpool",
+            serial_number="D1",
+            created_by_id=user.id,
+            created_at=utcnow(),
+        )
+        db.session.add_all([washer, dryer])
+        db.session.commit()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        page = client.get(f"/units/{unit.id}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"washer", page.data.lower())
+        self.assertIn(b"dryer", page.data.lower())
+        self.assertIn(b"W1", page.data)
+        self.assertIn(b"D1", page.data)
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        saved = client.post(
+            f"/equipment/{washer.id}",
+            data={
+                "csrf_token": token,
+                "kind": "washer",
+                "brand": "Whirlpool",
+                "style": "top-load",
+                "model": "WTW5000",
+                "serial": "W1",
+                "size": "",
+                "color": "white",
+                "notes": "knob broken",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertIn(b"knob broken", saved.data)
+        db.session.refresh(washer)
+        db.session.refresh(dryer)
+        self.assertEqual(washer.notes, "knob broken")
+        self.assertEqual(washer.style, "top-load")
+        self.assertEqual(washer.model_number, "WTW5000")
+        self.assertEqual(washer.color, "white")
+        self.assertEqual(dryer.notes, "")
+        self.assertEqual(dryer.serial_number, "D1")
 
 
 if __name__ == "__main__":

@@ -586,10 +586,16 @@ def property_detail(property_id):
     sort = request.args.get("sort") or "recent"
     if sort not in ("recent", "number"):
         sort = "recent"
+    from app.services.geo import city_parts, place_title
+
+    city_name, state = city_parts(prop.city.name, prop.city.region) if prop.city else ("", "")
     packed = unit_cards(prop.id, sort=sort, query=request.args.get("q") or "")
     return render_template(
         "property.html",
         prop=prop,
+        place_name=place_title(prop.name, city_name, state),
+        city_name=city_name,
+        state_name=state,
         cards=packed["cards"],
         loose_jobs=packed["loose_jobs"],
         unit_total=packed["total"],
@@ -638,6 +644,76 @@ def property_delete(property_id):
     return redirect("/places")
 
 
+@bp.post("/properties/<int:property_id>/units")
+@login_required
+def property_add_unit(property_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.services.records import normalize_unit
+
+    prop = db.session.get(Property, property_id)
+    if not prop or prop.deleted_at:
+        abort(404)
+    number = normalize_unit(request.form.get("unit_number") or "")
+    if not number:
+        flash("Type a unit number.", "warn")
+        return redirect(f"/properties/{property_id}")
+    existing = (
+        Unit.query.filter_by(property_id=prop.id, unit_number=number)
+        .filter(Unit.deleted_at.is_(None))
+        .first()
+    )
+    if existing:
+        flash(f"Unit {number} is already on this property.", "warn")
+        return redirect(f"/properties/{property_id}")
+    db.session.add(Unit(property_id=prop.id, unit_number=number, created_at=utcnow()))
+    db.session.commit()
+    flash(f"Added unit {number}.", "ok")
+    return redirect(f"/properties/{property_id}")
+
+
+@bp.post("/units/<int:unit_id>")
+@login_required
+def unit_rename(unit_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.services.records import normalize_unit
+
+    unit = db.session.get(Unit, unit_id)
+    if not unit or unit.deleted_at:
+        abort(404)
+    number = normalize_unit(request.form.get("unit_number") or "")
+    if not number:
+        flash("Type a unit number.", "warn")
+        return redirect(f"/properties/{unit.property_id}")
+    taken = (
+        Unit.query.filter_by(property_id=unit.property_id, unit_number=number)
+        .filter(Unit.deleted_at.is_(None), Unit.id != unit.id)
+        .first()
+    )
+    if taken:
+        flash(f"Unit {number} is already on this property.", "warn")
+        return redirect(f"/properties/{unit.property_id}")
+    unit.unit_number = number
+    db.session.commit()
+    flash(f"Unit number is {number}.", "ok")
+    return redirect(f"/properties/{unit.property_id}")
+
+
+@bp.post("/units/<int:unit_id>/delete")
+@login_required
+def unit_delete(unit_id):
+    if current_user.role == "viewer":
+        abort(403)
+    unit = db.session.get(Unit, unit_id)
+    if not unit or unit.deleted_at:
+        abort(404)
+    unit.deleted_at = utcnow()
+    db.session.commit()
+    flash(f"Removed unit {unit.unit_number}.", "ok")
+    return redirect(f"/properties/{unit.property_id}")
+
+
 @bp.get("/units/<int:unit_id>")
 @login_required
 def unit_detail(unit_id):
@@ -659,7 +735,7 @@ def unit_detail(unit_id):
     events = {}
     for job in jobs:
         events[job.id] = JobEvent.query.filter_by(job_id=job.id).order_by(JobEvent.id.asc()).all()
-    from app.services.equipment import KIND_CHOICES
+    from app.services.equipment import kind_choices, kind_label
 
     last = jobs[0].created_at if jobs else (visits[0].started_at if visits else None)
     return render_template(
@@ -669,7 +745,8 @@ def unit_detail(unit_id):
         jobs=jobs,
         events=events,
         gear=gear,
-        gear_kinds=KIND_CHOICES,
+        gear_kinds=kind_choices(),
+        kind_label=kind_label,
         last=last,
     )
 
@@ -679,40 +756,86 @@ def unit_detail(unit_id):
 def unit_equipment(unit_id):
     if current_user.role == "viewer":
         abort(403)
-    from app.models import Equipment
-    from app.services.records import audit
-
     unit = db.session.get(Unit, unit_id)
     if not unit or unit.deleted_at:
         abort(404)
-    kind = (request.form.get("kind") or "").strip()
-    brand = (request.form.get("brand") or "").strip()
-    model = (request.form.get("model") or "").strip()
-    serial = (request.form.get("serial") or "").strip()
-    size = (request.form.get("size") or "").strip()
-    if not any((kind, brand, model, serial)):
-        flash("Say what the equipment is, or its brand, model, or serial.", "warn")
+    piece = _equipment_form()
+    if not any(piece.values()):
+        flash("Say what the equipment is, or its brand, model, serial, or a note.", "warn")
         return redirect(f"/units/{unit.id}")
-    row = Equipment(
-        property_id=unit.property_id,
-        unit_id=unit.id,
-        kind=kind[:80],
-        brand=brand[:80],
-        model_number=model[:80],
-        serial_number=serial[:80],
-        size_label=size[:40],
-        notes=" ".join(bit for bit in (brand, size, kind, f"model {model}" if model else "", f"serial {serial}" if serial else "") if bit)[:2000],
-        confidence=1,
-        source="human",
-        created_by_id=current_user.id,
-        created_at=utcnow(),
-    )
-    db.session.add(row)
-    db.session.flush()
-    audit(current_user.id, "human", "create", "equipment", row.id, {}, {"kind": kind, "brand": brand, "model": model, "serial": serial, "unit_id": unit.id})
+    from app.services.appliers import file_piece
+    from app.services.equipment import kind_label
+
+    row, _ambiguous = file_piece(current_user, piece, unit, None, unit.property_id, "human", force_new=True)
     db.session.commit()
-    flash(f"Saved the {kind or 'equipment'} in unit {unit.unit_number}.", "ok")
+    label = kind_label(row.kind) if row else "equipment"
+    flash(f"Saved the {label or 'equipment'} in unit {unit.unit_number}.", "ok")
     return redirect(f"/units/{unit.id}")
+
+
+def _equipment_form() -> dict:
+    return {
+        "kind": (request.form.get("kind") or "").strip(),
+        "brand": (request.form.get("brand") or "").strip(),
+        "style": (request.form.get("style") or "").strip(),
+        "model": (request.form.get("model") or "").strip(),
+        "serial": (request.form.get("serial") or "").strip(),
+        "size": (request.form.get("size") or "").strip(),
+        "color": (request.form.get("color") or "").strip(),
+        "notes": (request.form.get("notes") or "").strip(),
+    }
+
+
+@bp.post("/equipment/<int:gear_id>")
+@login_required
+def equipment_update(gear_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.models import Equipment
+    from app.services.equipment import kind_label
+    from app.services.records import audit
+
+    row = db.session.get(Equipment, gear_id)
+    if not row or row.deleted_at or not row.unit_id:
+        abort(404)
+    before = {
+        "kind": row.kind,
+        "brand": row.brand,
+        "style": row.style,
+        "model": row.model_number,
+        "serial": row.serial_number,
+        "notes": row.notes,
+    }
+    piece = _equipment_form()
+    row.kind = piece["kind"][:80]
+    row.brand = piece["brand"][:80]
+    row.style = piece["style"][:80]
+    row.model_number = piece["model"][:80]
+    row.serial_number = piece["serial"][:80].upper()
+    row.size_label = piece["size"][:40]
+    row.color = piece["color"][:40]
+    row.notes = piece["notes"][:2000]
+    audit(current_user.id, "human", "update", "equipment", row.id, before, {"kind": row.kind, "serial": row.serial_number, "notes": row.notes, "unit_id": row.unit_id})
+    db.session.commit()
+    flash(f"Updated this {kind_label(row.kind) or 'item'}.", "ok")
+    return redirect(f"/units/{row.unit_id}")
+
+
+@bp.post("/equipment/<int:gear_id>/delete")
+@login_required
+def equipment_delete(gear_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.models import Equipment
+
+    row = db.session.get(Equipment, gear_id)
+    if not row or row.deleted_at:
+        abort(404)
+    unit_id = row.unit_id
+    row.deleted_at = utcnow()
+    db.session.commit()
+    flash("Removed that piece of equipment.", "ok")
+    return redirect(f"/units/{unit_id}" if unit_id else "/places")
 
 
 @bp.get("/expenses")

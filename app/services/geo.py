@@ -56,6 +56,58 @@ def state_name(value: str) -> str:
     return _STATE.get(text.lower(), text)
 
 
+def city_parts(name: str, region: str = "") -> tuple[str, str]:
+    """Odessa plus Texas, even if the saved city says Odessa, Texas and the region says Texas again."""
+    text = re.sub(r"\s+", " ", (name or "").strip())
+    state = state_name(region)
+    changed = True
+    while changed and text:
+        changed = False
+        if "," in text:
+            head, tail = [part.strip() for part in text.rsplit(",", 1)]
+            if tail.lower() in _STATE:
+                state = state_name(tail)
+                text = head
+                changed = True
+                continue
+        words = text.split()
+        if words and words[-1].lower() in _STATE:
+            state = state_name(words[-1])
+            text = " ".join(words[:-1]).strip()
+            changed = True
+    if text:
+        text = " ".join(part.capitalize() for part in text.split())
+    return text, state
+
+
+def place_title(name: str, city: str, state: str = "") -> str:
+    """Drop a repeated city and state off the property name."""
+    text = re.sub(r"\s+", " ", (name or "").strip())
+    suffixes = []
+    if city and state:
+        suffixes.extend([f"{city}, {state}", f"{city} {state}", f"{city}, tx", f"{city} tx"])
+    if city:
+        suffixes.append(city)
+    if state:
+        suffixes.append(state)
+    lowered = text.lower()
+    for suffix in suffixes:
+        if suffix and lowered.endswith(suffix.lower()) and len(lowered) > len(suffix) + 1:
+            text = text[: -len(suffix)].strip(" ,.-")
+            lowered = text.lower()
+    if not text:
+        text = (name or "").strip()
+    words = []
+    for word in text.split():
+        if word.lower() in _STATE:
+            words.append(state_name(word))
+        elif word.islower() or word.isupper():
+            words.append(word.capitalize())
+        else:
+            words.append(word)
+    return " ".join(words)
+
+
 def geocode_enabled() -> bool:
     return (os.getenv("APT_GEOCODE") or "").strip().lower() not in ("0", "off", "false", "no")
 

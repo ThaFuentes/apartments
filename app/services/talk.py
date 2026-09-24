@@ -250,6 +250,12 @@ def _from_model(user, text: str, key: str, source: str):
     wanted = _address_she_wants(text)
     if wanted:
         return _online_address(wanted)
+    noted = _file_item_note(user, text, key, source)
+    if noted:
+        return noted
+    filed = _file_named_unit(user, text, key, source)
+    if filed:
+        return filed
     typed = _typed_address(text)
     if typed:
         _close_questions(user)
@@ -280,7 +286,213 @@ def _from_model(user, text: str, key: str, source: str):
     return {"ok": False, "reply": "I didn't get an answer. Say that again."}
 
 
+def _style_in(text: str) -> str:
+    match = re.search(r"\bstyle\s+([a-z0-9][a-z0-9' \-]{1,40})", text or "", re.I)
+    if not match:
+        return ""
+    words = []
+    for word in match.group(1).split():
+        if word.lower() in {"note", "notes", "serial", "model", "color", "sn"}:
+            break
+        words.append(word)
+    return " ".join(words).strip(" -")
+
+
+def _color_in(text: str) -> str:
+    match = re.search(r"\bcolor\s+([a-z]{3,20})", text or "", re.I)
+    return match.group(1) if match else ""
+
+
+def _after_kind(text: str, kind: str) -> str:
+    from app.services.equipment import KINDS
+
+    words = next((items for name, items in KINDS if name == kind), ())
+    low = (text or "").lower().replace("drier", "dryer")
+    best = -1
+    hit_len = 0
+    for word in words:
+        for match in re.finditer(rf"(^|[^a-z]){re.escape(word)}([^a-z]|$)", low):
+            start = match.start() + (0 if match.group(1) == "" else 1)
+            if start >= best:
+                best = start
+                hit_len = len(word)
+    if best < 0:
+        return ""
+    return (text or "")[best + hit_len :].strip(" .,:;-")
+
+
+def _plain_note(tail: str) -> str:
+    from app.services.equipment import MODEL, SERIAL
+
+    text = SERIAL.sub(" ", tail or "")
+    text = MODEL.sub(" ", text)
+    style = _style_in(text)
+    if style:
+        text = re.sub(rf"\bstyle\s+{re.escape(style)}", " ", text, count=1, flags=re.I)
+    color = _color_in(text)
+    if color:
+        text = re.sub(rf"\bcolor\s+{re.escape(color)}", " ", text, count=1, flags=re.I)
+    changed = True
+    while changed:
+        nxt = re.sub(r"^\s*(?:the|a|an|note|notes|is|has|have|:|,|-)\s*", "", text, count=1, flags=re.I)
+        changed = nxt != text
+        text = nxt
+    return re.sub(r"\s+", " ", text).strip(" .")
+
+
+def _unit_place(text: str) -> tuple[str, str] | None:
+    found = re.search(
+        r"\b(?:in|at)\s+([a-z][a-z0-9']{3,40})\s+(?:apartment|apt|unit)\s+#?\s*([0-9]{1,6}[a-z]?)\b",
+        text or "",
+        re.I,
+    )
+    if not found:
+        return None
+    return found.group(1), found.group(2)
+
+
+def _pieces_from_sentence(text: str, kinds: list[str]) -> list[dict]:
+    from app.services.equipment import parse_equipment
+
+    if len(kinds) != 1:
+        return [{"kind": kind} for kind in kinds]
+    parsed = parse_equipment(text)
+    item = {"kind": kinds[0]}
+    for key in ("brand", "model", "serial", "size"):
+        if parsed.get(key):
+            item[key] = parsed[key]
+    style = _style_in(text)
+    color = _color_in(text)
+    if style:
+        item["style"] = style
+    if color:
+        item["color"] = color
+    note = _plain_note(_after_kind(text, kinds[0]))
+    if note and len(note) >= 3 and not re.search(r"\b(added|installed|replaced|put)\b", note, re.I):
+        item["notes"] = note
+    return [item]
+
+
+def _item_note_sentence(text: str) -> dict | None:
+    raw = (text or "").strip()
+    if re.search(r"\b(added|installed|replaced|put)\b", raw, re.I):
+        return None
+    place = _unit_place(raw)
+    if not place:
+        return None
+    from app.services.equipment import appliance_kinds, parse_equipment
+
+    kinds = appliance_kinds(raw)
+    if len(kinds) != 1:
+        return None
+    parsed = parse_equipment(raw)
+    item = {"kind": kinds[0]}
+    for key in ("brand", "model", "serial", "size"):
+        if parsed.get(key):
+            item[key] = parsed[key]
+    style = _style_in(raw)
+    color = _color_in(raw)
+    if style:
+        item["style"] = style
+    if color:
+        item["color"] = color
+    note = _plain_note(_after_kind(raw, kinds[0]))
+    if note and len(note) >= 3:
+        item["notes"] = note
+    if not any(item.get(key) for key in ("brand", "model", "serial", "size", "style", "color", "notes")):
+        return None
+    return {"hint": place[0], "unit_number": place[1], "equipment": item}
+
+
+def _file_item_note(user, text: str, key: str, source: str):
+    parsed = _item_note_sentence(text)
+    if not parsed:
+        return None
+    from app.services.pending import commit_apply
+    from app.services.records import fuzzy_properties, property_place
+
+    matches = fuzzy_properties(parsed["hint"])
+    if not matches:
+        return {"ok": False, "reply": f"Nothing on your list matches {parsed['hint']}."}
+    if len(matches) > 1:
+        lines = "\n".join(property_place(prop) for prop in matches[:8])
+        return {"ok": True, "reply": f"Which one?\n{lines}"}
+    prop = matches[0]
+    _close_questions(user)
+    return commit_apply(
+        user,
+        "note_equipment",
+        {"property_id": prop.id, "unit_number": parsed["unit_number"], "equipment": parsed["equipment"]},
+        source,
+        key,
+    )
+
+
+def _named_unit_work(text: str) -> dict | None:
+    raw = (text or "").strip()
+    found = re.search(
+        r"\b(?:in|at)\s+([a-z][a-z0-9']{3,40})\s+(?:apartment|apt|unit)\s+#?\s*([0-9]{1,6}[a-z]?)\b",
+        raw,
+        re.I,
+    )
+    if not found:
+        return None
+    from app.services.equipment import appliance_kinds
+
+    kinds = appliance_kinds(raw)
+    action = re.search(r"\b((?:i\s+)?(?:added|installed|replaced|put)\b.+)$", raw, re.I)
+    title = _clean_slot(action.group(1)) if action else ""
+    title = re.sub(r"^i\s+", "", title, flags=re.I)
+    if not title and not kinds:
+        return None
+    if not title:
+        title = "Added " + " and ".join(kinds)
+    return {"hint": found.group(1), "unit_number": found.group(2), "title": title, "kinds": kinds}
+
+
+def _file_named_unit(user, text: str, key: str, source: str):
+    parsed = _named_unit_work(text)
+    if not parsed:
+        return None
+    from app.services.geo import city_parts
+    from app.services.pending import commit_apply
+    from app.services.records import fuzzy_properties, property_place
+
+    matches = fuzzy_properties(parsed["hint"])
+    if not matches:
+        return {"ok": False, "reply": f"Nothing on your list matches {parsed['hint']}."}
+    if len(matches) > 1:
+        lines = "\n".join(property_place(prop) for prop in matches[:8])
+        return {"ok": True, "reply": f"Which one?\n{lines}"}
+    prop = matches[0]
+    city, state = city_parts(prop.city.name, prop.city.region) if prop.city else ("", "")
+    items = _pieces_from_sentence(text, parsed["kinds"])
+    payload = {
+        "property_name": prop.name,
+        "city": city,
+        "region": state,
+        "unit_number": parsed["unit_number"],
+        "title": parsed["title"],
+        "status": "done",
+    }
+    if items:
+        payload["equipment"] = items[0]
+        payload["equipment_items"] = items[1:]
+    _close_questions(user)
+    return commit_apply(user, "log_work", payload, source, key)
+
+
 def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:
+    noted = _file_item_note(user, text, key, source)
+    if noted:
+        if note:
+            noted["reply"] = note + " " + (noted.get("reply") or "")
+        return noted
+    filed = _file_named_unit(user, text, key, source)
+    if filed:
+        if note:
+            filed["reply"] = note + " " + (filed.get("reply") or "")
+        return filed
     wanted = _address_she_wants(text)
     if wanted:
         result = _online_address(wanted)
@@ -1641,7 +1853,13 @@ def _gear_line(item) -> str:
     prop = db.session.get(Property, item.property_id) if item.property_id else None
     place = prop.name if prop else ""
     city = prop.city.name if prop and prop.city else ""
-    bits = " ".join(bit for bit in (item.brand, item.size_label, item.kind) if bit)
+    from app.services.equipment import kind_label
+
+    bits = " ".join(bit for bit in (item.brand, item.style, item.size_label, kind_label(item.kind)) if bit)
+    if item.serial_number:
+        bits += f" serial {item.serial_number}"
+    if item.notes:
+        bits += f" — {item.notes}"
     where = ", ".join(bit for bit in (f"unit {unit}" if unit else "", place, city) if bit)
     when = item.created_at.strftime("%b %d, %Y").replace(" 0", " ") if item.created_at else ""
     return f"{where} — {bits}" + (f" — {when}" if when else "")

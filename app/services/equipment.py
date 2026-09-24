@@ -54,6 +54,11 @@ KINDS = (
 )
 
 KIND_CHOICES = tuple(kind for kind, _words in KINDS)
+KIND_LABELS = {
+    "range": "stove",
+    "washer dryer": "washer and dryer",
+    "air conditioner": "AC",
+}
 
 SERIAL = re.compile(
     r"\b(?:sn|s/?n|serial(?:\s*(?:number|no\.?|#))?)\s*[:#]?\s*([A-Z0-9][A-Z0-9\-]{2,})",
@@ -86,21 +91,49 @@ def has_identity(row: dict | None) -> bool:
     return any((row.get(key) or "").strip() for key in ("brand", "model", "serial", "size"))
 
 
+def kind_label(kind: str) -> str:
+    key = (kind or "").strip().lower()
+    if not key:
+        return ""
+    return KIND_LABELS.get(key, kind)
+
+
+def kind_choices() -> list[tuple[str, str]]:
+    return [(kind, kind_label(kind)) for kind in KIND_CHOICES]
+
+
 def describe(row: dict | None) -> str:
     if not row:
         return ""
     bits = []
     if row.get("brand"):
         bits.append(str(row["brand"]))
+    if row.get("style"):
+        bits.append(str(row["style"]))
+    if row.get("color"):
+        bits.append(str(row["color"]))
     if row.get("size"):
         bits.append(str(row["size"]))
-    if row.get("kind") and row["kind"].lower() not in " ".join(bits).lower():
-        bits.append(str(row["kind"]))
+    label = kind_label(row.get("kind") or "")
+    if label and label.lower() not in " ".join(bits).lower():
+        bits.append(label)
     if row.get("model"):
         bits.append(f"model {row['model']}")
     if row.get("serial"):
         bits.append(f"serial {row['serial']}")
     return " ".join(bits).strip()
+
+
+def appliance_kinds(text: str) -> list[str]:
+    """Every appliance named in the sentence. Drier counts as dryer."""
+    low = (text or "").lower().replace("drier", "dryer")
+    found = []
+    for kind, words in KINDS:
+        if kind == "washer dryer":
+            continue
+        if any(re.search(rf"(^|[^a-z]){re.escape(word)}([^a-z]|$)", low) for word in words):
+            found.append(kind)
+    return found
 
 
 def parse_equipment(text: str) -> dict:

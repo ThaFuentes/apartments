@@ -133,6 +133,8 @@ details .card { margin-top: 0.55rem; }
 }
 .unit-card strong { font-size: 1.2rem; }
 .unit-meta, .unit-gear { color: var(--muted); font-size: 0.95rem; }
+.gear-card h3 { margin: 0; font-size: 1.2rem; text-transform: capitalize; }
+.gear-note { margin: 0; font-weight: 700; }
 .unit-card[hidden] { display: none !important; }
 .find-unit { display: flex; flex-direction: column; gap: 0.3rem; font-weight: 700; }
 .find-unit input { font-weight: 500; }

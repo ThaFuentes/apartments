@@ -9,21 +9,54 @@
   </div>
 
   <h2>Equipment</h2>
+  <p class="hint">Each piece is its own card. A note on this washer stays on this washer.</p>
   {% if not gear %}
   <p class="empty">No equipment filed on this unit.</p>
   {% else %}
-  <ul class="list">
+  <div class="stack">
     {% for item in gear %}
-    <li>
-      <strong>{{ item.brand }} {{ item.size_label }} {{ item.kind }}</strong>
-      <span class="hint">
-        {% if item.model_number %}Model {{ item.model_number }}{% endif %}
+    <article class="card gear-card">
+      <h3>{{ kind_label(item.kind) or "Equipment" }}</h3>
+      <p class="hint">
+        {% if item.brand %}{{ item.brand }}{% endif %}
+        {% if item.style %} · {{ item.style }}{% endif %}
+        {% if item.color %} · {{ item.color }}{% endif %}
+        {% if item.size_label %} · {{ item.size_label }}{% endif %}
+        {% if item.model_number %} · Model {{ item.model_number }}{% endif %}
         {% if item.serial_number %} · Serial {{ item.serial_number }}{% endif %}
         · Added {{ item.created_at|apt_when }}
-      </span>
-    </li>
+      </p>
+      {% if item.notes %}<p class="gear-note">{{ item.notes }}</p>{% else %}<p class="hint">No note on this one.</p>{% endif %}
+      {% if current_user.role != 'viewer' %}
+      <details>
+        <summary>Update this {{ kind_label(item.kind) or "item" }}</summary>
+        <form method="post" action="/equipment/{{ item.id }}" class="card stack">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>What is it
+            <select name="kind">
+              {% for value, label in gear_kinds %}
+              <option value="{{ value }}" {% if item.kind == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Brand <input name="brand" value="{{ item.brand }}" autocomplete="off"></label>
+          <label>Style <input name="style" value="{{ item.style }}" autocomplete="off" placeholder="top-load, gas, stackable"></label>
+          <label>Model <input name="model" value="{{ item.model_number }}" autocomplete="off"></label>
+          <label>Serial <input name="serial" value="{{ item.serial_number }}" autocomplete="off"></label>
+          <label>Size <input name="size" value="{{ item.size_label }}" autocomplete="off"></label>
+          <label>Color <input name="color" value="{{ item.color }}" autocomplete="off"></label>
+          <label>Note for this one <textarea name="notes" placeholder="knob broken">{{ item.notes }}</textarea></label>
+          <button type="submit">Save this {{ kind_label(item.kind) or "item" }}</button>
+        </form>
+      </details>
+      <form method="post" action="/equipment/{{ item.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="ghost">Remove this {{ kind_label(item.kind) or "item" }}</button>
+      </form>
+      {% endif %}
+    </article>
     {% endfor %}
-  </ul>
+  </div>
   {% endif %}
   {% if current_user.role != 'viewer' %}
   <details>
@@ -32,15 +65,19 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>What is it
         <select name="kind">
-          {% for kind in gear_kinds %}
-          <option value="{{ kind }}">{{ kind }}</option>
+          <option value="">Choose</option>
+          {% for value, label in gear_kinds %}
+          <option value="{{ value }}">{{ label }}</option>
           {% endfor %}
         </select>
       </label>
       <label>Brand <input name="brand" autocomplete="off"></label>
+      <label>Style <input name="style" autocomplete="off" placeholder="top-load, gas, stackable"></label>
       <label>Model <input name="model" autocomplete="off"></label>
       <label>Serial <input name="serial" autocomplete="off"></label>
-      <label>Size or note <input name="size" autocomplete="off"></label>
+      <label>Size <input name="size" autocomplete="off"></label>
+      <label>Color <input name="color" autocomplete="off"></label>
+      <label>Note for this one <textarea name="notes" placeholder="knob broken"></textarea></label>
       <button type="submit">Save this equipment</button>
     </form>
   </details>
