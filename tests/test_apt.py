@@ -1257,6 +1257,32 @@ Lubbock — 2 outside compressor installs"""
         self.assertEqual(manifest.status_code, 200)
         self.assertIn(b"standalone", manifest.data)
 
+    def test_removed_work_stays_off_the_home_page(self):
+        from app.models import Job
+        from app.services.browse import home_board
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        unit = Unit(property_id=prop.id, unit_number="12", created_at=utcnow())
+        kept = Unit(property_id=prop.id, unit_number="14", created_at=utcnow())
+        db.session.add_all([unit, kept])
+        db.session.flush()
+        db.session.add(Job(property_id=prop.id, unit_id=unit.id, title="Replaced the compressor", status="done", created_by_id=user.id, created_at=utcnow()))
+        db.session.add(Job(property_id=prop.id, unit_id=kept.id, title="Changed the filter", status="done", created_by_id=user.id, created_at=utcnow()))
+        db.session.commit()
+        titles = [job.title for job in home_board(user.id, user)["jobs"]]
+        self.assertIn("Replaced the compressor", titles)
+        unit.deleted_at = utcnow()
+        db.session.commit()
+        titles = [job.title for job in home_board(user.id, user)["jobs"]]
+        self.assertNotIn("Replaced the compressor", titles)
+        self.assertIn("Changed the filter", titles)
+        gone = Job.query.filter_by(unit_id=kept.id).one()
+        gone.deleted_at = utcnow()
+        db.session.commit()
+        self.assertEqual(home_board(user.id, user)["jobs"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

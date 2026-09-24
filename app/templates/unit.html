@@ -177,6 +177,13 @@
   <article class="card">
     <p class="kicker">{{ job.created_at|apt_when }} · {{ job.status }}{% if who(job.created_by_id) %} · {{ who(job.created_by_id) }}{% endif %}</p>
     <h3>{{ job.title }}</h3>
+    {% if editable %}
+    <form method="post" action="/jobs/{{ job.id }}/delete">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="/units/{{ unit.id }}">
+      <button type="submit" class="ghost">Remove this work</button>
+    </form>
+    {% endif %}
     {% if job.detail and job.detail != job.title %}<p>{{ job.detail }}</p>{% endif %}
     {% for event in events.get(job.id, []) %}
     {% if event.body and event.body != job.title %}

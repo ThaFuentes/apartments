@@ -4,9 +4,21 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
+from app.builddb.builddb import db
 from app.models import Equipment, Job, Property, Unit, UnitVisit
 
 _EMPTY = datetime.min
+
+
+def visible_jobs():
+    """Work that is still on a property and, when it names a unit, that unit is still there."""
+    return (
+        Job.query.filter(Job.deleted_at.is_(None))
+        .join(Property, Property.id == Job.property_id)
+        .filter(Property.deleted_at.is_(None))
+        .outerjoin(Unit, Unit.id == Job.unit_id)
+        .filter(db.or_(Job.unit_id.is_(None), Unit.deleted_at.is_(None)))
+    )
 
 
 def unit_sort_key(number: str) -> tuple:
@@ -74,7 +86,7 @@ def home_board(user_id: int, user=None) -> dict:
                 "trip_id": item.trip_id,
             }
         )
-    job_query = Job.query.filter(Job.deleted_at.is_(None))
+    job_query = visible_jobs()
     if allowed is not None:
         job_query = job_query.filter(Job.property_id.in_(allowed or {0}))
     jobs = job_query.order_by(Job.created_at.desc(), Job.id.desc()).limit(6).all()
@@ -113,7 +125,7 @@ def place_groups(city_id: int | None = None, user=None) -> list[dict]:
     if not props:
         return []
     ids = [prop.id for prop in props]
-    jobs = Job.query.filter(Job.property_id.in_(ids), Job.deleted_at.is_(None)).all()
+    jobs = visible_jobs().filter(Job.property_id.in_(ids)).all()
     visits = UnitVisit.query.filter(UnitVisit.property_id.in_(ids)).all()
     units = Unit.query.filter(Unit.property_id.in_(ids), Unit.deleted_at.is_(None)).all()
     jobs_by = {}

@@ -695,7 +695,14 @@ def unit_rename(unit_id):
 @login_required
 def unit_delete(unit_id):
     unit = _editable_unit(unit_id)
-    unit.deleted_at = utcnow()
+    now = utcnow()
+    unit.deleted_at = now
+    for job in Job.query.filter_by(unit_id=unit.id).filter(Job.deleted_at.is_(None)).all():
+        job.deleted_at = now
+    from app.models import UnitTask
+
+    for task in UnitTask.query.filter_by(unit_id=unit.id).filter(UnitTask.deleted_at.is_(None)).all():
+        task.deleted_at = now
     db.session.commit()
     flash(f"Removed unit {unit.unit_number}.", "ok")
     return redirect(f"/properties/{unit.property_id}")
