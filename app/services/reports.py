@@ -336,6 +336,17 @@ def build_snapshot(
     return snapshot
 
 
+def chat_excerpt(markdown: str, limit: int = 1800) -> str:
+    """Plain report text for the chat thread."""
+    import re
+
+    text = re.sub(r"^#{1,6}\s*", "", markdown or "", flags=re.M).strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit("\n", 1)[0].rstrip()
+    return (cut or text[:limit].rstrip()) + "\n…"
+
+
 def render_markdown(snapshot: dict) -> str:
     period = snapshot.get("period") or {}
     totals = snapshot.get("totals") or {}

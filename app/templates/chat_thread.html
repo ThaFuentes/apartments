@@ -1,0 +1,19 @@
+<div class="thread" id="thread">
+  {% if not chat_lines %}
+  <p class="bubble assistant"><span class="who">Apt</span>Hi. Tell me a site, what you did, or ask what's on your record. I'll answer right here.</p>
+  {% endif %}
+  {% for msg in chat_lines %}
+  <p class="bubble {{ msg.role }}">{% if msg.role == 'assistant' %}<span class="who">Apt</span>{% endif %}{{ msg.body }}{% if msg.created_at %}<time>{{ msg.created_at|chat_clock }}</time>{% endif %}</p>
+  {% endfor %}
+</div>
+<form method="post" action="/chat" enctype="multipart/form-data" class="composer" id="composer">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="idempotency_key" value="{{ chat_key }}">
+  <label class="clip">
+    <input type="file" name="photo" accept="image/*" capture="environment">
+    <span>Photo</span>
+  </label>
+  <textarea name="message" rows="1" placeholder="Message"></textarea>
+  <button type="button" id="mic" class="quiet" aria-label="Speak">Mic</button>
+  <button type="submit" class="send" aria-label="Send">Send</button>
+</form>

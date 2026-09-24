@@ -39,7 +39,7 @@ from app.services.records import (
     site_profile,
     units_for,
 )
-from app.services.reports import build_snapshot, load_snapshot, render_markdown, sign_report
+from app.services.reports import build_snapshot, chat_excerpt, load_snapshot, render_markdown, sign_report
 
 VISIT_TOOLS = {"record_unit_visit", "log_job_event"}
 
@@ -807,7 +807,11 @@ def apply_draft_report(user, payload, source) -> dict:
         existing.snapshot_json = dumps(snapshot)
         existing.property_id = prop_id
         audit(user.id, source, "update", "report", existing.id, before, {"title": existing.title})
-        return {"ok": True, "reply": f"Updated {existing.title}. Bosses with a login can open it. Email is only used when they have one.", "report_id": existing.id}
+        return {
+            "ok": True,
+            "reply": f"{existing.title}\n\n{chat_excerpt(body)}\n\nBosses with a login can open it. Email is only used when they have one.",
+            "report_id": existing.id,
+        }
     report = Report(
         kind=kind,
         title=snapshot["title"][:200],
@@ -826,7 +830,7 @@ def apply_draft_report(user, payload, source) -> dict:
     audit(user.id, source, "create", "report", report.id, {}, {"kind": kind, "title": report.title})
     bosses = User.query.filter_by(role="viewer", active=True, can_see_reports=True).count()
     who = f"{bosses} boss login(s) can read it now." if bosses else "Add a boss whenever you want — they do not need an email."
-    return {"ok": True, "reply": f"Saved {report.title}. {who}", "report_id": report.id}
+    return {"ok": True, "reply": f"{report.title}\n\n{chat_excerpt(body)}\n\n{who}", "report_id": report.id}
 
 
 def apply_send_report(user, payload, source) -> dict:

@@ -48,6 +48,27 @@ def create_app() -> Flask:
     db.init_app(app)
     init_db(app)
 
+    @app.template_filter("chat_clock")
+    def chat_clock(value):
+        if not value:
+            return ""
+        from datetime import timezone
+
+        from flask import g
+
+        from app.services.clock import zone
+
+        if not getattr(g, "apt_tz", None):
+            try:
+                from app.services.records import site_profile
+
+                profile = site_profile()
+                g.apt_tz = (profile.timezone if profile else "") or "America/Chicago"
+            except Exception:
+                g.apt_tz = "America/Chicago"
+        local = value.replace(tzinfo=timezone.utc).astimezone(zone(g.apt_tz))
+        return local.strftime("%I:%M %p").lstrip("0")
+
     try:
         from poweredbytop import init_security
 
@@ -154,7 +175,7 @@ def create_app() -> Flask:
                 chat_lines = (
                     ChatMessage.query.filter_by(user_id=current_user.id)
                     .order_by(ChatMessage.id.desc())
-                    .limit(20)
+                    .limit(80)
                     .all()
                 )
                 chat_lines.reverse()

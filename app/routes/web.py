@@ -46,7 +46,7 @@ from app.services.pending import batch_confirm, confirm_id, confirm_property, di
 from app.services.people import create_user, find_user
 from app.services.records import audit, loads, open_shift, site_profile
 from app.services.reports import build_snapshot, load_snapshot, render_pdf, signature_ok
-from app.services.talk import handle_message
+from app.services.talk import handle_message, handle_photo
 
 bp = Blueprint("desk", __name__)
 
@@ -156,12 +156,7 @@ def join(token):
 def home():
     if current_user.role == "viewer":
         return redirect("/reports")
-    sites = (
-        Property.query.filter(Property.deleted_at.is_(None))
-        .order_by(Property.name.asc())
-        .all()
-    )
-    return render_template("sites.html", sites=sites, msg_key=_new_key())
+    return render_template("chat_home.html")
 
 
 @bp.get("/api/places")
@@ -273,7 +268,22 @@ def chat():
         text = ((request.get_json(silent=True) or {}).get("message") or "").strip()
     else:
         text = (request.form.get("message") or "").strip()
-    result = handle_message(current_user, text, idempotency_key=_key() or _new_key(), source="ai")
+    blob = request.files.get("photo") if request.files else None
+    raw = b""
+    if blob and blob.filename:
+        raw = blob.read()
+    key = _key() or _new_key()
+    if raw:
+        result = handle_photo(
+            current_user,
+            text,
+            raw,
+            blob.mimetype or "image/jpeg",
+            idempotency_key=key,
+            source="ai",
+        )
+    else:
+        result = handle_message(current_user, text, idempotency_key=key, source="ai")
     if request.is_json or request.headers.get("Accept") == "application/json":
         return jsonify(result)
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")

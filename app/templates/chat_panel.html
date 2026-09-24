@@ -1,23 +1,14 @@
 <button type="button" class="chat-fab" id="chat-open">Chat</button>
 <section class="chat-panel" id="chat-panel" hidden>
-  <div class="chat-head">
-    <strong>Chat</strong>
-    <button type="button" class="ghost" id="chat-close">Close</button>
-  </div>
-  <div class="thread" id="thread">
-    {% for msg in chat_lines %}
-    <p class="bubble {{ msg.role }}">{{ msg.body }}</p>
-    {% endfor %}
-  </div>
-  <form method="post" action="/chat" class="composer" id="composer">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="{{ chat_key }}">
-    <label>Message
-      <textarea name="message" rows="3" required placeholder="add Woodview Apartments from Odessa Texas to my sites"></textarea>
-    </label>
-    <div class="actions">
-      <button type="button" id="mic" class="quiet">Speak</button>
-      <button type="submit">Send</button>
+  <header class="chat-bar">
+    <div class="peer">
+      <span class="avatar" aria-hidden="true">A</span>
+      <div>
+        <strong>Apt</strong>
+        <small>Chat</small>
+      </div>
     </div>
-  </form>
+    <button type="button" class="ghost" id="chat-close">Close</button>
+  </header>
+  {% include "chat_thread.html" %}
 </section>

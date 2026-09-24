@@ -9,9 +9,9 @@
   <title>{% block title %}Apt{% endblock %}</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=5">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=7">
 </head>
-<body class="{% if drive %}drive{% endif %}" data-share="{{ '1' if share.on else '0' }}">
+<body class="{% if drive %}drive{% endif %} {% block body_class %}{% endblock %}" data-share="{{ '1' if share.on else '0' }}">
   <header class="top">
     <div class="brand">
       <strong>Apt</strong>
@@ -55,7 +55,7 @@
     {% endif %}
     {% block main %}{% endblock %}
   </main>
-  {% if current_user.is_authenticated and current_user.role != 'viewer' %}
+  {% if current_user.is_authenticated and current_user.role != 'viewer' and request.path != '/' %}
   {% include "chat_panel.html" %}
   {% endif %}
   {% if current_user.is_authenticated %}
@@ -71,6 +71,6 @@
     {% endif %}
   </nav>
   {% endif %}
-  <script src="{{ url_for('static', filename='js/apt.js') }}?v=5"></script>
+  <script src="{{ url_for('static', filename='js/apt.js') }}?v=7"></script>
 </body>
 </html>

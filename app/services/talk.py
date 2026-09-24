@@ -1,4 +1,4 @@
-"""Every action can start from a sentence. Material writes wait for yes."""
+"""Every action can start from a sentence. A clear sentence is saved, and the reply is the receipt."""
 from __future__ import annotations
 
 import re
@@ -167,7 +167,15 @@ def _gemini_calls(user, text: str):
     return collect_tool_calls(user, text)
 
 
+def _place_ready(user) -> bool:
+    shift = open_shift(user)
+    return bool(shift and shift.confirmed)
+
+
 def _from_calls(user, calls, key, source, quota_note) -> dict:
+    """A tool call is the action. The reply in the thread is what happened."""
+    from app.services.pending import commit_apply
+
     replies = []
     proposals = []
     if quota_note:
@@ -183,16 +191,17 @@ def _from_calls(user, calls, key, source, quota_note) -> dict:
             db.session.commit()
             replies.append(result.get("reply") or "")
             continue
-        summary, risk = _summary(name, args)
-        card = propose(user, name, args, summary, risk, item_key, key, source)
-        replies.append(card.get("reply") or "")
-        if card.get("proposal"):
-            proposals.append(card["proposal"])
-    shift = open_shift(user)
-    if shift and not shift.confirmed:
-        from app.services.records import shift_question
-
-        replies.insert(0, shift_question(shift))
+        if args.get("needs_answer") or (name == "record_unit_visit" and not _place_ready(user)):
+            summary, risk = _summary(name, args)
+            card = propose(user, name, args, summary, risk, item_key, key, source)
+            if name == "record_unit_visit":
+                card = _with_place_prompt(user, card)
+            replies.append(card.get("reply") or "")
+            if card.get("proposal"):
+                proposals.append(card["proposal"])
+            continue
+        result = commit_apply(user, name, args, source, item_key)
+        replies.append(result.get("reply") or "")
     return {"ok": True, "reply": " ".join(bit for bit in replies if bit), "proposals": proposals}
 
 
@@ -237,7 +246,7 @@ def _summary(tool: str, payload: dict) -> tuple[str, str]:
 
 def interpret(user, text: str, key: str, source: str) -> dict:
     text = text.strip().rstrip(".")
-    plate = _answer_plate(user, text)
+    plate = _answer_plate(user, text, key, source)
     if plate:
         return plate
     merged = _merge_open_question(user, text, key, source)
@@ -258,11 +267,18 @@ def interpret(user, text: str, key: str, source: str) -> dict:
         profile.default_city if profile else "",
         profile.default_region if profile else "",
     )
+    heard = answer_record(user, text)
+    if heard:
+        return heard
     if planned:
-        return propose(user, "plan_day", planned, summarize_plan(planned), "material", key, key, source)
+        from app.services.pending import commit_apply
+
+        return commit_apply(user, "plan_day", planned, source, key)
     outcome = parse_outcome_text(text) if not UNIT_JOB.search(text.strip()) else None
     if outcome:
-        return propose(user, "plan_outcome", outcome, summarize_outcome(outcome), "material", key, key, source)
+        from app.services.pending import commit_apply
+
+        return commit_apply(user, "plan_outcome", outcome, source, key)
     going = GOING.search(text.strip())
     if going:
         return _plan_from_phrase(user, going, key, source)
@@ -276,6 +292,9 @@ def interpret(user, text: str, key: str, source: str) -> dict:
     if END_VISIT.search(text):
         return _offer(user, "update_trip", {"end_visit": True}, "End this property visit.", "low", key, source)
     if QUESTION.search(text) or text.strip().endswith("?"):
+        heard = answer_record(user, text)
+        if heard:
+            return heard
         result = apply_query_record(user, {"question": text}, source)
         db.session.commit()
         return result
@@ -291,9 +310,13 @@ def interpret(user, text: str, key: str, source: str) -> dict:
     if SKIP.search(text):
         number = _loose_unit(text)
         if not number:
-            return {"ok": True, "reply": "Skipped a door. Tell me the unit if you want it on the record. I will not invent one."}
+            return {"ok": True, "reply": "Which unit should I skip?"}
         payload = {"unit_number": number, "title": "Nobody home", "status": "skipped", "note": "Nobody home"}
-        card = propose(user, "record_unit_visit", payload, f"Mark unit {number} nobody home. Not saved yet.", "low", key, key, source)
+        if _place_ready(user):
+            from app.services.pending import commit_apply
+
+            return commit_apply(user, "record_unit_visit", payload, source, key)
+        card = propose(user, "record_unit_visit", payload, f"Mark unit {number} nobody home.", "low", key, key, source)
         return _with_place_prompt(user, card)
     expense = _expense_payload(text)
     if expense:
@@ -364,8 +387,7 @@ def interpret(user, text: str, key: str, source: str) -> dict:
     return {
         "ok": True,
         "reply": (
-            f"{name} can stage a trip, log a unit, file gas, or build the company report. "
-            "Tell me the property and what you did, or open Plan today and search for the stops."
+            "I didn't catch that. Tell me a site to add, what you did, or ask what's on your record."
         ),
     }
 
@@ -406,7 +428,7 @@ def _site_to_add(text: str) -> dict | None:
     return {"property_name": name, "city": city, "region": region}
 
 
-def _answer_plate(user, text: str) -> dict | None:
+def _answer_plate(user, text: str, key: str, source: str) -> dict | None:
     """A short reply can fill the serial or the unit on a nameplate that is waiting."""
     from app.services.equipment import SERIAL, describe
 
@@ -445,14 +467,25 @@ def _answer_plate(user, text: str) -> dict | None:
         missing.append("the serial")
     row.payload_json = dumps(payload)
     label = describe(equipment) or payload.get("title") or "that equipment"
-    if missing:
+    still = [item for item in missing if item != "the serial"]
+    if still or not payload.get("unit_number"):
+        ask = "Which unit?" if not payload.get("unit_number") else "I still need " + " and ".join(still) + "."
         row.status = "needs_answer"
-        row.summary = f"{label}. I still need {' and '.join(missing)}."
-    else:
-        row.status = "pending"
-        row.summary = f"Log unit {payload.get('unit_number')} — {label}. Not saved yet."
+        row.summary = f"{label}. {ask}"
+        row.payload_json = dumps(payload)
+        db.session.commit()
+        return {"ok": True, "pending": True, "reply": row.summary, "proposal": {"id": row.id, "tool": row.tool, "summary": row.summary, "status": row.status, "payload": payload, "risk": row.risk}}
+    if _place_ready(user):
+        result = _commit_waiting(user, row, "record_unit_visit", payload, key, source)
+        if result.get("ok") and payload.get("media_id") and not equipment.get("serial"):
+            result["reply"] = ((result.get("reply") or "").rstrip() + " I didn't catch a serial.").strip()
+        return result
+    row.status = "pending"
+    row.summary = f"Unit {payload.get('unit_number')}: {label}."
+    row.payload_json = dumps(payload)
     db.session.commit()
-    return {"ok": True, "pending": True, "reply": row.summary, "proposal": {"id": row.id, "tool": row.tool, "summary": row.summary, "status": row.status, "payload": payload, "risk": row.risk}}
+    card = {"ok": True, "pending": True, "reply": row.summary, "proposal": {"id": row.id, "tool": row.tool, "summary": row.summary, "status": row.status, "payload": payload, "risk": row.risk}}
+    return _with_place_prompt(user, card)
 
 
 def _unit_job(user, number: str, title: str, text: str, key: str, source: str) -> dict:
@@ -466,9 +499,14 @@ def _unit_job(user, number: str, title: str, text: str, key: str, source: str) -
     if has_identity(equipment) or equipment.get("kind"):
         payload["equipment"] = equipment
     label = describe(equipment) if has_identity(equipment) else title
-    summary = f"Log unit {number} — {label}. Not saved yet."
+    shift = open_shift(user)
+    if shift and shift.confirmed:
+        from app.services.pending import commit_apply
+
+        return commit_apply(user, "record_unit_visit", payload, source, key)
+    summary = f"Unit {number}: {label}. Say yes and I'll save it."
     if has_identity(equipment) and not equipment.get("serial"):
-        summary += " Serial was not in that sentence. Add it if you have it."
+        summary += " I didn't catch a serial."
     card = propose(user, "record_unit_visit", payload, summary, "material", key, key, source)
     return _with_place_prompt(user, card)
 
@@ -486,12 +524,9 @@ def _plan_from_phrase(user, match, key, source) -> dict:
         payload["starts_on"] = next_named_day(when, today).isoformat()
     if not payload.get("city"):
         return {"ok": False, "needs_answer": True, "reply": "Which city is that property in?"}
-    summary = (
-        f"Stage {payload['property_name']} in {payload['city']} on {payload['starts_on']}"
-        + (f" for {payload['purpose']}" if payload["purpose"] else "")
-        + ". Not saved yet."
-    )
-    return propose(user, "plan_trip", payload, summary, "material", key, key, source)
+    from app.services.pending import commit_apply
+
+    return commit_apply(user, "plan_trip", payload, source, key)
 
 
 def _place_payload(place: str, arrive: bool = False) -> dict:
@@ -564,15 +599,126 @@ def _expense_payload(text: str) -> dict | None:
     }
 
 
+def answer_record(user, text: str) -> dict | None:
+    """Plain questions answered in the thread from her record."""
+    from app.models import Equipment, PlanItem, Property
+    from app.services.miles import traveled_total
+
+    low = " ".join((text or "").lower().split())
+    if re.search(r"\b(my sites|my properties|list (my )?sites|what sites|which sites|show (my )?sites|my places)\b", low):
+        rows = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
+        if not rows:
+            return {"ok": True, "reply": "You don't have any sites yet. Say add, the property name, from the city, to my sites."}
+        lines = []
+        for prop in rows[:40]:
+            city = prop.city.name if prop.city else ""
+            region = prop.city.region if prop.city else ""
+            place = ", ".join(bit for bit in (city, region) if bit)
+            lines.append(f"{prop.name}" + (f" — {place}" if place else ""))
+        extra = f"\nAnd {len(rows) - 40} more." if len(rows) > 40 else ""
+        return {"ok": True, "reply": "Your sites:\n" + "\n".join(lines) + extra}
+    if re.search(r"\b(my plan|the plan|on my plan|what.?s planned|today.?s plan|what do i have planned)\b", low):
+        items = PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial"))).all()
+        if not items:
+            return {"ok": True, "reply": "Nothing is open on the plan."}
+        lines = []
+        for item in items[:30]:
+            place = item.property.name if item.property else "Somewhere"
+            left = ""
+            if item.status == "partial":
+                left = f" ({item.done_qty} of {item.planned_qty} done)"
+            elif int(item.planned_qty or 1) > 1:
+                left = f" ({item.planned_qty})"
+            lines.append(f"{place}: {item.title}{left}")
+        return {"ok": True, "reply": "Still open:\n" + "\n".join(lines)}
+    if re.search(r"\b(my miles|how many miles|miles so far|miles have i|total miles)\b", low):
+        total = traveled_total(user.id)
+        return {"ok": True, "reply": f"You have {total} miles on the record."}
+    if re.search(r"\b(what equipment|list equipment|show equipment|my equipment|equipment at|equipment in|my appliances)\b", low):
+        gear = Equipment.query.filter(Equipment.deleted_at.is_(None)).order_by(Equipment.id.desc()).all()
+        if not gear:
+            return {"ok": True, "reply": "No equipment is filed yet. Tell me the unit and what it is, like unit 12 fridge is a Whirlpool."}
+        lines = []
+        for item in gear[:30]:
+            unit = item.unit.unit_number if item.unit else ""
+            place = item.property.name if getattr(item, "property", None) else ""
+            if not place and item.property_id:
+                prop = db.session.get(Property, item.property_id)
+                place = prop.name if prop else ""
+            bits = " ".join(bit for bit in (item.brand, item.size_label, item.kind) if bit)
+            if item.model_number:
+                bits += f" model {item.model_number}"
+            if item.serial_number:
+                bits += f" serial {item.serial_number}"
+            where = " ".join(bit for bit in (f"unit {unit}" if unit else "", place) if bit)
+            lines.append(f"{where}: {bits}".strip())
+        return {"ok": True, "reply": "Equipment:\n" + "\n".join(lines)}
+    if re.search(r"\b(what did i do|what have i done|my jobs|jobs today|what did i log|today'?s work)\b", low):
+        from app.models import Job, Unit
+
+        rows = Job.query.filter(Job.deleted_at.is_(None)).order_by(Job.id.desc()).limit(12).all()
+        if not rows:
+            return {"ok": True, "reply": "Nothing is logged yet. Tell me the unit and what you did."}
+        lines = []
+        for job in rows:
+            unit = db.session.get(Unit, job.unit_id) if job.unit_id else None
+            prop = db.session.get(Property, job.property_id) if job.property_id else None
+            where = []
+            if unit:
+                where.append(f"unit {unit.unit_number}")
+            if prop:
+                where.append(prop.name)
+            prefix = ", ".join(where)
+            lines.append(f"{job.title} ({job.status})" + (f" — {prefix}" if prefix else ""))
+        return {"ok": True, "reply": "Logged:\n" + "\n".join(lines)}
+    if re.search(r"\b(my expenses|what did i spend|my receipts|money i spent|what have i spent)\b", low):
+        from app.models import Expense
+
+        rows = Expense.query.filter(Expense.deleted_at.is_(None)).order_by(Expense.id.desc()).limit(12).all()
+        if not rows:
+            return {"ok": True, "reply": "No expenses yet. Tell me the amount when you have it."}
+        lines = []
+        total = 0
+        for row in rows:
+            cents = int(row.amount_cents or 0)
+            total += cents
+            who = f" at {row.merchant}" if row.merchant else ""
+            lines.append(f"{row.kind} ${cents / 100:.2f}{who}")
+        lines.append(f"Total ${total / 100:.2f}")
+        return {"ok": True, "reply": "Expenses:\n" + "\n".join(lines)}
+    if re.search(r"\b(read|show|what.?s on|what is on|latest)\b", low) and re.search(r"\breport\b", low):
+        from app.models import Report
+        from app.services.reports import chat_excerpt
+
+        report = (
+            Report.query.filter(Report.deleted_at.is_(None))
+            .order_by(Report.id.desc())
+            .first()
+        )
+        if not report:
+            return {"ok": True, "reply": "No report yet. Say weekly report or company report and I'll write it here."}
+        return {"ok": True, "reply": f"{report.title}\n\n{chat_excerpt(report.body_md or '')}"}
+    if re.search(r"\b(who can (?:log in|sign in)|my bosses|my employees|who has access|my people|who'?s on the account)\b", low):
+        from app.models import User
+        from app.services.providers import ROLE_LABELS
+
+        people = User.query.filter_by(active=True).order_by(User.id.asc()).all()
+        lines = []
+        for person in people:
+            mail = person.email or "no email"
+            lines.append(f"{person.label()} — {ROLE_LABELS.get(person.role, person.role)} ({mail})")
+        return {"ok": True, "reply": "People:\n" + "\n".join(lines)}
+    return None
+
+
 def _expense_offer(user, payload, key, source) -> dict:
     if payload.get("needs_answer"):
         ask = " and ".join(payload.get("missing") or [])
         summary = f"I need {ask} before this {payload['kind']} expense can be saved."
         return propose(user, "log_expense", payload, summary, "material", key, key, source)
-    dollars = payload["amount_cents"] / 100
-    odo = f", odometer {payload['odometer']}" if payload.get("odometer") else ""
-    summary = f"File {payload['kind']} ${dollars:.2f}{odo}. Not saved yet."
-    return propose(user, "log_expense", payload, summary, "material", key, key, source)
+    from app.services.pending import commit_apply
+
+    return commit_apply(user, "log_expense", payload, source, key)
 
 
 def _merge_open_question(user, text, key, source) -> dict | None:
@@ -623,11 +769,10 @@ def _merge_open_question(user, text, key, source) -> dict | None:
         row.summary = "I still need " + " and ".join(missing) + "."
         db.session.commit()
         return {"ok": True, "pending": True, "reply": row.summary, "proposal": {"id": row.id, "tool": row.tool, "summary": row.summary, "status": row.status, "payload": payload, "risk": row.risk}}
-    row.status = "pending"
-    dollars = int(payload["amount_cents"]) / 100
-    row.summary = f"File {payload['kind']} ${dollars:.2f}. Not saved yet."
-    db.session.commit()
-    return {"ok": True, "pending": True, "reply": row.summary, "proposal": {"id": row.id, "status": "pending", "summary": row.summary, "tool": row.tool, "risk": row.risk, "payload": payload}}
+    payload["needs_answer"] = False
+    payload["fields_confirmed"] = True
+    payload["confidence"] = 0.9
+    return _commit_waiting(user, row, "log_expense", payload, key, source)
 
 
 def _user_offer(user, text, match, key, source) -> dict:
@@ -652,9 +797,9 @@ def _user_offer(user, text, match, key, source) -> dict:
         "can_see_history": True,
         "can_see_live_map": False,
     }
-    mail = payload["email"] or "no email"
-    summary = f"Add {username} as {role} ({mail}). Not saved yet."
-    return propose(user, "invite_viewer", payload, summary, "material", key, key, source)
+    from app.services.pending import commit_apply
+
+    return commit_apply(user, "invite_viewer", payload, source, key)
 
 
 def _settings_payload(text: str) -> dict:
@@ -677,8 +822,131 @@ def _settings_payload(text: str) -> dict:
     return payload
 
 
+def handle_photo(user, text, raw: bytes, mime: str, *, idempotency_key: str, source: str = "ai") -> dict:
+    """A photo in the thread is filed, and the reading comes back in the thread."""
+    from app.models import Media
+    from app.services.equipment import describe, merge_equipment, parse_equipment, read_photo
+    from app.services.files import save_blob
+    from app.services.records import dumps, loads
+
+    name = save_blob(raw)
+    media = Media(
+        user_id=user.id,
+        kind="photo",
+        storage_name=name,
+        mime=mime or "image/jpeg",
+        caption=(text or "")[:300],
+        created_at=utcnow(),
+    )
+    db.session.add(media)
+    db.session.commit()
+    seen = read_photo(user, raw, media.mime)
+    merged = merge_equipment(parse_equipment(text or ""), seen)
+    media.parse_json = dumps(merged)
+    media.confidence = merged.get("confidence")
+    if merged.get("serial") or merged.get("model"):
+        media.kind = "nameplate"
+    db.session.commit()
+    label = describe(merged)
+    note = (text or "").strip()
+    if note:
+        result = handle_message(user, note, idempotency_key=idempotency_key, source=source)
+        _stick_photo(user, media, merged, idempotency_key, result)
+        extra = ""
+        if label:
+            extra = f"From the photo: {label}."
+        elif seen.get("reply"):
+            extra = seen["reply"]
+        if extra:
+            combined = ((result.get("reply") or "").rstrip() + "\n" + extra).strip()
+            result["reply"] = combined
+            last = (
+                ChatMessage.query.filter_by(user_id=user.id, role="assistant")
+                .order_by(ChatMessage.id.desc())
+                .first()
+            )
+            if last:
+                last.body = combined[:8000]
+                db.session.commit()
+        result["media_id"] = media.id
+        return result
+    _save_chat(user, "user", "Photo")
+    if label:
+        reply = f"I read {label}. Which unit is this?"
+        payload = {
+            "unit_number": "",
+            "title": label,
+            "status": "done",
+            "note": label,
+            "equipment": merged,
+            "media_id": media.id,
+            "needs_answer": True,
+            "missing": ["the unit"],
+        }
+        card = propose(
+            user,
+            "record_unit_visit",
+            payload,
+            reply,
+            "material",
+            idempotency_key,
+            idempotency_key,
+            source,
+        )
+        reply = card.get("reply") or reply
+    else:
+        extra = seen.get("reply") or "Tell me the unit and what it is, and I'll file it."
+        reply = f"Photo kept. {extra}"
+    _save_chat(user, "assistant", reply)
+    return {"ok": True, "reply": reply, "media_id": media.id}
+
+
+def _stick_photo(user, media, merged, key, result) -> None:
+    from app.services.equipment import merge_equipment
+    from app.services.records import dumps, loads
+
+    row = PendingAction.query.filter_by(user_id=user.id, idempotency_key=(key or "")[:120]).first()
+    if row and row.status in ("pending", "needs_answer"):
+        payload = loads(row.payload_json)
+        payload["media_id"] = media.id
+        if row.tool == "record_unit_visit" and merged:
+            payload["equipment"] = merge_equipment(payload.get("equipment") or {}, merged)
+        row.payload_json = dumps(payload)
+        db.session.commit()
+        return
+    if result.get("job_id"):
+        media.job_id = result["job_id"]
+    if result.get("unit_id"):
+        media.unit_id = result["unit_id"]
+    if result.get("job_id") or result.get("unit_id"):
+        db.session.commit()
+
+
+def _commit_waiting(user, row, tool, payload, key, source) -> dict:
+    from app.services.pending import commit_apply
+    from app.services.records import dumps
+
+    payload = dict(payload)
+    payload.pop("needs_answer", None)
+    payload["fields_confirmed"] = True
+    result = commit_apply(user, tool, payload, source, key)
+    fresh = db.session.get(PendingAction, row.id)
+    if fresh:
+        if result.get("ok"):
+            fresh.status = "accepted"
+            fresh.result_json = dumps(result)
+        else:
+            fresh.status = "needs_answer"
+            fresh.payload_json = dumps(payload)
+            fresh.summary = result.get("reply") or fresh.summary
+        db.session.commit()
+    return result
+
+
 def _offer(user, tool, payload, summary, risk, key, source) -> dict:
-    return propose(user, tool, payload, summary, risk, key, key, source)
+    from app.services.pending import commit_apply
+
+    return commit_apply(user, tool, payload, source, key)
 
 
 def _direct(user, tool, payload, key, source, summary_prefix: str) -> dict:

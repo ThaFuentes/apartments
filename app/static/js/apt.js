@@ -100,19 +100,54 @@
     if (!thread || !text) return;
     const bubble = document.createElement("p");
     bubble.className = "bubble " + role;
-    bubble.textContent = text;
+    if (role === "assistant") {
+      const who = document.createElement("span");
+      who.className = "who";
+      who.textContent = "Apt";
+      bubble.appendChild(who);
+    }
+    bubble.appendChild(document.createTextNode(text));
+    const time = document.createElement("time");
+    time.textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    bubble.appendChild(time);
     thread.appendChild(bubble);
     thread.scrollTop = thread.scrollHeight;
   }
 
+  const box = composer ? composer.querySelector("textarea") : null;
+  const photo = composer ? composer.querySelector('input[name="photo"]') : null;
+  const photoLabel = composer ? composer.querySelector(".clip span") : null;
+  if (box) {
+    box.addEventListener("input", function () {
+      box.style.height = "auto";
+      box.style.height = Math.min(box.scrollHeight, 140) + "px";
+    });
+    box.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        if (composer.requestSubmit) composer.requestSubmit();
+        else composer.dispatchEvent(new Event("submit", { cancelable: true }));
+      }
+    });
+  }
+  if (photo && photoLabel) {
+    photo.addEventListener("change", function () {
+      const file = photo.files && photo.files[0];
+      photoLabel.textContent = file ? file.name : "Photo";
+    });
+  }
+  const openThread = document.getElementById("thread");
+  if (openThread) openThread.scrollTop = openThread.scrollHeight;
+
   if (composer) {
     composer.addEventListener("submit", function (event) {
       const text = (composer.querySelector("textarea").value || "").trim();
+      const file = photo && photo.files && photo.files[0];
       event.preventDefault();
-      if (!text) return;
+      if (!text && !file) return;
       if (!navigator.onLine) {
-        if (moneyTalk.test(text)) {
-          window.alert("Money and “save it” wait until you have signal, so a receipt is not filed twice.");
+        if (file || moneyTalk.test(text)) {
+          addBubble("assistant", "Photos and money wait until you have signal, so nothing is filed twice.");
           return;
         }
         const rows = drafts();
@@ -122,23 +157,24 @@
         });
         saveDrafts(rows);
         composer.querySelector("textarea").value = "";
-        window.alert("Saved on this phone. It sends when you are back online.");
+        addBubble("user", text);
+        addBubble("assistant", "I'll send that when you're back online.");
         return;
       }
       const body = new FormData(composer);
-      addBubble("user", text);
+      addBubble("user", text || "Photo");
       composer.querySelector("textarea").value = "";
+      if (box) box.style.height = "auto";
+      if (photo) photo.value = "";
+      if (photoLabel) photoLabel.textContent = "Photo";
       fetch("/chat", {
         method: "POST",
         body: body,
         headers: { Accept: "application/json", "X-CSRF-Token": token }
       }).then(function (resp) { return resp.json(); }).then(function (data) {
-        addBubble("assistant", (data && data.reply) || "Saved.");
+        addBubble("assistant", (data && data.reply) || "Got it.");
         const key = composer.querySelector('[name="idempotency_key"]');
         if (key) key.value = Math.random().toString(16).slice(2) + Date.now().toString(16);
-        if (data && data.ok && /on your sites/i.test(data.reply || "") && location.pathname === "/") {
-          window.setTimeout(function () { location.reload(); }, 600);
-        }
       }).catch(function () {
         addBubble("assistant", "That didn't send. Try again.");
       });

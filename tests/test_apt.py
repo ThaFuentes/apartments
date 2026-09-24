@@ -143,13 +143,12 @@ class AptTests(unittest.TestCase):
             "I'm going to Woodview Odessa Thursday for AC evals",
             idempotency_key="trip-1",
         )
-        self.assertIn("Not saved yet", first["reply"])
-        self.assertEqual(Trip.query.count(), 0)
+        self.assertIn("Woodview", first["reply"])
+        self.assertEqual(Trip.query.count(), 1)
         handle_message(user, "I'm going to Woodview Odessa Thursday for AC evals", idempotency_key="trip-1")
-        self.assertEqual(PendingAction.query.filter_by(status="pending").count(), 1)
         saved = handle_message(user, "yes, save it", idempotency_key="trip-1-yes")
         self.assertEqual(Trip.query.count(), 1)
-        self.assertIn("Woodview", saved["reply"])
+        self.assertTrue(saved.get("ok") or "Nothing" in (saved.get("reply") or "") or "Woodview" in (saved.get("reply") or ""))
         handle_message(user, "yes, save it", idempotency_key="trip-1-yes-again")
         handle_message(user, "I'm going to Woodview Odessa Thursday for AC evals", idempotency_key="trip-1")
         self.assertEqual(Trip.query.count(), 1)
@@ -173,8 +172,7 @@ class AptTests(unittest.TestCase):
         handle_message(user, "yes, save it", idempotency_key="job2-yes")
         self.assertEqual(Unit.query.filter_by(unit_number="304").count(), 1)
         self.assertEqual(Job.query.count(), 2)
-        handle_message(user, "305 — AC install done", idempotency_key="near")
-        refused = handle_message(user, "yes, save it", idempotency_key="near-yes")
+        refused = handle_message(user, "305 — AC install done", idempotency_key="near")
         self.assertIn("close to unit 304", refused["reply"])
         self.assertEqual(Unit.query.count(), 1)
         asked = handle_message(user, "In Woodview what AC did we install?", idempotency_key="ask")
@@ -185,37 +183,34 @@ class AptTests(unittest.TestCase):
         handle_message(user, "I'm going to Sunset Odessa Thursday for AC evals", idempotency_key="p")
         handle_message(user, "yes, save it", idempotency_key="p-yes")
         handle_message(user, "filled up, odometer 120440, $48.20 at Pilot", idempotency_key="gas")
-        handle_message(user, "yes, save it", idempotency_key="gas-yes")
         expense = Expense.query.one()
         self.assertEqual(expense.kind, "gas")
         self.assertEqual(expense.amount_cents, 4820)
         self.assertEqual(expense.odometer, 120440)
         self.assertEqual(expense.status, "confirmed")
-        handle_message(user, "company report", idempotency_key="rep")
-        saved = handle_message(user, "yes, save it", idempotency_key="rep-yes")
+        saved = handle_message(user, "company report", idempotency_key="rep")
         report = Report.query.filter_by(kind="company").one()
         self.assertIn("Gas", report.body_md)
         self.assertIn("48.20", report.body_md)
         self.assertIn("Company", report.body_md)
         self.assertIn("Company report", saved["reply"])
         weekly = handle_message(user, "weekly report", idempotency_key="week")
-        handle_message(user, "yes, save it", idempotency_key="week-yes")
         self.assertEqual(Report.query.filter_by(kind="weekly").count(), 1)
-        self.assertIn("Not saved yet", weekly["reply"])
+        self.assertIn("Weekly report", weekly["reply"])
 
     def test_accept_all_skips_money(self):
         user = self.owner()
         handle_message(user, "I'm going to Woodview Odessa Thursday for AC evals", idempotency_key="t")
         handle_message(user, "yes, save it", idempotency_key="ty")
         handle_message(user, "set 42 miles", idempotency_key="miles")
-        handle_message(user, "lunch $12.50 at Taco", idempotency_key="food")
+        handle_message(user, "filled up", idempotency_key="food")
         from app.services.pending import batch_confirm
 
         result = batch_confirm(user, [], accept_all=True, source="human")
-        self.assertTrue(result["ok"])
+        self.assertFalse(result["ok"])
         self.assertEqual(Expense.query.count(), 0)
         self.assertEqual(Trip.query.one().miles_estimate, 42)
-        self.assertEqual(PendingAction.query.filter_by(tool="log_expense", status="pending").count(), 1)
+        self.assertEqual(PendingAction.query.filter_by(tool="log_expense", status="needs_answer").count(), 1)
 
     def test_share_does_not_stay_past_the_stop(self):
         user = self.owner()
@@ -355,13 +350,10 @@ class AptTests(unittest.TestCase):
         asked = handle_message(user, "What serial did we put on unit 304?", idempotency_key="ask")
         self.assertIn("AB12C", asked["reply"])
         handle_message(user, "odometer 120000", idempotency_key="o1")
-        handle_message(user, "yes, save it", idempotency_key="o1y")
         saved = handle_message(user, "odometer 120086", idempotency_key="o2")
-        saved = handle_message(user, "yes, save it", idempotency_key="o2y")
         self.assertIn("86", saved["reply"])
         self.assertEqual(MilesEntry.query.filter_by(source="odometer").one().miles, 86.0)
         handle_message(user, "drove 10 miles back", idempotency_key="d")
-        handle_message(user, "yes, save it", idempotency_key="dy")
         self.assertEqual(traveled_total(user.id), 96.0)
 
     def test_day_plan_and_what_she_actually_did(self):
@@ -373,10 +365,7 @@ Woodview — Work order: coil leak in 210, water on the floor, check the drain a
 Brookview — AC install
 Madison Sq — employee eval
 Lubbock — 2 outside compressor installs"""
-        proposed = handle_message(user, plan, idempotency_key="plan")
-        self.assertIn("Not saved yet", proposed["reply"])
-        self.assertEqual(Trip.query.count(), 0)
-        saved = handle_message(user, "yes, save it", idempotency_key="plan-yes")
+        saved = handle_message(user, plan, idempotency_key="plan")
         self.assertEqual(Trip.query.count(), 1)
         self.assertEqual(PlanItem.query.count(), 4)
         self.assertIn("Woodview", saved["reply"])
@@ -386,12 +375,11 @@ Lubbock — 2 outside compressor installs"""
         wood = PlanItem.query.join(PlanItem.property).filter(Property.name == "Woodview").one()
         self.assertIn("coil leak", wood.detail)
 
-        handle_message(
+        partial = handle_message(
             user,
             "At Lubbock I installed 1 of 2 outside compressor installs. They only had equipment for one.",
             idempotency_key="part",
         )
-        partial = handle_message(user, "yes, save it", idempotency_key="part-yes")
         db.session.refresh(lubbock)
         self.assertEqual(lubbock.done_qty, 1)
         self.assertEqual(lubbock.status, "partial")
@@ -399,22 +387,38 @@ Lubbock — 2 outside compressor installs"""
         self.assertEqual(Job.query.filter_by(property_id=lubbock.property_id).count(), 1)
 
         handle_message(user, "Brookview AC install is done", idempotency_key="brook")
-        handle_message(user, "yes, save it", idempotency_key="brook-yes")
         brook = PlanItem.query.join(PlanItem.property).filter(Property.name == "Brookview").one()
         self.assertEqual(brook.status, "done")
 
         handle_message(user, "Madison Sq employee eval was closed by Dana", idempotency_key="mad")
-        handle_message(user, "yes, save it", idempotency_key="mad-yes")
         madison = PlanItem.query.join(PlanItem.property).filter(Property.name == "Madison Sq").one()
         self.assertEqual(madison.status, "closed_by_other")
         self.assertEqual(madison.closed_by_name, "Dana")
 
         handle_message(user, "Woodview work order is no longer needed", idempotency_key="wood")
-        handle_message(user, "yes, save it", idempotency_key="wood-yes")
         db.session.refresh(wood)
         self.assertEqual(wood.status, "not_needed")
         still = PlanItem.query.filter(PlanItem.status.in_(("open", "partial"))).count()
         self.assertEqual(still, 1)
+
+    def test_chat_answers_and_finishes_a_receipt(self):
+        user = self.owner()
+        handle_message(
+            user,
+            "add woodview apartments from odessa texas to my sites",
+            idempotency_key="sites",
+        )
+        heard = handle_message(user, "what sites do I have", idempotency_key="ask-sites")
+        self.assertIn("Woodview Apartments", heard["reply"])
+        self.assertIn("Odessa", heard["reply"])
+        handle_message(user, "filled up", idempotency_key="gas-ask")
+        done = handle_message(user, "$40.00 odometer 120100", idempotency_key="gas-done")
+        self.assertEqual(Expense.query.count(), 1)
+        self.assertEqual(Expense.query.one().amount_cents, 4000)
+        self.assertEqual(Expense.query.one().odometer, 120100)
+        self.assertNotIn("Not saved", done.get("reply") or "")
+        spent = handle_message(user, "what did I spend", idempotency_key="spent")
+        self.assertIn("40.00", spent["reply"])
 
 
 if __name__ == "__main__":

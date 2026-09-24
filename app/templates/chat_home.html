@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Chat{% endblock %}
+{% block body_class %}chat-home{% endblock %}
+{% block main %}
+<section class="chat-screen">
+  <header class="chat-bar">
+    <div class="peer">
+      <span class="avatar" aria-hidden="true">A</span>
+      <div>
+        <strong>Apt</strong>
+        <small>Chat</small>
+      </div>
+    </div>
+    <details class="chat-menu">
+      <summary>Menu</summary>
+      <div class="chat-menu-pop">
+        <a href="/trips">Plan</a>
+        <a href="/places">Places</a>
+        <a href="/more">More</a>
+      </div>
+    </details>
+  </header>
+  {% include "chat_thread.html" %}
+</section>
+{% endblock %}
