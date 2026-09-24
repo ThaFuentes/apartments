@@ -30,6 +30,7 @@ from app.services.records import (
     CONFIDENCE_FLOOR,
     audit,
     dumps,
+    bare_property_name,
     ensure_property,
     find_properties,
     not_a_property,
@@ -530,7 +531,11 @@ def apply_upsert_property(user, payload, source) -> dict:
     city = (payload.get("city") or "").strip()
     if not_a_property(name):
         return {"ok": False, "reply": f"{name} stays on the trip plan. It is not a place."}
-    if not name or not city:
+    name = bare_property_name(name, city)
+    if not name:
+        where = city or "that city"
+        return {"ok": False, "reply": f"What's the property's name in {where}? I didn't save that sentence as the name."}
+    if not city:
         return {"ok": False, "reply": "Tell me the property and the city."}
     profile = site_profile()
     region = (payload.get("region") or (profile.default_region if profile else "") or "").strip()

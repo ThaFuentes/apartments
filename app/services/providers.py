@@ -237,7 +237,7 @@ def chat_with_tools(row, text: str, timeout: int = 25) -> dict:
     messages = [
         {
             "role": "system",
-            "content": "You help one regional manager. The message names you and says how to talk. When she says to add a property, call upsert_property with the exact name and city she said. Never substitute a different property. A plan or a trip plan is plan_trip, not a new property. Gas, fuel, and meals are never properties. Do not call query_record for an add. Do not say there is no matching job unless she asked about a job.",
+            "content": "You help one regional manager. The message names you and says how to talk. When she says to add a property, call upsert_property with only the apartment name and the city. Never put her sentence in property_name. If she only gives a city, ask for the apartment name and do not save anything. Never substitute a different property. A plan or a trip plan is plan_trip, not a new property. Gas, fuel, and meals are never properties. Do not call query_record for an add. Do not say there is no matching job unless she asked about a job.",
         },
         {"role": "user", "content": text},
     ]
@@ -388,7 +388,7 @@ def record_brief() -> str:
 
 
 def collect_tool_calls(user, text: str):
-    """One try per saved key. A prose answer is kept. A quota error moves on."""
+    """Try each saved key in order. Stop on a real answer. Local chat runs only after every key fails."""
     rows = keys_for(user)
     if not rows:
         return None
@@ -406,21 +406,26 @@ def collect_tool_calls(user, text: str):
     )
     notes = []
     for row in rows:
+        label = provider_spec(row.provider).get("label") or row.provider
         if getattr(row, "backoff_until", None) and row.backoff_until > utcnow():
-            notes.append(f"{provider_spec(row.provider).get('label') or row.provider} is cooling down.")
+            notes.append(f"{label} is cooling down.")
             continue
-        result = chat_with_tools(row, prompt)
+        try:
+            result = chat_with_tools(row, prompt)
+        except Exception:
+            notes.append(f"{label} did not answer.")
+            continue
+        if not isinstance(result, dict):
+            notes.append(f"{label} did not answer.")
+            continue
         if result.get("quota"):
             row.backoff_until = backoff_until(result.get("seconds") or 60)
             db.session.commit()
-            notes.append(f"{provider_spec(row.provider).get('label') or row.provider} is out of quota. I will not keep calling it.")
+            notes.append(f"{label} is out of quota.")
             continue
-        if result.get("calls"):
-            return {"calls": result["calls"], "text": (result.get("text") or "").strip(), "note": ""}
-        if result.get("ok") and (result.get("text") or "").strip():
-            return {"calls": [], "text": result["text"].strip(), "note": ""}
-        if result.get("ok"):
-            return {"calls": [], "text": "", "note": ""}
-    if notes:
-        return {"calls": [], "text": "", "note": " ".join(notes)}
-    return {"calls": [], "text": "", "note": ""}
+        calls = result.get("calls") or []
+        prose = (result.get("text") or "").strip()
+        if calls or prose:
+            return {"calls": calls, "text": prose, "note": ""}
+        notes.append(f"{label} did not answer.")
+    return {"calls": [], "text": "", "note": " ".join(notes)}

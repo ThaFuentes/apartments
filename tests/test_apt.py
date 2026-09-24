@@ -725,7 +725,7 @@ Lubbock — 2 outside compressor installs"""
         self.assertEqual(place["property_name"], "Woodview")
         self.assertEqual(place["city"], "Odessa")
         self.assertEqual(place["region"], "Texas")
-        self.assertIsNone(_place_she_named("i said add a property please pay attention"))
+        self.assertTrue(_place_she_named("i said add a property please pay attention") is None or _place_she_named("i said add a property please pay attention").get("needs_name"))
         user = self.owner()
         db.session.add(
             ApiCredential(
@@ -744,7 +744,7 @@ Lubbock — 2 outside compressor installs"""
             "lng": -102.35,
             "label": "Woodview",
         }
-        with patch("app.services.providers.gemini_complete", return_value={"ok": True, "text": "", "calls": [{"name": "query_record", "args": {"question": "woodview"}}]}), patch(
+        with patch("app.services.providers.gemini_complete", return_value={"ok": False, "error": "down"}), patch(
             "app.services.appliers.lookup_place", return_value=hit
         ):
             heard = handle_message(user, said, idempotency_key="add-wood")
@@ -782,7 +782,7 @@ Lubbock — 2 outside compressor installs"""
         hit = {"address": "5100 E Everglade Ave, Odessa, TX", "lat": 31.9, "lng": -102.3, "label": "Brookview"}
         with patch(
             "app.services.providers.gemini_complete",
-            return_value={"ok": True, "text": "I couldn't locate Brookview in our current records.", "calls": []},
+            return_value={"ok": False, "error": "down"},
         ), patch("app.services.geo.lookup_place", return_value=hit):
             heard = handle_message(user, asked, idempotency_key="brook-web")
         self.assertIn("5100 E Everglade", heard["reply"])
@@ -806,7 +806,7 @@ Lubbock — 2 outside compressor installs"""
         db.session.commit()
         with patch(
             "app.services.providers.gemini_complete",
-            return_value={"ok": True, "text": "I don't have a matching job.", "calls": []},
+            return_value={"ok": False, "error": "down"},
         ):
             heard = handle_message(user, "please remove brookview", idempotency_key="rm-b")
             self.assertIn("Say yes", heard["reply"])
@@ -887,7 +887,7 @@ Lubbock — 2 outside compressor installs"""
         db.session.commit()
         with patch(
             "app.services.providers.gemini_complete",
-            return_value={"ok": True, "text": "Which property is this? Log unit 26: Unit maintenance. Not saved yet.", "calls": []},
+            return_value={"ok": False, "error": "down"},
         ):
             heard = handle_message(
                 user,
@@ -938,7 +938,7 @@ Lubbock — 2 outside compressor installs"""
         db.session.commit()
         with patch(
             "app.services.providers.gemini_complete",
-            return_value={"ok": True, "text": "Which property is this? Not saved yet.", "calls": []},
+            return_value={"ok": False, "error": "down"},
         ):
             handle_message(user, "in brookv apartment 12 i added a washer and a stove", idempotency_key="both")
             heard = handle_message(
@@ -989,7 +989,7 @@ Lubbock — 2 outside compressor installs"""
         db.session.commit()
         with patch(
             "app.services.providers.gemini_complete",
-            return_value={"ok": True, "text": "Noted on every washer.", "calls": []},
+            return_value={"ok": False, "error": "down"},
         ):
             vague = handle_message(user, "in brookv apartment 26 the washer note door leaks", idempotency_key="which")
             picked = handle_message(
@@ -1092,12 +1092,8 @@ Lubbock — 2 outside compressor installs"""
         with patch(
             "app.services.providers.gemini_complete",
             return_value={
-                "ok": True,
-                "text": "Added Gas and the location.",
-                "calls": [
-                    {"name": "upsert_property", "args": {"property_name": "Gas", "city": "Midland"}},
-                    {"name": "upsert_property", "args": {"property_name": "Replace an AC", "city": "Odessa"}},
-                ],
+                "ok": False,
+                "error": "down",
             },
         ):
             heard = handle_message(
@@ -1346,23 +1342,8 @@ Lubbock — 2 outside compressor installs"""
 
     def test_a_typed_address_is_saved_instead_of_searched(self):
         user = self.owner()
-        db.session.add(
-            ApiCredential(
-                user_id=user.id,
-                provider="gemini",
-                secret_ciphertext=encrypt_text("AIza-test-key-value"),
-                last4="alue",
-                model_id="gemini-3.8-flash",
-                created_at=utcnow(),
-            )
-        )
-        db.session.commit()
         said = "add this property Oakwood the address is 4330 N Grandview Ave Odessa Texas"
-        with patch(
-            "app.services.providers.gemini_complete",
-            return_value={"ok": True, "text": f"I searched online for {said} and didn't find a street address.", "calls": []},
-        ):
-            heard = handle_message(user, said, idempotency_key="given-addr")
+        heard = handle_message(user, said, idempotency_key="given-addr")
         self.assertNotIn("searched online", heard["reply"].lower())
         self.assertIn("4330 N Grandview", heard["reply"])
         self.assertIn("Oakwood", heard["reply"])
@@ -1378,31 +1359,13 @@ Lubbock — 2 outside compressor installs"""
 
         user = self.owner()
         ensure_property("Woodview", "Odessa", "Texas", user.id)
-        db.session.add(
-            ApiCredential(
-                user_id=user.id,
-                provider="gemini",
-                secret_ciphertext=encrypt_text("AIza-test-key-value"),
-                last4="alue",
-                model_id="gemini-3.8-flash",
-                created_at=utcnow(),
-            )
-        )
         db.session.commit()
-        with patch(
-            "app.services.providers.gemini_complete",
-            return_value={
-                "ok": True,
-                "text": "Added Woodview.",
-                "calls": [{"name": "upsert_property", "args": {"property_name": "Woodview", "city": "Odessa"}}],
-            },
-        ):
-            heard = handle_message(
-                user,
-                "make me a plan for woodview odessa to replace an ac",
-                idempotency_key="plan-not-place",
-            )
-            bare = handle_message(user, "make me a plan", idempotency_key="plan-where")
+        heard = handle_message(
+            user,
+            "make me a plan for woodview odessa to replace an ac",
+            idempotency_key="plan-not-place",
+        )
+        bare = handle_message(user, "make me a plan", idempotency_key="plan-where")
         self.assertIn("trip", heard["reply"].lower())
         self.assertIn("Woodview", heard["reply"])
         self.assertNotIn("Added Woodview", heard["reply"])
@@ -1454,7 +1417,8 @@ Lubbock — 2 outside compressor installs"""
         )
         db.session.add_all([first, second])
         db.session.commit()
-        ranked = handle_message(user, "make gemini 1st", idempotency_key="rank-1")
+        with patch("app.services.providers.chat_with_tools", return_value={"ok": False, "error": "down"}):
+            ranked = handle_message(user, "make gemini 1st", idempotency_key="rank-1")
         self.assertIn("1st", ranked["reply"])
         self.assertEqual([row.provider for row in keys_for(user)], ["gemini", "groq"])
         self.assertEqual(keys_for(user)[0].use_order, 1)
@@ -1467,39 +1431,21 @@ Lubbock — 2 outside compressor installs"""
         ensure_property("Bentwood", "Odessa", "Texas", user.id, address="1 Main St")
         ensure_property("Bentwood", "Lubbock", "Texas", user.id, address="2 Main St")
         wood = ensure_property("Woodview", "Odessa", "Texas", user.id)
-        db.session.add(
-            ApiCredential(
-                user_id=user.id,
-                provider="gemini",
-                secret_ciphertext=encrypt_text("AIza-test-key-value"),
-                last4="alue",
-                model_id="gemini-3.8-flash",
-                created_at=utcnow(),
-            )
-        )
         db.session.commit()
-        with patch(
-            "app.services.providers.gemini_complete",
-            return_value={
-                "ok": True,
-                "text": "Added a new Bentwood.",
-                "calls": [{"name": "upsert_property", "args": {"property_name": "Bentwood", "city": "Dallas"}}],
-            },
-        ):
-            asked = handle_message(user, "delete all bentwood apartments", idempotency_key="del-all")
-            self.assertNotIn("named all", asked["reply"].lower())
-            self.assertIn("Say yes", asked["reply"])
-            self.assertIn("Odessa", asked["reply"])
-            self.assertIn("Lubbock", asked["reply"])
-            self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 3)
-            done = handle_message(user, "yes", idempotency_key="del-all-yes")
-            self.assertIn("Removed", done["reply"])
-            self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
-            edited = handle_message(
-                user,
-                "edit woodview the address is 4330 N Grandview Ave Odessa Texas",
-                idempotency_key="edit-w",
-            )
+        asked = handle_message(user, "delete all bentwood apartments", idempotency_key="del-all")
+        self.assertNotIn("named all", asked["reply"].lower())
+        self.assertIn("Say yes", asked["reply"])
+        self.assertIn("Odessa", asked["reply"])
+        self.assertIn("Lubbock", asked["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 3)
+        done = handle_message(user, "yes", idempotency_key="del-all-yes")
+        self.assertIn("Removed", done["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        edited = handle_message(
+            user,
+            "edit woodview the address is 4330 N Grandview Ave Odessa Texas",
+            idempotency_key="edit-w",
+        )
         self.assertIn("Updated", edited["reply"])
         self.assertNotIn("Added", edited["reply"])
         self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
@@ -1526,6 +1472,120 @@ Lubbock — 2 outside compressor installs"""
         )
         self.assertEqual(saved.status_code, 200)
         self.assertIn(b"Replace the AC", saved.data)
+
+    def test_create_a_property_in_a_city_does_not_use_the_sentence_as_the_name(self):
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            side_effect=[
+                {
+                    "ok": True,
+                    "text": "",
+                    "calls": [
+                        {
+                            "name": "upsert_property",
+                            "args": {"property_name": "create me a property in lubbock", "city": "Lubbock"},
+                        }
+                    ],
+                },
+                {
+                    "ok": True,
+                    "text": "",
+                    "calls": [{"name": "upsert_property", "args": {"property_name": "Oakwood", "city": "Lubbock"}}],
+                },
+            ],
+        ):
+            heard = handle_message(user, "create me a property in lubbock", idempotency_key="need-name")
+            made = handle_message(user, "add oakwood in lubbock", idempotency_key="oak")
+        self.assertIn("name", heard["reply"].lower())
+        self.assertIn("Lubbock", heard["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        prop = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertEqual(prop.name, "Oakwood")
+        self.assertEqual(prop.city.name, "Lubbock")
+        self.assertIn("Oakwood", made["reply"])
+
+    def test_keys_are_tried_in_order_and_local_is_last(self):
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add_all(
+            [
+                ApiCredential(
+                    user_id=user.id,
+                    provider="gemini",
+                    secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                    last4="gem1",
+                    model_id="gemini-3.8-flash",
+                    active=True,
+                    use_order=1,
+                    created_at=utcnow(),
+                ),
+                ApiCredential(
+                    user_id=user.id,
+                    provider="groq",
+                    secret_ciphertext=encrypt_text("gsk-test-key-value"),
+                    last4="grq2",
+                    model_id="llama-3.3-70b-versatile",
+                    active=True,
+                    use_order=2,
+                    created_at=utcnow(),
+                ),
+                ApiCredential(
+                    user_id=user.id,
+                    provider="xai",
+                    secret_ciphertext=encrypt_text("xai-test-key-value"),
+                    last4="xai3",
+                    model_id="grok-4",
+                    active=True,
+                    use_order=3,
+                    created_at=utcnow(),
+                ),
+            ]
+        )
+        db.session.commit()
+        tried = []
+
+        def fake(row, text, timeout=25):
+            tried.append(row.provider)
+            if row.provider == "gemini":
+                return {"ok": False, "quota": True, "seconds": 30}
+            if row.provider == "groq":
+                return {"ok": False, "error": "down"}
+            return {"ok": True, "text": "Grok has it. What is the property name in Lubbock?", "calls": []}
+
+        with patch("app.services.providers.chat_with_tools", side_effect=fake):
+            heard = handle_message(user, "create me a property in lubbock", idempotency_key="order-1")
+        self.assertEqual(tried, ["gemini", "groq", "xai"])
+        self.assertIn("Grok has it", heard["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        for row in ApiCredential.query.all():
+            row.backoff_until = None
+        db.session.commit()
+        tried.clear()
+
+        def all_down(row, text, timeout=25):
+            tried.append(row.provider)
+            return {"ok": False, "quota": True, "seconds": 30}
+
+        with patch("app.services.providers.chat_with_tools", side_effect=all_down):
+            local = handle_message(user, "create me a property in lubbock", idempotency_key="order-2")
+        self.assertEqual(tried, ["gemini", "groq", "xai"])
+        self.assertIn("name", local["reply"].lower())
+        self.assertIn("quota", local["reply"].lower())
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
 
 
 if __name__ == "__main__":

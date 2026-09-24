@@ -126,6 +126,8 @@ def _has_ask(text: str) -> bool:
 
 def _split_asks(text: str) -> list[str]:
     raw = (text or "").strip()
+    if "\n" in raw and re.search(r"\bplan\b", raw, re.I):
+        return [raw]
     parts = [part.strip(" .") for part in re.split(r"[\n;]+|(?<=[.!?])\s+", raw) if part.strip()]
     if len(parts) > 1 and sum(1 for part in parts if _has_ask(part)) >= 2:
         return parts
@@ -252,35 +254,21 @@ def route(user, text: str, key: str, source: str) -> dict:
             "ok": True,
             "reply": "Next door. Tell me the unit number when you are there, or say skip — nobody home.",
         }
-    ranked = _key_rank_sentence(text)
-    if ranked:
-        return _set_key_rank(user, ranked[0], ranked[1])
-    parts = _split_asks(text)
-    if len(parts) > 1:
-        replies = []
-        for index, part in enumerate(parts, start=1):
-            result = _one_turn(user, part, f"{key}-{index}", source)
-            if result.get("reply"):
-                replies.append(result["reply"])
-        if replies:
-            return {"ok": True, "reply": " ".join(replies)}
-    intents = _intent_names(text)
-    if len(intents) > 1:
-        result = _one_turn(user, text, key, source)
-        started = intents[0]
-        reply = f"Let's handle these one at a time. I'll start with {started}. " + (result.get("reply") or "")
-        reply = reply.strip() + " Send the next one when this is saved."
-        result["reply"] = reply
-        return result
     model = _from_model(user, text, key, source)
-    if model is not None:
+    if model is not None and not model.get("failed"):
         return model
-    return _local_fallback(user, text, key, source, "")
+    note = (model or {}).get("note") or ""
+    result = _local_fallback(user, text, key, source, "")
+    if note and result.get("reply") and note not in result["reply"]:
+        result["reply"] = note + " " + result["reply"]
+    return result
 
 
 def _place_she_named(text: str) -> dict | None:
     """The property and city in her sentence, when she asked to add it."""
     raw = (text or "").strip()
+    if re.search(r"^(what|which|when|where|who|how|did)\b", raw, re.I) or raw.endswith("?"):
+        return None
     if not re.search(r"\b(add|create|save|put|look\s*up|lookup)\b", raw, re.I):
         return None
     tail = re.search(r"\bit(?:'s|s| is)\s+(.+)$", raw, re.I)
@@ -304,12 +292,17 @@ def _place_she_named(text: str) -> dict | None:
         if named:
             city = _tidy_place(named.group(2))
             region = STATES.get(named.group(3).lower(), named.group(3).upper())
-    if not name or not city:
+    from app.services.records import bare_property_name
+
+    bare = bare_property_name(name, city)
+    if city and not bare:
+        return {"needs_name": True, "city": _tidy_place(city), "region": region}
+    if not bare or not city:
         return None
     generic = {"a", "the", "property", "properties", "place", "places", "site", "sites", "list", "address", "street", "name", "number", "it"}
-    if name.lower() in generic or city.lower() in generic:
+    if bare.lower() in generic or city.lower() in generic:
         return None
-    return {"property_name": name, "city": city, "region": region}
+    return {"property_name": bare, "city": city, "region": region}
 
 
 def _calls_she_asked(text: str, calls: list) -> list:
@@ -901,72 +894,22 @@ def _file_unit_board(user, text: str, key: str, source: str):
 
 
 def _from_model(user, text: str, key: str, source: str):
-    """Her words go to the saved model. A web address lookup is answered from the web."""
-    from app.services.pending import commit_apply
+    """The saved key answers first. Local chat runs only when this returns failed."""
     from app.services.providers import collect_tool_calls
 
     heard = collect_tool_calls(user, text)
     if not heard:
         return None
-    edited = _file_edit(user, text, key, source)
-    if edited:
-        return edited
-    removed = _file_remove(user, text, key, source)
-    if removed:
-        return removed
-    if not _is_trip_plan(text):
-        given = _given_property_address(text)
-        if given:
-            return _save_given_address(user, given, key, source)
-        wanted = _address_she_wants(text)
-        if wanted:
-            return _online_address(wanted)
-    person = _person_to_add(user, text, key, source)
-    if person:
-        return person
-    access = _file_access(user, text, key, source)
-    if access:
-        return access
-    planned = _file_trip_plan(user, text, key, source)
-    if planned:
-        return planned
-    board = _file_unit_board(user, text, key, source)
-    if board:
-        return board
-    noted = _file_item_note(user, text, key, source)
-    if noted:
-        return noted
-    filed = _file_named_unit(user, text, key, source)
-    if filed:
-        return filed
-    typed = _typed_address(text)
-    if typed:
-        _close_questions(user)
-        return _save_typed_address(user, typed, key, source)
-    gone = _property_delete(text)
-    if gone:
-        _close_questions(user)
-        return _ask_remove(user, gone, key, source)
-    named = _named_place(text)
-    if named:
-        _close_questions(user)
-        return commit_apply(user, "upsert_property", named, source, key)
-    place = _place_she_named(text)
-    if place and not _is_trip_plan(text):
-        _close_questions(user)
-        return commit_apply(user, "upsert_property", place, source, key)
     note = (heard.get("note") or "").strip()
-    calls = _calls_she_asked(text, heard.get("calls") or [])
+    calls = heard.get("calls") or []
+    prose = (heard.get("text") or "").strip()
     if calls:
         return _from_calls(user, calls, key, source, note)
-    prose = (heard.get("text") or "").strip()
     if prose:
         if note:
             prose = f"{note} {prose}"
         return {"ok": True, "reply": prose}
-    if note:
-        return {"ok": False, "reply": note, "quota": True}
-    return {"ok": False, "reply": "I didn't get an answer. Say that again."}
+    return {"failed": True, "note": note}
 
 
 def _style_in(text: str) -> str:
@@ -1165,7 +1108,23 @@ def _file_named_unit(user, text: str, key: str, source: str):
     return commit_apply(user, "log_work", payload, source, key)
 
 
-def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:
+def _local_fallback(user, text: str, key: str, source: str, note: str, *, split: bool = True) -> dict:
+    if split:
+        ranked = _key_rank_sentence(text)
+        if ranked:
+            return _set_key_rank(user, ranked[0], ranked[1])
+        parts = _split_asks(text)
+        if len(parts) > 1:
+            replies = []
+            for index, part in enumerate(parts, start=1):
+                result = _local_fallback(user, part, f"{key}-{index}", source, "", split=False)
+                if result.get("reply"):
+                    replies.append(result["reply"])
+            if replies:
+                reply = " ".join(replies)
+                if note:
+                    reply = note + " " + reply
+                return {"ok": True, "reply": reply}
     edited = _file_edit(user, text, key, source)
     if edited:
         return edited
@@ -1203,6 +1162,16 @@ def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:
     wanted = _address_she_wants(text)
     if wanted:
         result = _online_address(wanted)
+        if note:
+            result["reply"] = note + " " + (result.get("reply") or "")
+        return result
+    place = _place_she_named(text)
+    if place and place.get("needs_name"):
+        return {"ok": True, "reply": f"What's the property's name in {place['city']}?"}
+    if place:
+        from app.services.pending import commit_apply
+
+        result = commit_apply(user, "upsert_property", place, source, key)
         if note:
             result["reply"] = note + " " + (result.get("reply") or "")
         return result
@@ -1975,6 +1944,8 @@ def _file_edit(user, text: str, key: str, source: str):
     """Edit the property she named. Do not create a second one."""
     if not _is_edit(text):
         return None
+    if re.search(r"\b(office manager|employee|let|give|allow)\b", text or "", re.I):
+        return None
     if re.search(r"\b(plan|trip)\b", text or "", re.I) and not re.search(r"\b(address|addy|property)\b", text or "", re.I):
         return None
     from app.services.pending import commit_apply
@@ -2285,6 +2256,8 @@ def interpret(user, text: str, key: str, source: str) -> dict:
     from app.services.plan import parse_outcome_text, parse_plan_text, summarize_outcome, summarize_plan
 
     added = _site_to_add(text)
+    if added and added.get("needs_name"):
+        return {"ok": True, "reply": f"What's the property's name in {added['city']}?"}
     if added:
         from app.services.pending import commit_apply
 
@@ -2447,8 +2420,12 @@ def _site_to_add(text: str) -> dict | None:
     match = ADD_SITE.match((text or "").strip().rstrip("."))
     if not match:
         return None
-    name = _tidy_place(match.group(1))
+    from app.services.records import bare_property_name
+
     city, region = _split_city(match.group(2))
+    name = bare_property_name(match.group(1), city)
+    if city and not name:
+        return {"needs_name": True, "city": city, "region": region}
     if not name or not city:
         return None
     return {"property_name": name, "city": city, "region": region}

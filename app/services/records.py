@@ -141,6 +141,22 @@ def ensure_city(name: str, region: str, actor_id: int | None, source: str = "hum
     return row
 
 
+def bare_property_name(name: str, city: str = "") -> str:
+    """The apartment name only. A sentence like 'create me a property in Lubbock' is not a name."""
+    skip = {
+        "me", "a", "an", "the", "new", "this", "my", "our", "property", "properties",
+        "place", "places", "site", "sites", "please", "create", "add", "save", "put",
+        "make", "in", "at", "from", "called", "named",
+    }
+    words = [word for word in re.findall(r"[A-Za-z0-9']+", name or "") if word.lower() not in skip]
+    city_words = {word.lower() for word in re.findall(r"[A-Za-z0-9']+", city or "")}
+    while words and words[-1].lower() in city_words:
+        words.pop()
+    if not words:
+        return ""
+    return " ".join(word.capitalize() for word in words)
+
+
 def not_a_property(name: str) -> bool:
     """Gas, fuel, and meals are stops on a plan. They are not apartment properties."""
     low = " ".join(re.sub(r"[^a-z ]", " ", (name or "").lower()).split())
