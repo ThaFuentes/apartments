@@ -680,6 +680,24 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn("Woodview", removed["reply"])
         self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
 
+    def test_report_names_who_prepared_it(self):
+        from app.services.reports import render_markdown
+
+        text = render_markdown(
+            {
+                "title": "Weekly report",
+                "company": "Acme",
+                "author": "Maria Fuentes",
+                "period": {"start": "2026-03-01", "end": "2026-03-07"},
+                "totals": {},
+                "expenses": {},
+                "miles": {},
+                "prior": {},
+                "properties": [],
+            }
+        )
+        self.assertIn("Prepared by Maria Fuentes.", text)
+
     def test_its_at_saves_the_looked_up_address(self):
         user = self.owner()
         hit = {

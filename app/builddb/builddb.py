@@ -59,6 +59,7 @@ def init_db(app):
 
         db.create_all()
         _evolve_credentials()
+        _evolve_mail()
         _say("[apt] MariaDB schema ready")
 
 
@@ -80,6 +81,35 @@ def _evolve_credentials():
         statements.append("ALTER TABLE api_credentials ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1")
     if "preferred" not in have:
         statements.append("ALTER TABLE api_credentials ADD COLUMN preferred TINYINT(1) NOT NULL DEFAULT 0")
+    if not statements:
+        return
+    with db.engine.begin() as conn:
+        for sql in statements:
+            conn.execute(text(sql))
+
+
+def _evolve_mail():
+    """Mail columns for sending a report from Settings."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    if "assistant_profiles" not in names:
+        return
+    have = {col["name"] for col in inspect(db.engine).get_columns("assistant_profiles")}
+    statements = []
+    if "smtp_host" not in have:
+        statements.append("ALTER TABLE assistant_profiles ADD COLUMN smtp_host VARCHAR(200) NOT NULL DEFAULT ''")
+    if "smtp_port" not in have:
+        statements.append("ALTER TABLE assistant_profiles ADD COLUMN smtp_port INT NOT NULL DEFAULT 587")
+    if "smtp_user" not in have:
+        statements.append("ALTER TABLE assistant_profiles ADD COLUMN smtp_user VARCHAR(200) NOT NULL DEFAULT ''")
+    if "smtp_from" not in have:
+        statements.append("ALTER TABLE assistant_profiles ADD COLUMN smtp_from VARCHAR(200) NOT NULL DEFAULT ''")
+    if "smtp_password_ciphertext" not in have:
+        statements.append("ALTER TABLE assistant_profiles ADD COLUMN smtp_password_ciphertext TEXT NULL")
     if not statements:
         return
     with db.engine.begin() as conn:

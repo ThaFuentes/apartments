@@ -1047,11 +1047,28 @@ def apply_send_report(user, payload, source) -> dict:
             }
         )
     owner_link = sign_report(report.id, ttl=900)
+    import re
+
+    extras = []
+    for bit in re.split(r"[,;\s]+", str(payload.get("also") or "")):
+        bit = bit.strip()
+        if "@" in bit and bit not in extras:
+            extras.append(bit)
+    for address in extras:
+        delivered.append(
+            {
+                "username": address,
+                "email": address,
+                "mailed": _email_report(address, report, owner_link),
+                "link": owner_link,
+            }
+        )
     audit(user.id, source, "send", "report", report.id, before, {"status": "sent", "viewers": [d["username"] for d in delivered]})
+    mail_note = "" if _mail_config()[0] else " Mail is not saved in Settings yet, so nothing was emailed."
     if not delivered:
         return {
             "ok": True,
-            "reply": f"Marked {report.title} sent. No bosses are on the account yet. This short link works for 15 minutes: {owner_link}",
+            "reply": f"Marked {report.title} sent. No bosses are on the account yet. Download the PDF from the report page.{mail_note} This short link works for 15 minutes: {owner_link}",
             "report_id": report.id,
             "link": owner_link,
             "delivered": [],
@@ -1066,35 +1083,61 @@ def apply_send_report(user, payload, source) -> dict:
             bits.append(f"{row['username']} has no email — it is on their login")
     return {
         "ok": True,
-        "reply": f"Sent {report.title}. " + "; ".join(bits) + f". Short link: {owner_link}",
+        "reply": f"Sent {report.title}. " + "; ".join(bits) + f".{mail_note} Short link: {owner_link}",
         "report_id": report.id,
         "link": owner_link,
         "delivered": delivered,
     }
 
 
-def _email_report(address: str, report: Report, link: str) -> bool:
+def _mail_config() -> tuple[str, int, str, str, str]:
     import os
+
+    profile = site_profile()
+    host = ((getattr(profile, "smtp_host", None) or "") or os.getenv("SMTP_HOST") or "").strip()
+    try:
+        port = int(getattr(profile, "smtp_port", None) or os.getenv("SMTP_PORT") or 587)
+    except (TypeError, ValueError):
+        port = 587
+    user_name = ((getattr(profile, "smtp_user", None) or "") or os.getenv("SMTP_USER") or "").strip()
+    sender = ((getattr(profile, "smtp_from", None) or "") or os.getenv("SMTP_FROM") or user_name or "apt@poweredby.top").strip()
+    password = ""
+    cipher = getattr(profile, "smtp_password_ciphertext", None) if profile else None
+    if cipher:
+        from app.services.crypto import decrypt_text
+
+        try:
+            password = decrypt_text(cipher)
+        except Exception:
+            password = ""
+    if not password:
+        password = os.getenv("SMTP_PASSWORD") or ""
+    return host, port, user_name, password, sender
+
+
+def _email_report(address: str, report: Report, link: str) -> bool:
     import smtplib
     from email.message import EmailMessage
 
-    host = (os.getenv("SMTP_HOST") or "").strip()
+    host, port, user_name, password, sender = _mail_config()
     if not host or not address:
         return False
+    snapshot = load_snapshot(report)
     msg = EmailMessage()
     msg["Subject"] = report.title
-    msg["From"] = os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "apt@poweredby.top"
+    msg["From"] = sender
     msg["To"] = address
-    snapshot = load_snapshot(report)
     msg.set_content(render_markdown(snapshot) + f"\nShort link (15 minutes): {link}\n")
     try:
-        port = int(os.getenv("SMTP_PORT") or "587")
+        pdf = render_pdf(snapshot)
+        msg.add_attachment(pdf, maintype="application", subtype="pdf", filename=f"apt-report-{report.id}.pdf")
+    except Exception:
+        pass
+    try:
         with smtplib.SMTP(host, port, timeout=15) as smtp:
             smtp.starttls()
-            user = os.getenv("SMTP_USER") or ""
-            password = os.getenv("SMTP_PASSWORD") or ""
-            if user:
-                smtp.login(user, password)
+            if user_name:
+                smtp.login(user_name, password)
             smtp.send_message(msg)
         return True
     except Exception:
@@ -1362,6 +1405,9 @@ def apply_update_settings(user, payload, source) -> dict:
         "company_name",
         "home_label",
         "timezone",
+        "smtp_host",
+        "smtp_user",
+        "smtp_from",
     )
     before = {name: getattr(profile, name) for name in fields}
     changed = []
@@ -1373,6 +1419,20 @@ def apply_update_settings(user, payload, source) -> dict:
         profile.home_lat = float(payload["home_lat"])
         profile.home_lng = float(payload["home_lng"])
         changed.append("home_pin")
+    if str(payload.get("smtp_port") or "").strip():
+        try:
+            profile.smtp_port = int(payload["smtp_port"])
+            changed.append("smtp_port")
+        except (TypeError, ValueError):
+            pass
+    if (payload.get("smtp_password") or "").strip():
+        from app.services.crypto import encrypt_text
+
+        profile.smtp_password_ciphertext = encrypt_text(payload["smtp_password"].strip())
+        changed.append("smtp_password")
+    if (payload.get("reporter_name") or "").strip():
+        user.display_name = payload["reporter_name"].strip()[:150]
+        changed.append("reporter_name")
     audit(user.id, source, "update", "assistant_profile", profile.id, before, {name: getattr(profile, name) for name in fields})
     if not changed:
         return {"ok": False, "reply": "Tell me what to change — name, tone, city, company, or home base."}

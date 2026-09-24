@@ -4,7 +4,8 @@
 <article class="sheet report">
   <p class="kicker">{{ snapshot.company or 'Company' }} · {{ report.status }}</p>
   <h1>{{ snapshot.title or report.title }}</h1>
-  <p>{{ snapshot.period.start }} through {{ snapshot.period.end }}{% if snapshot.author %} · {{ snapshot.author }}{% endif %}</p>
+  <p>Prepared by {{ snapshot.author or 'the field manager' }}.</p>
+  <p>{{ snapshot.period.start }} through {{ snapshot.period.end }}</p>
   {% if report.kind == 'company' %}
   <p>Company review copy. Jobs she went for, what got done, units, miles, and gas, food, and other.</p>
   {% endif %}
@@ -77,17 +78,19 @@
     <li>Spend {{ money(snapshot.totals.spend_cents) }} this week, {{ money(snapshot.prior.spend_cents) }} last week.</li>
     <li>Miles {{ snapshot.miles.estimate or 0 }} this week, {{ snapshot.prior.miles or 0 }} last week.</li>
   </ul>
-  <p><a href="/reports/{{ report.id }}/pdf">Download PDF</a></p>
+  <p><a href="/reports/{{ report.id }}/pdf?dl=1">Download PDF</a></p>
   {% if current_user.is_authenticated and current_user.role == 'owner' and report.status != 'sent' %}
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Edit the written copy <textarea name="body_md" rows="8">{{ report.body_md }}</textarea></label>
     <button type="submit">Save edits</button>
   </form>
-  <form method="post" action="/reports/{{ report.id }}/send">
+  <form method="post" action="/reports/{{ report.id }}/send" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
-    <button type="submit">Send to bosses</button>
+    <label>Also email <input name="also" placeholder="boss@company.com, another@company.com" autocomplete="off"></label>
+    <button type="submit">Send report</button>
+    <p class="lead">Bosses with an email get it too. Download stays on this page. Mail has to be saved under Settings first.</p>
   </form>
   <h2>Who can read this</h2>
   {% if viewers %}

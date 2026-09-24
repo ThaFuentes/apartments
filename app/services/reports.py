@@ -356,11 +356,10 @@ def render_markdown(snapshot: dict) -> str:
     lines = [
         f"# {snapshot.get('title') or 'Report'}",
         "",
+        f"Prepared by {snapshot.get('author') or 'the field manager'}.",
         f"Prepared for {snapshot.get('company') or 'the company'}.",
         f"Period: {period.get('start')} through {period.get('end')}.",
     ]
-    if snapshot.get("author"):
-        lines.append(f"From: {snapshot['author']}.")
     if snapshot.get("kind") == "company":
         lines.append("This packet is the company review copy: jobs, units, miles, and money.")
     lines += [

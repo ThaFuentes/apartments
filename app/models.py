@@ -71,6 +71,11 @@ class AssistantProfile(db.Model):
     home_lng = db.Column(db.Float, nullable=True)
     timezone = db.Column(db.String(64), nullable=False, default="America/Chicago")
     expense_confirm_cents = db.Column(db.Integer, nullable=False, default=0)
+    smtp_host = db.Column(db.String(200), nullable=False, default="")
+    smtp_port = db.Column(db.Integer, nullable=False, default=587)
+    smtp_user = db.Column(db.String(200), nullable=False, default="")
+    smtp_from = db.Column(db.String(200), nullable=False, default="")
+    smtp_password_ciphertext = db.Column(db.Text, nullable=True)
 
 
 class ApiCredential(db.Model):

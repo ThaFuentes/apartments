@@ -848,7 +848,13 @@ def report_send(report_id):
         abort(403)
     from app.services.pending import commit_apply
 
-    result = commit_apply(current_user, "send_report", {"report_id": report_id}, "human", _key() or f"send-{report_id}-{_new_key()}")
+    result = commit_apply(
+        current_user,
+        "send_report",
+        {"report_id": report_id, "also": request.form.get("also") or ""},
+        "human",
+        _key() or f"send-{report_id}-{_new_key()}",
+    )
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
     return redirect(f"/reports/{report_id}")
 
@@ -1105,6 +1111,12 @@ def settings():
             "company_name": request.form.get("company_name"),
             "home_label": request.form.get("home_label"),
             "timezone": request.form.get("timezone"),
+            "reporter_name": request.form.get("reporter_name"),
+            "smtp_host": request.form.get("smtp_host"),
+            "smtp_port": request.form.get("smtp_port"),
+            "smtp_user": request.form.get("smtp_user"),
+            "smtp_from": request.form.get("smtp_from"),
+            "smtp_password": request.form.get("smtp_password"),
         }
         if request.form.get("home_lat") and request.form.get("home_lng"):
             payload["home_lat"] = request.form.get("home_lat")
