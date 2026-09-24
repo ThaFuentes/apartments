@@ -52,15 +52,22 @@
     <button type="submit">Save settings</button>
   </form>
   <h2>AI keys</h2>
-  <p class="lead">Add the keys you already pay for or a free Gemini key. Apt uses the one you mark first, then the next if that one is out of quota. Only the last 4 characters are shown.</p>
+  <p class="lead">Add the keys you already pay for or a free Gemini key. 1st is used first, then 2nd, then 3rd, if a key is out of quota. Only the last 4 characters are shown. You can also say “make Gemini 1st” in chat.</p>
   {% for row in keys %}
   <article class="card">
     <strong>{{ row.provider_label }}</strong>
-    <p>····{{ row.last4 }}{% if row.preferred %} · used first{% endif %}{% if not row.active %} · off{% endif %}</p>
+    <p>····{{ row.last4 }}{% if row.use_order %} · {{ row.use_order }}{% if row.use_order == 1 %}st{% elif row.use_order == 2 %}nd{% elif row.use_order == 3 %}rd{% else %}th{% endif %}{% elif row.preferred %} · 1st{% endif %}{% if not row.active %} · off{% endif %}</p>
     <form method="post" action="/settings/key/{{ row.id }}" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Model <input name="model" value="{{ row.model_id or '' }}" autocomplete="off"></label>
       <label>Base URL <input name="base_url" value="{{ row.base_url or '' }}" placeholder="Only for a custom endpoint" autocomplete="off"></label>
+      <label>Order
+        <select name="use_order">
+          {% for place in [1, 2, 3, 4] %}
+          <option value="{{ place }}" {% if row.use_order == place or (not row.use_order and row.preferred and place == 1) %}selected{% endif %}>{{ place }}{% if place == 1 %}st{% elif place == 2 %}nd{% elif place == 3 %}rd{% else %}th{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
       <label class="check"><input type="checkbox" name="active" value="1" {% if row.active %}checked{% endif %}> On</label>
       <div class="actions">
         <button type="submit">Save this key</button>

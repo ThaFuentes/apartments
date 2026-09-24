@@ -332,7 +332,7 @@ def keys_for(user) -> list:
         return []
     rows = ApiCredential.query.filter_by(user_id=owner.id).order_by(ApiCredential.id.asc()).all()
     usable = [row for row in rows if getattr(row, "active", True)]
-    usable.sort(key=lambda row: (0 if getattr(row, "preferred", False) else 1, row.id))
+    usable.sort(key=lambda row: (row.use_order or 99, 0 if getattr(row, "preferred", False) else 1, row.id))
     return usable
 
 

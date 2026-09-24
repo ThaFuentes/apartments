@@ -83,6 +83,8 @@ def _evolve_credentials():
         statements.append("ALTER TABLE api_credentials ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1")
     if "preferred" not in have:
         statements.append("ALTER TABLE api_credentials ADD COLUMN preferred TINYINT(1) NOT NULL DEFAULT 0")
+    if "use_order" not in have:
+        statements.append("ALTER TABLE api_credentials ADD COLUMN use_order INT NOT NULL DEFAULT 0")
     if not statements:
         return
     with db.engine.begin() as conn:

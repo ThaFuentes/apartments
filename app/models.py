@@ -91,6 +91,7 @@ class ApiCredential(db.Model):
     base_url = db.Column(db.String(300), nullable=True)
     active = db.Column(db.Boolean, nullable=False, default=True)
     preferred = db.Column(db.Boolean, nullable=False, default=False)
+    use_order = db.Column(db.Integer, nullable=False, default=0)
     model_checked_at = db.Column(db.DateTime, nullable=True)
     backoff_until = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)

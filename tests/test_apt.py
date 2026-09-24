@@ -1412,6 +1412,54 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn("plan", bare["reply"].lower())
         self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
 
+    def test_several_asks_in_one_message_and_key_order(self):
+        from app.models import PlanItem, Trip, UnitTask
+        from app.services.providers import keys_for
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.commit()
+        heard = handle_message(
+            user,
+            "make me a plan for woodview odessa to replace an ac. add a work order for a fan in unit 12 at woodview",
+            idempotency_key="two-asks",
+        )
+        self.assertIn("trip", heard["reply"].lower())
+        self.assertIn("work order", heard["reply"].lower())
+        self.assertEqual(Trip.query.filter(Trip.deleted_at.is_(None)).count(), 1)
+        self.assertTrue(PlanItem.query.count() >= 1)
+        self.assertEqual(UnitTask.query.filter_by(kind="work_order").count(), 1)
+        first = ApiCredential(
+            user_id=user.id,
+            provider="groq",
+            secret_ciphertext=encrypt_text("gsk-test-key-value"),
+            last4="alue",
+            model_id="llama-3.3-70b-versatile",
+            active=True,
+            preferred=True,
+            use_order=1,
+            created_at=utcnow(),
+        )
+        second = ApiCredential(
+            user_id=user.id,
+            provider="gemini",
+            secret_ciphertext=encrypt_text("AIza-test-key-value"),
+            last4="key1",
+            model_id="gemini-3.8-flash",
+            active=True,
+            preferred=False,
+            use_order=2,
+            created_at=utcnow(),
+        )
+        db.session.add_all([first, second])
+        db.session.commit()
+        ranked = handle_message(user, "make gemini 1st", idempotency_key="rank-1")
+        self.assertIn("1st", ranked["reply"])
+        self.assertEqual([row.provider for row in keys_for(user)], ["gemini", "groq"])
+        self.assertEqual(keys_for(user)[0].use_order, 1)
+        self.assertEqual(keys_for(user)[1].use_order, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

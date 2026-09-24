@@ -1293,11 +1293,8 @@ def settings():
     if current_user.role == "owner":
         from app.services.providers import PROVIDERS
 
-        keys = (
-            ApiCredential.query.filter_by(user_id=current_user.id)
-            .order_by(ApiCredential.preferred.desc(), ApiCredential.id.asc())
-            .all()
-        )
+        keys = ApiCredential.query.filter_by(user_id=current_user.id).all()
+        keys.sort(key=lambda row: (row.use_order or 99, 0 if row.preferred else 1, row.id))
         for row in keys:
             row.provider_label = (PROVIDERS.get(row.provider) or {}).get("label") or row.provider
         providers = [
@@ -1364,6 +1361,7 @@ def settings_key():
         base_url=base_url or None,
         active=True,
         preferred=others == 0,
+        use_order=others + 1,
         model_checked_at=utcnow(),
         created_at=utcnow(),
     )
@@ -1388,6 +1386,15 @@ def settings_key_update(key_id):
     base_url = (request.form.get("base_url") or "").strip()
     row.base_url = base_url[:300] or None
     row.active = request.form.get("active") == "1"
+    order = (request.form.get("use_order") or "").strip()
+    if order.isdigit():
+        place = max(1, min(int(order), 9))
+        for other in ApiCredential.query.filter_by(user_id=current_user.id).all():
+            if other.id != row.id and (other.use_order or 0) == place:
+                other.use_order = row.use_order or 0
+            other.preferred = False
+        row.use_order = place
+        row.preferred = place == 1
     db.session.commit()
     state = "on" if row.active else "off"
     flash(f"Saved ····{row.last4}. Model {row.model_id or 'unset'}. {state}.", "ok")
@@ -1400,11 +1407,15 @@ def settings_key_prefer(key_id):
     row = ApiCredential.query.filter_by(id=key_id, user_id=current_user.id).first()
     if not row:
         abort(404)
-    for other in ApiCredential.query.filter_by(user_id=current_user.id).all():
+    others = ApiCredential.query.filter_by(user_id=current_user.id).all()
+    for other in others:
+        if other.id != row.id and (other.use_order or 0) == 1:
+            other.use_order = row.use_order or 2
         other.preferred = other.id == row.id
+    row.use_order = 1
     row.active = True
     db.session.commit()
-    flash("That key is used first.", "ok")
+    flash("That key is 1st.", "ok")
     return redirect("/settings")
 
 

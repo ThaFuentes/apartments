@@ -113,6 +113,114 @@ def handle_message(user, text: str, *, idempotency_key: str, source: str = "ai")
     return result
 
 
+_ASK_MARK = re.compile(
+    r"\b(plan|schedule|work\s+order|add\s+units?|add\s+building|create\s+building|make\s+ready|occupied|address\s+is|add\s+(?:this\s+)?property|office\s+manager)\b",
+    re.I,
+)
+_ORDINALS = {"1st": 1, "first": 1, "2nd": 2, "second": 2, "3rd": 3, "third": 3, "4th": 4, "fourth": 4}
+
+
+def _has_ask(text: str) -> bool:
+    return bool(_ASK_MARK.search(text or ""))
+
+
+def _split_asks(text: str) -> list[str]:
+    raw = (text or "").strip()
+    parts = [part.strip(" .") for part in re.split(r"[\n;]+|(?<=[.!?])\s+", raw) if part.strip()]
+    if len(parts) > 1 and sum(1 for part in parts if _has_ask(part)) >= 2:
+        return parts
+    pieces = [part.strip(" .") for part in re.split(r"\s+\band\s+|\s+also\s+", raw, flags=re.I) if part.strip()]
+    if len(pieces) > 1 and all(_has_ask(part) for part in pieces):
+        return pieces
+    return [raw]
+
+
+def _intent_names(text: str) -> list[str]:
+    names = []
+    if _is_trip_plan(text):
+        names.append("the plan")
+    if re.search(r"\bwork\s+order\b", text, re.I):
+        names.append("the work order")
+    if re.search(r"\b(?:add|create)\s+(?:building|units?)\b", text, re.I):
+        names.append("the units")
+    if _given_property_address(text):
+        names.append("the property")
+    if re.search(r"\boffice\s+manager\b|\badd\s+employee\b", text, re.I):
+        names.append("the login")
+    return names
+
+
+def _one_turn(user, text: str, key: str, source: str) -> dict:
+    model = _from_model(user, text, key, source)
+    if model is not None:
+        return model
+    return _local_fallback(user, text, key, source, "")
+
+
+def _key_rank_sentence(text: str):
+    raw = (text or "").strip()
+    if not re.search(r"\b(key|gemini|groq|openai|grok|claude|anthropic)\b", raw, re.I):
+        return None
+    named = re.search(
+        r"\b(?:make|set|use)\s+(?:the\s+)?([a-z0-9][a-z0-9 ._-]{1,40}?)\s+(?:key\s+)?(?:as\s+|is\s+)?(1st|2nd|3rd|4th|first|second|third|fourth)\b",
+        raw,
+        re.I,
+    )
+    if named:
+        return named.group(1).strip(), _ORDINALS[named.group(2).lower()]
+    flipped = re.search(
+        r"\b(1st|2nd|3rd|4th|first|second|third|fourth)\s+(?:key\s+)?(?:is|should be)\s+([a-z0-9][a-z0-9 ._-]{1,40})",
+        raw,
+        re.I,
+    )
+    if flipped:
+        return flipped.group(2).strip(" ."), _ORDINALS[flipped.group(1).lower()]
+    return None
+
+
+def _set_key_rank(user, label: str, order: int) -> dict:
+    from app.services.providers import PROVIDERS
+
+    if getattr(user, "role", "") != "owner":
+        return {"ok": False, "reply": "Only the owner sets which key is 1st, 2nd, or 3rd."}
+    rows = ApiCredential.query.filter_by(user_id=user.id).all()
+    want = label.lower()
+    match = None
+    for row in rows:
+        spec = PROVIDERS.get(row.provider) or {}
+        names = {row.provider.lower(), (spec.get("label") or "").lower(), (row.last4 or "").lower()}
+        if want in names or any(want in name for name in names if name):
+            match = row
+            break
+    if not match:
+        return {"ok": False, "reply": f"I don't have a key named {label}."}
+    previous = match.use_order or 0
+    for row in rows:
+        if row.id != match.id and (row.use_order or 0) == order:
+            row.use_order = previous or order + 1
+    match.use_order = order
+    match.active = True
+    for row in rows:
+        row.preferred = row.id == match.id and order == 1
+    if order != 1:
+        first = sorted(rows, key=lambda row: (row.use_order or 99, row.id))
+        for row in first:
+            row.preferred = False
+        for row in first:
+            if row.active and (row.use_order or 99) == min((item.use_order or 99) for item in first if item.active):
+                row.preferred = True
+                break
+    db.session.commit()
+    words = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
+    ordered = sorted((row for row in rows if row.active), key=lambda row: (row.use_order or 99, row.id))
+    lineup = ", ".join(
+        f"{(PROVIDERS.get(row.provider) or {}).get('label') or row.provider} is {words.get(row.use_order, 'later')}"
+        for row in ordered
+        if row.use_order
+    )
+    return {"ok": True, "reply": f"{(PROVIDERS.get(match.provider) or {}).get('label') or match.provider} is {words.get(order, str(order))}. {lineup}."}
+
+
 def route(user, text: str, key: str, source: str) -> dict:
     low = text.lower().strip(" .!")
     if low in DISCARD:
@@ -144,6 +252,26 @@ def route(user, text: str, key: str, source: str) -> dict:
             "ok": True,
             "reply": "Next door. Tell me the unit number when you are there, or say skip — nobody home.",
         }
+    ranked = _key_rank_sentence(text)
+    if ranked:
+        return _set_key_rank(user, ranked[0], ranked[1])
+    parts = _split_asks(text)
+    if len(parts) > 1:
+        replies = []
+        for index, part in enumerate(parts, start=1):
+            result = _one_turn(user, part, f"{key}-{index}", source)
+            if result.get("reply"):
+                replies.append(result["reply"])
+        if replies:
+            return {"ok": True, "reply": " ".join(replies)}
+    intents = _intent_names(text)
+    if len(intents) > 1:
+        result = _one_turn(user, text, key, source)
+        started = intents[0]
+        reply = f"Let's handle these one at a time. I'll start with {started}. " + (result.get("reply") or "")
+        reply = reply.strip() + " Send the next one when this is saved."
+        result["reply"] = reply
+        return result
     model = _from_model(user, text, key, source)
     if model is not None:
         return model
