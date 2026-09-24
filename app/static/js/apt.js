@@ -288,28 +288,47 @@
   }
 
   const install = document.getElementById("apt-install");
-  const installGo = document.getElementById("apt-install-go");
-  const installSkip = document.getElementById("apt-install-skip");
   const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+  if (standalone) localStorage.setItem("apt-installed", "1");
+  window.addEventListener("appinstalled", function () {
+    localStorage.setItem("apt-installed", "1");
+    if (install) install.hidden = true;
+  });
+  function alreadyInstalled() {
+    return localStorage.getItem("apt-installed") === "1" || standalone;
+  }
   let installEvent = null;
-  if (install && !standalone && localStorage.getItem("apt-install-hide") !== "1") {
+  window.addEventListener("beforeinstallprompt", function (event) {
+    if (alreadyInstalled()) return;
+    event.preventDefault();
+    installEvent = event;
+    if (install && localStorage.getItem("apt-install-hide") !== "1") install.hidden = false;
+  });
+  if (install && !alreadyInstalled() && localStorage.getItem("apt-install-hide") !== "1") {
     const ios = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
-    window.addEventListener("beforeinstallprompt", function (event) {
-      event.preventDefault();
-      installEvent = event;
-      install.hidden = false;
-    });
     if (ios) {
       install.querySelector("p").textContent = "Install Apt: tap Share, then Add to Home Screen.";
-      if (installGo) installGo.hidden = true;
+      const go = document.getElementById("apt-install-go");
+      if (go) go.hidden = true;
       install.hidden = false;
     }
+    if (navigator.getInstalledRelatedApps) {
+      navigator.getInstalledRelatedApps().then(function (apps) {
+        if (apps && apps.length) {
+          localStorage.setItem("apt-installed", "1");
+          install.hidden = true;
+        }
+      }).catch(function () {});
+    }
   }
+  const installGo = document.getElementById("apt-install-go");
+  const installSkip = document.getElementById("apt-install-skip");
   if (installGo) {
     installGo.addEventListener("click", function () {
       if (!installEvent) return;
       installEvent.prompt();
-      installEvent.userChoice.then(function () {
+      installEvent.userChoice.then(function (choice) {
+        if (choice && choice.outcome === "accepted") localStorage.setItem("apt-installed", "1");
         install.hidden = true;
         installEvent = null;
       });
@@ -319,14 +338,6 @@
     installSkip.addEventListener("click", function () {
       localStorage.setItem("apt-install-hide", "1");
       install.hidden = true;
-    });
-  }
-  const installMore = document.getElementById("apt-install-more");
-  if (installMore && install) {
-    installMore.addEventListener("click", function () {
-      localStorage.removeItem("apt-install-hide");
-      install.hidden = false;
-      install.scrollIntoView({ block: "nearest" });
     });
   }
 })();

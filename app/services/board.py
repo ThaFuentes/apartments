@@ -219,7 +219,8 @@ def add_units(user, prop: Property, text: str, source: str, building: str = "") 
     if made or assigned:
         from app.services.access import announce
 
-        announce(prop.id, user.id, f"{who or 'Someone'} added units in {place}.", f"/properties/{prop.id}")
+        detail = describe_numbers(made or assigned, "added")
+        announce(prop.id, user.id, f"{who or 'Someone'} {detail} in {place}.", f"/properties/{prop.id}")
     return {"ok": True, "reply": reply, "property_id": prop.id, "building": building, "created": len(made)}
 
 

@@ -2,6 +2,11 @@
 {% block title %}Home{% endblock %}
 {% block main %}
 <section class="sheet">
+  <div id="apt-install" class="install" hidden>
+    <p>Install Apt on this phone so it opens like an app.</p>
+    <button type="button" id="apt-install-go">Install</button>
+    <button type="button" id="apt-install-skip" class="quiet">Not now</button>
+  </div>
   <div class="hero">
     <p class="kicker">{{ board.today.strftime("%A, %b %d").replace(" 0", " ") }}</p>
     <h1>Today</h1>
