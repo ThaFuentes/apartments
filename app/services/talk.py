@@ -209,9 +209,91 @@ def _calls_she_asked(text: str, calls: list) -> list:
     return kept
 
 
+_STREET = re.compile(
+    r"\b(\d{1,6}\s+(?:[NSEW]\.?\s+)?[A-Za-z0-9.'#\-]+(?:\s+[A-Za-z0-9.'#\-]+){0,5}\s+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|way|court|ct|circle|cir|parkway|pkwy|trail|trl|highway|hwy|place|pl)\.?)",
+    re.I,
+)
+
+
+def _given_property_address(text: str) -> dict | None:
+    """She typed the street. Use that. Do not search the web for it."""
+    raw = (text or "").strip().rstrip(".")
+    if not re.search(r"\b(add|create|save|put|address|addy|property|properties)\b", raw, re.I):
+        return None
+    marker = re.search(r"\b(?:the\s+)?(?:address|addy)\s+is\s+", raw, re.I)
+    if marker:
+        head, tail = raw[: marker.start()], raw[marker.end() :]
+    elif re.search(r"\b(address|addy)\b", raw, re.I):
+        street = _STREET.search(raw)
+        if not street:
+            return None
+        head, tail = raw[: street.start()], raw[street.start() :]
+    else:
+        return None
+    street = _STREET.search(tail)
+    if not street:
+        return None
+    from app.services.geo import state_name
+
+    line = street.group(1).strip(" .,")
+    line = re.sub(r"\b(TX|OK|NM|LA|AR|CO|KS)\b", lambda match: state_name(match.group(1)), line, flags=re.I)
+    after = tail[street.end() :].strip(" .,")
+    after = re.sub(r"^(?:in|at)\s+", "", after, flags=re.I)
+    zip_code = ""
+    zipped = re.search(r"\b(\d{5})(?:-\d{4})?\b", after)
+    if zipped:
+        zip_code = zipped.group(1)
+        after = (after[: zipped.start()] + " " + after[zipped.end() :]).strip(" .,")
+    city, region = _split_state(after)
+    address = line
+    if city:
+        address = f"{line}, {city}" + (f", {region}" if region else "")
+        if zip_code:
+            address = f"{address} {zip_code}"
+    name = re.sub(
+        r"\b(please|can|you|add|create|save|put|this|the|a|an|property|properties|place|site|sites|name|called|named|is|its|it's|new|my|list|to)\b",
+        " ",
+        head,
+        flags=re.I,
+    )
+    name = _tidy_place(_clean_slot(name))
+    if not name or name.lower() in {"address", "addy", "street"}:
+        return None
+    return {"property_name": name, "city": city, "region": region, "address": address}
+
+
+def _save_given_address(user, parsed: dict, key: str, source: str) -> dict:
+    from app.services.pending import commit_apply
+    from app.services.records import site_profile
+
+    city = parsed.get("city") or ""
+    region = parsed.get("region") or ""
+    if not city:
+        profile = site_profile()
+        city = (profile.default_city if profile else "") or ""
+        region = region or ((profile.default_region if profile else "") or "")
+    if not city:
+        return {"ok": True, "reply": f"I have {parsed['address']}. Which city is {parsed['property_name']} in?"}
+    _close_questions(user)
+    return commit_apply(
+        user,
+        "upsert_property",
+        {
+            "property_name": parsed["property_name"],
+            "city": city,
+            "region": region,
+            "address": parsed["address"],
+        },
+        source,
+        key,
+    )
+
+
 def _address_she_wants(text: str) -> dict | None:
     """A place and city she asked to look up on the web, not in her sites."""
     raw = (text or "").strip()
+    if _given_property_address(raw):
+        return None
     if not re.search(r"\b(address|google|online|look\s*up|lookup|search)\b", raw, re.I):
         return None
     if _place_she_named(raw):
@@ -665,6 +747,9 @@ def _from_model(user, text: str, key: str, source: str):
     heard = collect_tool_calls(user, text)
     if not heard:
         return None
+    given = _given_property_address(text)
+    if given:
+        return _save_given_address(user, given, key, source)
     wanted = _address_she_wants(text)
     if wanted:
         return _online_address(wanted)
@@ -935,6 +1020,12 @@ def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:
         if note:
             filed["reply"] = note + " " + (filed.get("reply") or "")
         return filed
+    given = _given_property_address(text)
+    if given:
+        result = _save_given_address(user, given, key, source)
+        if note:
+            result["reply"] = note + " " + (result.get("reply") or "")
+        return result
     wanted = _address_she_wants(text)
     if wanted:
         result = _online_address(wanted)

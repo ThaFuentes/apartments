@@ -1344,6 +1344,34 @@ Lubbock — 2 outside compressor installs"""
         self.assertFalse(brook_row.notify)
         self.assertIsNone(PropertyAccess.query.filter_by(user_id=jasmine.id, property_id=madison.id).first())
 
+    def test_a_typed_address_is_saved_instead_of_searched(self):
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        said = "add this property Oakwood the address is 4330 N Grandview Ave Odessa Texas"
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={"ok": True, "text": f"I searched online for {said} and didn't find a street address.", "calls": []},
+        ):
+            heard = handle_message(user, said, idempotency_key="given-addr")
+        self.assertNotIn("searched online", heard["reply"].lower())
+        self.assertIn("4330 N Grandview", heard["reply"])
+        self.assertIn("Oakwood", heard["reply"])
+        prop = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertEqual(prop.name, "Oakwood")
+        self.assertIn("4330 N Grandview", prop.address)
+        self.assertEqual(prop.city.name, "Odessa")
+        self.assertEqual(prop.city.region, "Texas")
+
 
 if __name__ == "__main__":
     unittest.main()
