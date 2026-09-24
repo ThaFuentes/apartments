@@ -88,6 +88,7 @@ def apply_plan_trip(user, payload, source) -> dict:
         return {"ok": False, "reply": "I need a property and a city. Try: I'm going to Woodview Odessa Thursday for AC evals."}
     profile = site_profile()
     region = (payload.get("region") or (profile.default_region if profile else "") or "").strip()
+    created_prop = not find_properties(name, city)
     prop = ensure_property(
         name,
         city,
@@ -118,9 +119,40 @@ def apply_plan_trip(user, payload, source) -> dict:
     if purpose:
         title = f"{title} — {purpose}"
     home = (profile.home_label if profile else "") or ""
-    miles = None
+    stated = payload.get("miles_estimate")
+    if stated is None:
+        stated = payload.get("miles")
+    calculated = None
     if profile and profile.home_lat is not None and prop.lat is not None:
-        miles = _miles_between(profile.home_lat, profile.home_lng, prop)
+        calculated = _miles_between(profile.home_lat, profile.home_lng, prop)
+    try:
+        stated_miles = float(stated) if stated not in (None, "") else None
+    except (TypeError, ValueError):
+        stated_miles = None
+    miles = stated_miles if stated_miles is not None else calculated
+    open_trip = (
+        Trip.query.join(TripProperty, TripProperty.trip_id == Trip.id)
+        .filter(
+            TripProperty.property_id == prop.id,
+            Trip.deleted_at.is_(None),
+            Trip.status.in_(("staged", "active")),
+        )
+        .order_by(Trip.id.desc())
+        .first()
+    )
+    if open_trip and not payload.get("force_new"):
+        return _refresh_trip(
+            user,
+            open_trip,
+            prop,
+            starts_on,
+            purpose,
+            stated_miles,
+            calculated,
+            source,
+            bool(payload.get("day_stated")),
+            created_prop,
+        )
     checklist = "\n".join(
         [
             "Keys",
@@ -167,14 +199,61 @@ def apply_plan_trip(user, payload, source) -> dict:
         from app.services.plan import ensure_plan_item
 
         ensure_plan_item(trip, prop, purpose[:200], "", 1, user.id, source)
-    miles_bit = f" About {miles} miles from home — you can change that." if miles is not None else " Miles are blank until the pin or home base is set. You can type them."
-    pin_bit = " Pin is on the map." if prop.lat is not None else " No map pin yet. Add an address when you have it."
     return {
         "ok": True,
-        "reply": f"Staged {title} on {starts_on.isoformat()}.{pin_bit}{miles_bit}",
+        "reply": _trip_sentence(prop, starts_on, purpose, miles, created_prop, False, bool(payload.get("day_assumed"))),
         "trip_id": trip.id,
         "property_id": prop.id,
     }
+
+
+def _refresh_trip(user, trip, prop, starts_on, purpose, stated_miles, calculated, source, day_stated, created_prop) -> dict:
+    before = {"purpose": trip.purpose, "miles_estimate": trip.miles_estimate, "starts_on": trip.starts_on.isoformat() if trip.starts_on else None}
+    if day_stated and starts_on:
+        trip.starts_on = starts_on
+        trip.ends_on = starts_on
+    if purpose:
+        trip.purpose = purpose[:300]
+    if stated_miles is not None:
+        trip.miles_estimate = stated_miles
+    elif trip.miles_estimate is None and calculated is not None:
+        trip.miles_estimate = calculated
+    place = f"{prop.name} {prop.city.name if prop.city else ''}".strip()
+    trip.title = (f"{place} — {trip.purpose}" if trip.purpose else place)[:200]
+    link = TripProperty.query.filter_by(trip_id=trip.id, property_id=prop.id).first()
+    if link and stated_miles is not None:
+        link.miles_leg = stated_miles
+    if trip.purpose:
+        from app.services.plan import ensure_plan_item
+
+        ensure_plan_item(trip, prop, trip.purpose[:200], "", 1, user.id, source)
+    audit(user.id, source, "update", "trip", trip.id, before, {"purpose": trip.purpose, "miles_estimate": trip.miles_estimate, "starts_on": trip.starts_on.isoformat() if trip.starts_on else None})
+    when = trip.starts_on or starts_on
+    return {
+        "ok": True,
+        "reply": _trip_sentence(prop, when, trip.purpose, trip.miles_estimate, created_prop, True, False),
+        "trip_id": trip.id,
+        "property_id": prop.id,
+        "updated": True,
+    }
+
+
+def _trip_sentence(prop, starts_on, purpose, miles, created_prop, updated, day_assumed) -> str:
+    city = prop.city.name if prop.city else ""
+    place = f"{prop.name} in {city}" if city else prop.name
+    verb = "Updated the trip to" if updated else "That's a trip to"
+    when = starts_on.strftime("%A") if starts_on else "today"
+    line = f"{verb} {place} on {when}"
+    if purpose:
+        line += f" for {purpose}"
+    line += "."
+    if miles is not None:
+        line += f" {float(miles):g} miles."
+    if created_prop:
+        line += f" I added {prop.name} to your sites."
+    if day_assumed and not updated:
+        line += " I put it on today. Tell me the day if it's different."
+    return line
 
 
 def apply_log_work(user, payload, source) -> dict:
@@ -272,8 +351,17 @@ def apply_update_trip(user, payload, source) -> dict:
         trip.handoff = str(payload["handoff"]).strip()
     if payload.get("notes"):
         trip.notes = str(payload["notes"]).strip()
+    if payload.get("starts_on"):
+        from datetime import date
+
+        try:
+            trip.starts_on = date.fromisoformat(str(payload["starts_on"])[:10])
+            trip.ends_on = trip.starts_on
+        except ValueError:
+            pass
     audit(user.id, source, "update", "trip", trip.id, before, {"miles_estimate": trip.miles_estimate, "miles_actual": trip.miles_actual, "handoff": trip.handoff})
-    return {"ok": True, "reply": f"Updated {trip.title}.", "trip_id": trip.id}
+    moved = f" Moved it to {trip.starts_on.strftime('%A')}." if payload.get("starts_on") and trip.starts_on else ""
+    return {"ok": True, "reply": f"Updated {trip.title}.{moved}", "trip_id": trip.id}
 
 
 def _arrive(user, payload, source) -> dict:

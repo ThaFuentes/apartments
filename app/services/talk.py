@@ -114,12 +114,28 @@ def route(user, text: str, key: str, source: str) -> dict:
     if low in CONFIRM_YES:
         if _unconfirmed(user):
             return confirm_property(user, source)
+        waiting = (
+            PendingAction.query.filter_by(user_id=user.id, status="needs_answer")
+            .order_by(PendingAction.id.desc())
+            .first()
+        )
+        if waiting and waiting.summary:
+            return {"ok": True, "reply": waiting.summary}
         return _save_waiting(user, source)
     if NEXT_UNIT.search(text):
         return {
             "ok": True,
             "reply": "Next door. Tell me the unit number when you are there, or say skip — nobody home.",
         }
+    continued = _continue_open(user, text, key, source)
+    if continued:
+        return continued
+    outing = _start_outing(user, text, key, source)
+    if outing:
+        return outing
+    arrived = _start_here(user, text, key, source)
+    if arrived:
+        return arrived
     quota_note = ""
     calls = _gemini_calls(user, text)
     if isinstance(calls, str):
@@ -242,6 +258,470 @@ def _summary(tool: str, payload: dict) -> tuple[str, str]:
     if tool == "estimate_miles":
         return ("Update the miles estimate. Not saved yet.", "low")
     return (f"{tool.replace('_', ' ')}. Not saved yet.", "material")
+
+
+DAY_WORD = r"today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{4}-\d{2}-\d{2}"
+MILES_PHRASE = re.compile(r"\b(?:with|about|around|roughly)?\s*(\d{1,4}(?:\.\d)?)\s*miles\b", re.I)
+WHEN_WORD = re.compile(rf"\b({DAY_WORD})\b", re.I)
+HERE = re.compile(r"^(?:i(?:'m| am)\s+here|i(?:'ve| have)\s+arrived|arrived|i(?:'m| am)\s+there)$", re.I)
+WORK_VERB = re.compile(
+    r"\b(replaced|installed|fixed|repaired|changed|checked|inspected|cleaned|swapped|hooked up|put in|worked on)\b",
+    re.I,
+)
+
+
+def _clean_slot(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[,;]+", " ", value or "")).strip(" .")
+
+
+def _split_state(city: str) -> tuple[str, str]:
+    city = _clean_slot(city)
+    words = city.split()
+    if len(words) >= 2 and " ".join(words[-2:]).lower() in STATES:
+        return _tidy_place(" ".join(words[:-2])), STATES[" ".join(words[-2:]).lower()]
+    if words and words[-1].lower() in STATES:
+        return _tidy_place(" ".join(words[:-1])), STATES[words[-1].lower()]
+    return _tidy_place(city) if city else "", ""
+
+
+def _slots_from_destination(body: str) -> dict:
+    """Pull city, property, purpose, day, and miles out of the destination half of a sentence."""
+    body = _clean_slot(body)
+    miles = None
+    mile = MILES_PHRASE.search(body)
+    if mile:
+        miles = float(mile.group(1))
+        body = _clean_slot(body[: mile.start()] + " " + body[mile.end() :])
+    when = ""
+    day = WHEN_WORD.search(body)
+    if day:
+        when = day.group(1)
+        body = _clean_slot(body[: day.start()] + " " + body[day.end() :])
+    purpose = ""
+    for_match = re.search(r"\bfor\s+(.+)$", body, re.I)
+    if for_match:
+        purpose = _clean_slot(for_match.group(1))
+        body = _clean_slot(body[: for_match.start()])
+    property_name = ""
+    city = ""
+    place = ""
+    at_match = re.search(r"\bat\s+(.+)$", body, re.I)
+    in_match = re.search(r"\b(?:in|from)\s+(.+)$", body, re.I)
+    if at_match:
+        property_name = _clean_slot(at_match.group(1))
+        city = _clean_slot(body[: at_match.start()])
+    elif in_match:
+        city = _clean_slot(in_match.group(1))
+        property_name = _clean_slot(body[: in_match.start()])
+    else:
+        words = [word for word in body.split() if word]
+        if len(words) >= 2:
+            property_name = " ".join(words[:-1])
+            city = words[-1]
+        elif words:
+            place = words[0]
+    city, region = _split_state(city)
+    return {
+        "property_name": _tidy_place(property_name) if property_name else "",
+        "city": city,
+        "region": region,
+        "purpose": purpose,
+        "miles_estimate": miles,
+        "when": when,
+        "place": _tidy_place(place) if place else "",
+        "day_stated": bool(when),
+    }
+
+
+def parse_outing(text: str) -> dict | None:
+    raw = (text or "").strip().rstrip(".")
+    if re.match(r"^(what|which|when|where|why|how|who)\b", raw, re.I):
+        return None
+    found = re.search(r"\b(?:going|gonna|headed|heading|off)\s+to\s+(.+)$", raw, re.I)
+    if not found:
+        found = re.search(r"\btrip\s+to\s+(.+)$", raw, re.I)
+    if not found:
+        return None
+    return _slots_from_destination(found.group(1))
+
+
+def _properties_in_city(city_name: str):
+    from app.models import City, Property
+
+    if not (city_name or "").strip():
+        return []
+    return (
+        Property.query.join(City)
+        .filter(Property.deleted_at.is_(None), db.func.lower(City.name) == city_name.strip().lower())
+        .order_by(Property.name.asc())
+        .limit(12)
+        .all()
+    )
+
+
+def _ask_trip(user, slots: dict, key: str, source: str, row, question: str) -> dict:
+    payload = {
+        "property_name": slots.get("property_name") or "",
+        "city": slots.get("city") or "",
+        "region": slots.get("region") or "",
+        "purpose": slots.get("purpose") or "",
+        "when": slots.get("when") or "",
+        "place": slots.get("place") or "",
+        "miles_estimate": slots.get("miles_estimate"),
+        "day_stated": bool(slots.get("when")),
+        "needs_answer": True,
+        "waiting_for": "trip",
+    }
+    if row is not None:
+        row.payload_json = dumps(payload)
+        row.summary = question
+        row.status = "needs_answer"
+        db.session.commit()
+        return {"ok": True, "pending": True, "reply": question}
+    return propose(user, "plan_trip", payload, question, "low", key, key, source)
+
+
+def _file_outing(user, slots: dict, key: str, source: str, row=None) -> dict:
+    from app.services.records import find_properties
+
+    slots = dict(slots)
+    profile = site_profile()
+    if not slots.get("region"):
+        slots["region"] = (profile.default_region if profile else "") or ""
+    place = slots.get("place") or ""
+    if place and slots.get("city") and not slots.get("property_name"):
+        slots["property_name"] = _tidy_place(place)
+        place = ""
+        slots["place"] = ""
+    if place and not slots.get("property_name"):
+        named = find_properties(place)
+        in_city = _properties_in_city(place)
+        if len(named) == 1 and not in_city:
+            prop = named[0]
+            slots["property_name"] = prop.name
+            slots["city"] = prop.city.name if prop.city else ""
+            slots["region"] = (prop.city.region if prop.city else "") or slots.get("region") or ""
+        elif named and in_city:
+            return _ask_trip(
+                user,
+                slots,
+                key,
+                source,
+                row,
+                f"Is {place} the property, or the city? Tell me the property and the city.",
+            )
+        elif in_city:
+            names = "\n".join(prop.name for prop in in_city[:8])
+            slots["city"] = place
+            slots["place"] = ""
+            return _ask_trip(user, slots, key, source, row, f"That's a trip to {place}. Which property?\n{names}")
+        else:
+            slots["city"] = place
+            slots["place"] = ""
+            return _ask_trip(
+                user,
+                slots,
+                key,
+                source,
+                row,
+                f"That's a trip to {place}. Which property? Say the name and I'll add it.",
+            )
+    if slots.get("property_name") and not slots.get("city"):
+        named = find_properties(slots["property_name"])
+        if len(named) == 1 and named[0].city:
+            slots["city"] = named[0].city.name
+            slots["region"] = named[0].city.region or slots.get("region") or ""
+        elif len(named) > 1:
+            from app.services.records import property_place
+
+            choices = ", ".join(property_place(prop) for prop in named[:6])
+            return _ask_trip(user, slots, key, source, row, f"Which {slots['property_name']}? {choices}")
+        else:
+            return _ask_trip(user, slots, key, source, row, f"Which city is {slots['property_name']} in?")
+    if slots.get("city") and not slots.get("property_name"):
+        in_city = _properties_in_city(slots["city"])
+        if in_city:
+            names = "\n".join(prop.name for prop in in_city[:8])
+            return _ask_trip(user, slots, key, source, row, f"That's a trip to {slots['city']}. Which property?\n{names}")
+        return _ask_trip(
+            user,
+            slots,
+            key,
+            source,
+            row,
+            f"That's a trip to {slots['city']}. Which property? Say the name and I'll add it.",
+        )
+    if not slots.get("property_name") or not slots.get("city"):
+        return _ask_trip(user, slots, key, source, row, "Where is this trip? Tell me the property and the city.")
+    profile = site_profile()
+    today = local_today(profile.timezone if profile else None)
+    if slots.get("when"):
+        when = str(slots["when"])
+        slots["starts_on"] = when if re.match(r"\d{4}-\d{2}-\d{2}$", when) else next_named_day(when, today).isoformat()
+        slots["day_stated"] = True
+        slots["day_assumed"] = False
+    else:
+        slots["starts_on"] = (slots.get("starts_on") or today.isoformat())
+        slots["day_stated"] = False
+        slots["day_assumed"] = True
+    payload = {
+        "property_name": slots["property_name"],
+        "city": slots["city"],
+        "region": slots.get("region") or "",
+        "purpose": slots.get("purpose") or "",
+        "starts_on": slots.get("starts_on"),
+        "when": slots.get("when") or "",
+        "day_stated": bool(slots.get("day_stated")),
+        "day_assumed": bool(slots.get("day_assumed")),
+    }
+    if slots.get("miles_estimate") is not None:
+        payload["miles_estimate"] = slots["miles_estimate"]
+    from app.services.pending import commit_apply
+
+    result = commit_apply(user, "plan_trip", payload, source, key)
+    if row is not None and result.get("ok"):
+        fresh = db.session.get(PendingAction, row.id)
+        if fresh:
+            fresh.status = "accepted"
+            fresh.result_json = dumps(result)
+            db.session.commit()
+    return result
+
+
+def _start_outing(user, text: str, key: str, source: str):
+    slots = parse_outing(text)
+    if not slots:
+        return None
+    return _file_outing(user, slots, key, source)
+
+
+def _answer_trip(user, row, text: str, key: str, source: str) -> dict:
+    payload = loads(row.payload_json)
+    extra = _slots_from_destination(text.strip().rstrip("."))
+    heard = any(extra.get(field) for field in ("property_name", "city", "region", "purpose", "when", "place")) or extra.get("miles_estimate") is not None
+    if not heard:
+        return {"ok": True, "reply": row.summary or "Which property?"}
+    for field in ("property_name", "city", "region", "purpose", "when", "place"):
+        if extra.get(field):
+            payload[field] = extra[field]
+    if extra.get("miles_estimate") is not None:
+        payload["miles_estimate"] = extra["miles_estimate"]
+    if extra.get("when"):
+        payload["day_stated"] = True
+    return _file_outing(user, payload, key, source, row)
+
+
+def _start_here(user, text: str, key: str, source: str):
+    if not HERE.match((text or "").strip().rstrip(".")):
+        return None
+    from app.models import Property, Trip, TripProperty
+    from app.services.records import property_place
+
+    trips = (
+        Trip.query.filter(Trip.deleted_at.is_(None), Trip.status.in_(("staged", "active")))
+        .order_by(Trip.id.desc())
+        .limit(6)
+        .all()
+    )
+    places = []
+    seen = set()
+    for trip in trips:
+        link = TripProperty.query.filter_by(trip_id=trip.id).order_by(TripProperty.sort_order.asc()).first()
+        if not link or link.property_id in seen:
+            continue
+        prop = db.session.get(Property, link.property_id)
+        if prop and not prop.deleted_at:
+            seen.add(prop.id)
+            places.append((trip, prop))
+    if len(places) == 1:
+        from app.services.pending import commit_apply
+
+        trip, prop = places[0]
+        return commit_apply(
+            user,
+            "update_trip",
+            {"arrive": True, "property_name": prop.name, "city": prop.city.name if prop.city else "", "trip_id": trip.id},
+            source,
+            key,
+        )
+    if len(places) > 1:
+        lines = "\n".join(property_place(prop) for _trip, prop in places[:6])
+        return propose(
+            user,
+            "update_trip",
+            {"arrive": True, "needs_answer": True, "waiting_for": "property"},
+            f"Which one are you at?\n{lines}",
+            "low",
+            key,
+            key,
+            source,
+        )
+    return {"ok": True, "needs_answer": True, "reply": "Which property are you at?"}
+
+
+def _answer_here(user, row, text: str, key: str, source: str) -> dict:
+    extra = _slots_from_destination(text.strip().rstrip("."))
+    name = extra.get("property_name") or extra.get("place") or ""
+    city = extra.get("city") or ""
+    if not name:
+        return {"ok": True, "reply": row.summary or "Which property are you at?"}
+    from app.services.pending import commit_apply
+
+    result = commit_apply(user, "update_trip", {"arrive": True, "property_name": name, "city": city}, source, key)
+    if result.get("ok"):
+        fresh = db.session.get(PendingAction, row.id)
+        if fresh:
+            fresh.status = "accepted"
+            fresh.result_json = dumps(result)
+            db.session.commit()
+    return result
+
+
+def _bare_day(user, text: str, key: str, source: str):
+    raw = (text or "").strip().rstrip(".")
+    if not re.fullmatch(DAY_WORD, raw, re.I):
+        return None
+    from app.models import Trip
+
+    trip = (
+        Trip.query.filter(Trip.deleted_at.is_(None), Trip.status.in_(("staged", "active")))
+        .order_by(Trip.id.desc())
+        .first()
+    )
+    if not trip:
+        return {"ok": True, "reply": "Which trip should I move? Tell me the property too."}
+    profile = site_profile()
+    today = local_today(profile.timezone if profile else None)
+    starts = raw if re.match(r"\d{4}-\d{2}-\d{2}$", raw) else next_named_day(raw, today).isoformat()
+    from app.services.pending import commit_apply
+
+    return commit_apply(user, "update_trip", {"trip_id": trip.id, "starts_on": starts}, source, key)
+
+
+def _is_fresh_command(text: str) -> bool:
+    raw = (text or "").strip()
+    if parse_outing(raw):
+        return True
+    if HERE.match(raw.rstrip(".")):
+        return True
+    if ADD_SITE.match(raw.rstrip(".")):
+        return True
+    if ARRIVE.search(raw):
+        return True
+    if UNIT_JOB.search(raw):
+        return True
+    if _expense_payload(raw):
+        return True
+    if QUESTION.search(raw) or raw.endswith("?"):
+        return True
+    if REPORT.search(raw) or SETTINGS.search(raw) or DELETE.search(raw):
+        return True
+    return False
+
+
+def _continue_open(user, text: str, key: str, source: str):
+    if _is_fresh_command(text):
+        return None
+    row = (
+        PendingAction.query.filter_by(user_id=user.id, status="needs_answer")
+        .order_by(PendingAction.id.desc())
+        .first()
+    )
+    if row and row.tool == "log_expense":
+        merged = _merge_open_question(user, text, key, source)
+        if merged:
+            return merged
+    if row and row.tool == "record_unit_visit":
+        plate = _answer_plate(user, text, key, source)
+        if plate:
+            return plate
+        payload = loads(row.payload_json)
+        if payload.get("waiting_for") in ("unit", "place"):
+            return _answer_work(user, row, text, key, source)
+        return None
+    if row and row.tool == "plan_trip":
+        return _answer_trip(user, row, text, key, source)
+    if row and row.tool == "update_trip":
+        payload = loads(row.payload_json)
+        if payload.get("waiting_for") == "property":
+            return _answer_here(user, row, text, key, source)
+    return _bare_day(user, text, key, source)
+
+
+def _answer_work(user, row, text: str, key: str, source: str) -> dict:
+    payload = loads(row.payload_json)
+    number = _loose_unit(text)
+    if number:
+        payload["unit_number"] = number
+        rest = re.sub(rf"\b(?:unit\s*)?#?{re.escape(number)}\b", " ", text, flags=re.I)
+        rest = _clean_slot(rest)
+    else:
+        rest = _clean_slot(text)
+    if rest and not re.fullmatch(r"(?:unit|at|in|the|a|an)", rest, re.I):
+        place = _place_payload(rest)
+        if place.get("property_name"):
+            payload["property_name"] = _tidy_place(place["property_name"])
+        if place.get("city"):
+            payload["city"] = _tidy_place(place["city"])
+    if payload.get("unit_number") and _place_ready(user):
+        payload.pop("needs_answer", None)
+        payload.pop("waiting_for", None)
+        return _commit_waiting(user, row, "record_unit_visit", payload, key, source)
+    if not payload.get("unit_number"):
+        question = "Which unit?"
+    else:
+        question = f"Unit {payload['unit_number']}. Which property is that, if you are not already checked in?"
+    payload["needs_answer"] = True
+    row.payload_json = dumps(payload)
+    row.summary = question
+    row.status = "needs_answer"
+    db.session.commit()
+    return {"ok": True, "pending": True, "reply": question}
+
+
+def _ask_about_work(user, text: str, key: str, source: str):
+    if not WORK_VERB.search(text or ""):
+        return None
+    title = (text or "").strip().rstrip(".")
+    number = _loose_unit(text)
+    if number and _place_ready(user):
+        from app.services.pending import commit_apply
+
+        return commit_apply(
+            user,
+            "record_unit_visit",
+            {"unit_number": number, "title": title[:300], "note": title[:500], "status": "done"},
+            source,
+            key,
+        )
+    if number:
+        return None
+    from app.services.records import property_place
+
+    shift = open_shift(user)
+    if shift and shift.confirmed and shift.property:
+        question = f"That's work at {property_place(shift.property)}: {title}. Which unit?"
+        waiting = "unit"
+    else:
+        question = f"That's work: {title}. Which property and which unit?"
+        waiting = "place"
+    return propose(
+        user,
+        "record_unit_visit",
+        {
+            "title": title[:300],
+            "note": title[:500],
+            "status": "done",
+            "unit_number": "",
+            "needs_answer": True,
+            "waiting_for": waiting,
+        },
+        question,
+        "material",
+        key,
+        key,
+        source,
+    )
 
 
 def interpret(user, text: str, key: str, source: str) -> dict:
@@ -382,13 +862,12 @@ def interpret(user, text: str, key: str, source: str) -> dict:
         payload = _settings_payload(text)
         if payload:
             return _offer(user, "update_settings", payload, "Update settings. Not saved yet.", "material", key, source)
-    profile = site_profile()
-    name = profile.assistant_name if profile else "Apt"
+    work = _ask_about_work(user, text, key, source)
+    if work:
+        return work
     return {
         "ok": True,
-        "reply": (
-            "I didn't catch that. Tell me a site to add, what you did, or ask what's on your record."
-        ),
+        "reply": "Tell me if that's a trip, work at a unit, or a receipt, and I'll ask for whatever is missing.",
     }
 
 

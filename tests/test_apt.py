@@ -420,6 +420,48 @@ Lubbock — 2 outside compressor installs"""
         spent = handle_message(user, "what did I spend", idempotency_key="spent")
         self.assertIn("40.00", spent["reply"])
 
+    def test_trip_sentence_files_place_purpose_and_miles(self):
+        user = self.owner()
+        asked = handle_message(user, "I'm going to Lubbock", idempotency_key="city")
+        self.assertIn("Which property", asked["reply"])
+        self.assertEqual(Trip.query.count(), 0)
+        filed = handle_message(user, "Woodview for an AC install, 86 miles", idempotency_key="place")
+        self.assertIn("Woodview", filed["reply"])
+        self.assertIn("Lubbock", filed["reply"])
+        self.assertIn("AC install", filed["reply"])
+        self.assertIn("86", filed["reply"])
+        trip = Trip.query.one()
+        self.assertEqual(float(trip.miles_estimate), 86.0)
+        self.assertIn("AC install", trip.purpose)
+        prop = Property.query.filter(db.func.lower(Property.name) == "woodview").one()
+        self.assertEqual(prop.city.name, "Lubbock")
+        updated = handle_message(
+            user,
+            "I'm going to Lubbock at Woodview for a blower motor with 90 miles",
+            idempotency_key="update",
+        )
+        self.assertIn("Updated", updated["reply"])
+        self.assertEqual(Trip.query.count(), 1)
+        self.assertEqual(float(Trip.query.one().miles_estimate), 90.0)
+        self.assertIn("blower", Trip.query.one().purpose.lower())
+        moved = handle_message(user, "Friday", idempotency_key="day")
+        self.assertIn("Friday", moved["reply"])
+        self.assertEqual(Trip.query.one().starts_on.strftime("%A"), "Friday")
+
+    def test_here_and_work_ask_the_next_question(self):
+        user = self.owner()
+        handle_message(user, "I'm going to Woodview Odessa Thursday for AC evals", idempotency_key="t")
+        here = handle_message(user, "I'm here", idempotency_key="here")
+        self.assertIn("Is this", here["reply"])
+        self.assertIn("Woodview", here["reply"])
+        handle_message(user, "yes", idempotency_key="yes-place")
+        work = handle_message(user, "I replaced the compressor", idempotency_key="work")
+        self.assertIn("Which unit", work["reply"])
+        self.assertEqual(Job.query.count(), 0)
+        done = handle_message(user, "12", idempotency_key="unit12")
+        self.assertEqual(Job.query.count(), 1)
+        self.assertIn("12", done["reply"])
+
 
 if __name__ == "__main__":
     unittest.main()

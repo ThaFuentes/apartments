@@ -42,7 +42,7 @@ FALLBACK_FREE = (
 TOOL_DECLS = [
     {
         "name": "plan_trip",
-        "description": "Stage a trip to a property in a city. Does not save until she confirms.",
+        "description": "She is going on a trip. Create the property if it is new, or update the open trip if that place is already planned. Save immediately. Include every detail she gave: property, city, what the visit is for, the day, and the miles.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -51,7 +51,10 @@ TOOL_DECLS = [
                 "region": {"type": "string"},
                 "address": {"type": "string"},
                 "starts_on": {"type": "string", "description": "YYYY-MM-DD"},
-                "purpose": {"type": "string"},
+                "purpose": {"type": "string", "description": "What the visit is for"},
+                "miles_estimate": {"type": "number", "description": "Miles she stated for the drive"},
+                "day_stated": {"type": "boolean"},
+                "day_assumed": {"type": "boolean"},
             },
             "required": ["property_name", "city"],
         },
