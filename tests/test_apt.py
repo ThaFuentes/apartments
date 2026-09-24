@@ -85,6 +85,26 @@ class AptTests(unittest.TestCase):
         db.session.commit()
         return user
 
+    def test_add_site_creates_it(self):
+        user = self.owner()
+        result = handle_message(
+            user,
+            "add woodview apartments from odessa texas to my sites",
+            idempotency_key="add-woodview",
+        )
+        self.assertTrue(result.get("ok"))
+        self.assertIn("Woodview Apartments", result.get("reply") or "")
+        prop = Property.query.filter(db.func.lower(Property.name) == "woodview apartments").one()
+        self.assertEqual(prop.city.name, "Odessa")
+        self.assertEqual(prop.city.region, "TX")
+        again = handle_message(
+            user,
+            "add woodview apartments from odessa texas to my sites",
+            idempotency_key="add-woodview",
+        )
+        self.assertTrue(again.get("duplicate") or Property.query.filter(db.func.lower(Property.name) == "woodview apartments").count() == 1)
+        self.assertEqual(Property.query.filter(db.func.lower(Property.name) == "woodview apartments").count(), 1)
+
     def test_first_login_needs_email(self):
         with self.assertRaises(ValueError):
             create_user(username="first", password="field-pass", role="owner", email=None)

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Sites{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <h1>Your sites</h1>
+    <p class="lead">Open chat and say add a property. Example: add Woodview Apartments from Odessa Texas to my sites.</p>
+    <a class="menu-link" href="/plan">Plan today</a>
+  </div>
+  {% if not sites %}
+  <p class="empty">No sites yet. That sentence creates the first one.</p>
+  {% else %}
+  <ul class="list">
+    {% for site in sites %}
+    <li>
+      <a href="/properties/{{ site.id }}">
+        <strong>{{ site.name }}</strong>
+        <span class="hint">{{ site.city.name if site.city else "" }}{% if site.city and site.city.region %} {{ site.city.region }}{% endif %}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

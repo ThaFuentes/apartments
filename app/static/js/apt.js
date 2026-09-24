@@ -22,7 +22,7 @@
           .then(function (rows) {
             results.innerHTML = "";
             if (!rows.length) {
-              results.innerHTML = "<p class=\"lead\">No property with that name yet.</p>";
+              results.innerHTML = "<p class=\"lead\">Not on your sites yet. In chat: add " + q + " from the city to my sites.</p>";
               return;
             }
             rows.forEach(function (row) {
@@ -78,23 +78,70 @@
   }
   const moneyTalk = /filled up|\$\s*\d|yes,\s*save it|^save it$|^save$/i;
 
+  const panel = document.getElementById("chat-panel");
+  const openChat = document.getElementById("chat-open");
+  const closeChat = document.getElementById("chat-close");
+  function setChat(open) {
+    if (!panel || !openChat) return;
+    panel.hidden = !open;
+    openChat.classList.toggle("is-open", open);
+    if (open) {
+      const box = panel.querySelector("textarea");
+      if (box) box.focus();
+      const thread = document.getElementById("thread");
+      if (thread) thread.scrollTop = thread.scrollHeight;
+    }
+  }
+  if (openChat) openChat.addEventListener("click", function () { setChat(true); });
+  if (closeChat) closeChat.addEventListener("click", function () { setChat(false); });
+
+  function addBubble(role, text) {
+    const thread = document.getElementById("thread");
+    if (!thread || !text) return;
+    const bubble = document.createElement("p");
+    bubble.className = "bubble " + role;
+    bubble.textContent = text;
+    thread.appendChild(bubble);
+    thread.scrollTop = thread.scrollHeight;
+  }
+
   if (composer) {
     composer.addEventListener("submit", function (event) {
-      if (navigator.onLine) return;
       const text = (composer.querySelector("textarea").value || "").trim();
       event.preventDefault();
-      if (moneyTalk.test(text)) {
-        window.alert("Money and “save it” wait until you have signal, so a receipt is not filed twice.");
+      if (!text) return;
+      if (!navigator.onLine) {
+        if (moneyTalk.test(text)) {
+          window.alert("Money and “save it” wait until you have signal, so a receipt is not filed twice.");
+          return;
+        }
+        const rows = drafts();
+        rows.push({
+          message: text,
+          idempotency_key: (composer.querySelector('[name="idempotency_key"]') || {}).value || String(Date.now())
+        });
+        saveDrafts(rows);
+        composer.querySelector("textarea").value = "";
+        window.alert("Saved on this phone. It sends when you are back online.");
         return;
       }
-      const rows = drafts();
-      rows.push({
-        message: text,
-        idempotency_key: (composer.querySelector('[name="idempotency_key"]') || {}).value || String(Date.now())
-      });
-      saveDrafts(rows);
+      const body = new FormData(composer);
+      addBubble("user", text);
       composer.querySelector("textarea").value = "";
-      window.alert("Saved on this phone. It sends when you are back online.");
+      fetch("/chat", {
+        method: "POST",
+        body: body,
+        headers: { Accept: "application/json", "X-CSRF-Token": token }
+      }).then(function (resp) { return resp.json(); }).then(function (data) {
+        addBubble("assistant", (data && data.reply) || "Saved.");
+        const key = composer.querySelector('[name="idempotency_key"]');
+        if (key) key.value = Math.random().toString(16).slice(2) + Date.now().toString(16);
+        if (data && data.ok && /on your sites/i.test(data.reply || "") && location.pathname === "/") {
+          window.setTimeout(function () { location.reload(); }, 600);
+        }
+      }).catch(function () {
+        addBubble("assistant", "That didn't send. Try again.");
+      });
     });
   }
 

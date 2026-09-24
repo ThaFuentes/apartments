@@ -49,6 +49,19 @@ END_VISIT = re.compile(r"\b(end (?:the )?visit|leaving|done here|done at this pr
 REPORT = re.compile(r"\b(company report|report for (?:my )?boss(?:es)?|boss report|weekly report|property report)\b", re.I)
 SEND = re.compile(r"\b(send (?:the |this )?(?:weekly |company |boss )?report)\b", re.I)
 QUESTION = re.compile(r"^(what|which|when|where|how many|show me|did we|in\s+.+\s+what)\b", re.I)
+ADD_SITE = re.compile(
+    r"^(?:please\s+)?(?:add|create|save|put)\s+(.+?)\s+(?:from|in|at)\s+(.+?)(?:\s+to\s+(?:my\s+)?(?:sites|site|properties|property|places|list))?$",
+    re.I,
+)
+STATES = {
+    "texas": "TX",
+    "oklahoma": "OK",
+    "new mexico": "NM",
+    "louisiana": "LA",
+    "arkansas": "AR",
+    "colorado": "CO",
+    "kansas": "KS",
+}
 ADD_USER = re.compile(
     r"\b(?:add|invite|give)\s+(?:my\s+)?(?:a\s+)?(viewer|boss|user|field|read-only|readonly)\s+([a-z0-9][a-z0-9._-]{1,40})",
     re.I,
@@ -234,6 +247,11 @@ def interpret(user, text: str, key: str, source: str) -> dict:
     today = local_today(profile.timezone if profile else None)
     from app.services.plan import parse_outcome_text, parse_plan_text, summarize_outcome, summarize_plan
 
+    added = _site_to_add(text)
+    if added:
+        from app.services.pending import commit_apply
+
+        return commit_apply(user, "upsert_property", added, source, key)
     planned = parse_plan_text(
         text,
         today,
@@ -350,6 +368,42 @@ def interpret(user, text: str, key: str, source: str) -> dict:
             "Tell me the property and what you did, or open Plan today and search for the stops."
         ),
     }
+
+
+def _tidy_place(value: str) -> str:
+    words = []
+    for word in (value or "").split():
+        if word.lower() in STATES:
+            words.append(STATES[word.lower()])
+        elif len(word) == 2 and word.isalpha():
+            words.append(word.upper())
+        else:
+            words.append(word.capitalize())
+    return " ".join(words)
+
+
+def _split_city(place: str) -> tuple[str, str]:
+    place = re.sub(r"\s+to\s+my\s+(?:sites|site|properties|places).*$", "", place.strip(" ."), flags=re.I)
+    bits = [bit.strip() for bit in place.split(",") if bit.strip()]
+    if len(bits) >= 2:
+        return _tidy_place(bits[0]), _tidy_place(bits[-1])
+    words = place.split()
+    if len(words) >= 2 and " ".join(words[-2:]).lower() in STATES:
+        return _tidy_place(" ".join(words[:-2])), STATES[" ".join(words[-2:]).lower()]
+    if len(words) >= 2 and words[-1].lower() in STATES:
+        return _tidy_place(" ".join(words[:-1])), STATES[words[-1].lower()]
+    return _tidy_place(place), ""
+
+
+def _site_to_add(text: str) -> dict | None:
+    match = ADD_SITE.match((text or "").strip().rstrip("."))
+    if not match:
+        return None
+    name = _tidy_place(match.group(1))
+    city, region = _split_city(match.group(2))
+    if not name or not city:
+        return None
+    return {"property_name": name, "city": city, "region": region}
 
 
 def _answer_plate(user, text: str) -> dict | None:

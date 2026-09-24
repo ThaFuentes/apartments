@@ -156,30 +156,12 @@ def join(token):
 def home():
     if current_user.role == "viewer":
         return redirect("/reports")
-    messages = (
-        ChatMessage.query.filter_by(user_id=current_user.id).order_by(ChatMessage.id.desc()).limit(30).all()
-    )
-    messages.reverse()
-    pending = (
-        PendingAction.query.filter(
-            PendingAction.user_id == current_user.id,
-            PendingAction.status.in_(("pending", "needs_answer")),
-        )
-        .order_by(PendingAction.id.asc())
+    sites = (
+        Property.query.filter(Property.deleted_at.is_(None))
+        .order_by(Property.name.asc())
         .all()
     )
-    from app.services.records import open_shift
-
-    shift = open_shift(current_user)
-    here = shift.property if shift and shift.confirmed and shift.property else None
-    return render_template(
-        "chat.html",
-        messages=messages,
-        pending=pending,
-        msg_key=_new_key(),
-        profile=site_profile(),
-        here=here,
-    )
+    return render_template("sites.html", sites=sites, msg_key=_new_key())
 
 
 @bp.get("/api/places")

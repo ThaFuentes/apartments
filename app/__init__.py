@@ -121,6 +121,7 @@ def create_app() -> Flask:
         share = {"on": False, "viewers": 0, "fresh": False}
         notices = []
         pending_n = 0
+        chat_lines = []
         if getattr(current_user, "is_authenticated", False):
             from app.models import Notice, PendingAction
             from app.services.records import open_shift
@@ -147,6 +148,21 @@ def create_app() -> Flask:
                 .all()
             )
             pending_n = PendingAction.query.filter_by(user_id=current_user.id, status="pending").count()
+            if getattr(current_user, "role", "") != "viewer":
+                from app.models import ChatMessage
+
+                chat_lines = (
+                    ChatMessage.query.filter_by(user_id=current_user.id)
+                    .order_by(ChatMessage.id.desc())
+                    .limit(20)
+                    .all()
+                )
+                chat_lines.reverse()
+            else:
+                chat_lines = []
+        import secrets as _secrets
+
+        chat_key = _secrets.token_hex(8)
         return {
             "csrf_token": token,
             "SITE_MODE": "apt",
@@ -157,6 +173,8 @@ def create_app() -> Flask:
             "share": share,
             "notices": notices,
             "pending_n": pending_n,
+            "chat_lines": chat_lines,
+            "chat_key": chat_key,
             "drive": bool(request.cookies.get("apt_drive") == "1"),
         }
 

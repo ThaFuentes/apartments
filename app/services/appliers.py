@@ -375,7 +375,8 @@ def apply_upsert_property(user, payload, source) -> dict:
     _pin_property(prop, (payload.get("address") or "").strip())
     return {
         "ok": True,
-        "reply": f"{property_place(prop)} is on file." + (" Pin saved." if prop.lat is not None else " Add an address for a pin."),
+        "reply": f"Added {prop.name} in {prop.city.name if prop.city else city}. It's on your sites."
+        + (" Pin saved." if prop.lat is not None else ""),
         "property_id": prop.id,
     }
 
