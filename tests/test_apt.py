@@ -642,6 +642,44 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn("Whirlpool", newest["reply"])
         self.assertIn("unit 12", newest["reply"])
 
+    def test_model_answer_is_not_replaced(self):
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={
+                "ok": True,
+                "text": "You have two Woodview rows, ids 4 and 9, because the second add did not match the first name.",
+                "calls": [],
+            },
+        ):
+            heard = handle_message(
+                user,
+                "why did you make 2 different entries for the same property",
+                idempotency_key="why-two",
+            )
+        self.assertIn("two Woodview rows", heard["reply"])
+        self.assertNotIn("matching job", heard["reply"])
+
+    def test_delete_property_from_the_sentence(self):
+        user = self.owner()
+        handle_message(user, "it's at woodview odessa texas", idempotency_key="add-w")
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        removed = handle_message(user, "delete woodview", idempotency_key="del-w")
+        self.assertIn("Removed", removed["reply"])
+        self.assertIn("Woodview", removed["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
+
     def test_its_at_saves_the_looked_up_address(self):
         user = self.owner()
         hit = {

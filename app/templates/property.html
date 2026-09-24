@@ -40,16 +40,21 @@
   </ul>
   {% endif %}
   {% if current_user.role != 'viewer' %}
-  <details>
-    <summary>Address and pin</summary>
-    <p>{{ prop.address or "No address yet." }}</p>
-    <form method="post" class="stack" action="/properties/{{ prop.id }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
-      <label>Address <input name="address" value="{{ prop.address }}"></label>
-      <button type="submit">Save address and pin</button>
-    </form>
-  </details>
+  <h2>Edit</h2>
+  <form method="post" class="card stack" action="/properties/{{ prop.id }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="edit-{{ msg_key }}">
+    <label>Name <input name="name" value="{{ prop.name }}" required></label>
+    <label>City <input name="city" value="{{ prop.city.name if prop.city else '' }}" required></label>
+    <label>State <input name="region" value="{{ prop.city.region if prop.city else '' }}"></label>
+    <label>Address <input name="address" value="{{ prop.address }}"></label>
+    <button type="submit">Save</button>
+  </form>
+  <form method="post" action="/properties/{{ prop.id }}/delete" onsubmit="return confirm('Delete {{ prop.name }}?');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="del-{{ msg_key }}">
+    <button type="submit" class="ghost">Delete this property</button>
+  </form>
   {% endif %}
 </section>
 {% endblock %}

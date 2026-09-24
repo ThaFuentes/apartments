@@ -1261,6 +1261,66 @@ def apply_clear_plan(user, payload, source) -> dict:
     return {"ok": True, "reply": " ".join(bits)}
 
 
+def _property_match(payload) -> tuple[Property | None, str]:
+    if payload.get("property_id"):
+        prop = db.session.get(Property, int(payload["property_id"]))
+        if not prop or prop.deleted_at:
+            return None, "That property is already gone."
+        return prop, ""
+    name = (payload.get("match_name") or payload.get("property_name") or "").strip()
+    city = (payload.get("city") or "").strip()
+    if not name:
+        return None, "Which property?"
+    rows = Property.query.filter(Property.deleted_at.is_(None), Property.name.ilike(f"%{name}%")).all()
+    if city:
+        rows = [row for row in rows if row.city and row.city.name.lower() == city.lower()]
+    exact = [row for row in rows if row.name.lower() == name.lower()]
+    rows = exact or rows
+    if not rows:
+        return None, f"No property named {name}."
+    if len(rows) > 1:
+        bits = [f"{row.id} {row.name} in {row.city.name if row.city else ''}" for row in rows[:6]]
+        return None, "More than one match: " + "; ".join(bits) + "."
+    return rows[0], ""
+
+
+def apply_delete_property(user, payload, source) -> dict:
+    source = _src(source)
+    prop, missing = _property_match(payload)
+    if not prop:
+        return {"ok": False, "reply": missing}
+    place = property_place(prop)
+    prop.deleted_at = utcnow()
+    audit(user.id, source, "delete", "property", prop.id, {"deleted_at": None}, {"deleted_at": prop.deleted_at.isoformat(), "name": prop.name})
+    return {"ok": True, "reply": f"Removed {place}.", "property_id": prop.id}
+
+
+def apply_update_property(user, payload, source) -> dict:
+    source = _src(source)
+    from app.services.records import ensure_city
+
+    prop, missing = _property_match(payload)
+    if not prop:
+        return {"ok": False, "reply": missing}
+    before = {"name": prop.name, "city_id": prop.city_id, "address": prop.address}
+    new_name = (payload.get("new_name") or "").strip()
+    if not new_name and payload.get("property_id") and (payload.get("property_name") or "").strip():
+        new_name = payload["property_name"].strip()
+    if new_name:
+        prop.name = new_name[:160]
+    city = (payload.get("city") or "").strip()
+    if city:
+        region = (payload.get("region") or (prop.city.region if prop.city else "") or "").strip()
+        prop.city = ensure_city(city, region, user.id)
+    if payload.get("address") is not None and str(payload.get("address")).strip():
+        prop.address = str(payload["address"]).strip()[:300]
+        _pin_property(prop, prop.address)
+    audit(user.id, source, "update", "property", prop.id, before, {"name": prop.name, "address": prop.address})
+    where = property_place(prop)
+    extra = f" Address: {prop.address}." if prop.address else ""
+    return {"ok": True, "reply": f"Updated {where}.{extra}", "property_id": prop.id}
+
+
 def apply_soft_delete(user, payload, source) -> dict:
     source = _src(source)
     name = (payload.get("entity") or "").strip().lower()
@@ -1325,6 +1385,8 @@ APPLIERS = {
     "log_work": apply_log_work,
     "plan_outcome": apply_plan_outcome,
     "clear_plan": apply_clear_plan,
+    "delete_property": apply_delete_property,
+    "update_property": apply_update_property,
     "update_trip": apply_update_trip,
     "upsert_property": apply_upsert_property,
     "record_unit_visit": apply_record_unit_visit,

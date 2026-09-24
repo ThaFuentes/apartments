@@ -237,7 +237,7 @@ def chat_with_tools(row, text: str, timeout: int = 25) -> dict:
     messages = [
         {
             "role": "system",
-            "content": "You help one regional manager. Use tools and save immediately. Do not ask again for something she already said. Delete plans and trips when asked. Finished miles are the trip actual. Drove or add miles are traveled miles. Set miles are the estimate.",
+            "content": "You help one regional manager. Her message starts with her record. Answer questions from that record in plain language, including why two properties match. Use tools to add, edit, or delete. delete_property and update_property take the property id. Do not say there is no matching job when she asked about a property.",
         },
         {"role": "user", "content": text},
     ]
@@ -336,26 +336,57 @@ def keys_for(user) -> list:
     return usable
 
 
+def record_brief() -> str:
+    """What she already has, so the model can see duplicates instead of guessing."""
+    from app.models import Equipment, Job, Property
+
+    props = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).limit(40).all()
+    lines = ["Her record:"]
+    if not props:
+        lines.append("No properties yet.")
+    names = {}
+    for prop in props:
+        city = prop.city.name if prop.city else ""
+        region = prop.city.region if prop.city else ""
+        where = ", ".join(bit for bit in (city, region) if bit)
+        lines.append(f"property {prop.id}: {prop.name} | {where or 'no city'} | {prop.address or 'no address'}")
+        names[prop.name.lower()] = names.get(prop.name.lower(), 0) + 1
+    dupes = [name for name, count in names.items() if count > 1]
+    if dupes:
+        lines.append("Same name more than once: " + ", ".join(dupes))
+    jobs = Job.query.filter(Job.deleted_at.is_(None)).order_by(Job.id.desc()).limit(8).all()
+    for job in jobs:
+        lines.append(f"job {job.id}: {job.title} at property {job.property_id}")
+    gear = Equipment.query.filter(Equipment.deleted_at.is_(None)).order_by(Equipment.id.desc()).limit(6).all()
+    for item in gear:
+        bits = " ".join(bit for bit in (item.brand, item.kind) if bit)
+        lines.append(f"appliance {item.id}: {bits} unit {item.unit_id or '-'} property {item.property_id}")
+    return "\n".join(lines)[:3500]
+
+
 def collect_tool_calls(user, text: str):
-    """One try per saved key. A quota error moves on. It does not hammer the same key."""
+    """One try per saved key. A prose answer is kept. A quota error moves on."""
     rows = keys_for(user)
     if not rows:
         return None
+    prompt = record_brief() + "\n\nShe said: " + (text or "")
     notes = []
     for row in rows:
         if getattr(row, "backoff_until", None) and row.backoff_until > utcnow():
             notes.append(f"{provider_spec(row.provider).get('label') or row.provider} is cooling down.")
             continue
-        result = chat_with_tools(row, text)
+        result = chat_with_tools(row, prompt)
         if result.get("quota"):
             row.backoff_until = backoff_until(result.get("seconds") or 60)
             db.session.commit()
             notes.append(f"{provider_spec(row.provider).get('label') or row.provider} is out of quota. I will not keep calling it.")
             continue
         if result.get("calls"):
-            return result["calls"]
+            return {"calls": result["calls"], "text": (result.get("text") or "").strip(), "note": ""}
+        if result.get("ok") and (result.get("text") or "").strip():
+            return {"calls": [], "text": result["text"].strip(), "note": ""}
         if result.get("ok"):
-            return None
+            return {"calls": [], "text": "", "note": ""}
     if notes:
-        return " ".join(notes)
-    return None
+        return {"calls": [], "text": "", "note": " ".join(notes)}
+    return {"calls": [], "text": "", "note": ""}

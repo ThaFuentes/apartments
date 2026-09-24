@@ -227,6 +227,33 @@ TOOL_DECLS = [
         },
     },
     {
+        "name": "delete_property",
+        "description": "Remove a property. Use the property id from her record. Use this when she says delete or remove a property, a site, or a duplicate.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "property_id": {"type": "integer"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "update_property",
+        "description": "Rename a property, change its city, or set its street address. Use the property id from her record.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "property_id": {"type": "integer"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "region": {"type": "string"},
+                "address": {"type": "string"},
+            },
+            "required": ["property_id"],
+        },
+    },
+    {
         "name": "clear_plan",
         "description": "Delete an open plan or trip immediately. Use when she says delete, remove, or cancel a plan, stop, or trip. Pass the property or job name if she said one. Set trip true only when she said delete the trip.",
         "parameters": {
@@ -375,11 +402,10 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False) 
                 {
                     "text": (
                         "You are the field assistant for one regional manager. "
-                        "Call tools and save immediately. Do not ask again for a property, city, day, unit, or miles she already said. "
-                        "Ask only when one required fact is still missing. "
-                        "Delete a plan or trip when she says delete, remove, or cancel. "
-                        "Finished or actual miles are the trip's real miles. Drove or add miles are miles traveled. Set or planned miles are the estimate. "
-                        "Never invent a unit she did not name."
+                        "Her message starts with her record. Answer questions from that record, including why two properties are the same. "
+                        "Use tools to add, edit, and delete. delete_property and update_property take the property id from the record. "
+                        "Do not say there is no matching job when she asked about a property. "
+                        "Do not ask again for a fact she already said. Never invent a unit she did not name."
                     )
                 }
             ]

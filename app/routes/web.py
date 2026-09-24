@@ -624,17 +624,33 @@ def property_save(property_id):
     if not prop:
         abort(404)
     payload = {
-        "property_name": prop.name,
-        "city": prop.city.name if prop.city else "",
-        "region": prop.city.region if prop.city else "",
-        "address": request.form.get("address") or prop.address,
+        "property_id": prop.id,
+        "property_name": (request.form.get("name") or prop.name).strip(),
+        "city": (request.form.get("city") or (prop.city.name if prop.city else "")).strip(),
+        "region": (request.form.get("region") or (prop.city.region if prop.city else "")).strip(),
+        "address": (request.form.get("address") or "").strip(),
     }
-    if request.form.get("lat") and request.form.get("lng"):
-        payload["lat"] = float(request.form.get("lat"))
-        payload["lng"] = float(request.form.get("lng"))
-    result = commit_apply(current_user, "upsert_property", payload, "human", _key() or f"prop-{property_id}-{_new_key()}")
+    result = commit_apply(current_user, "update_property", payload, "human", _key() or f"prop-{property_id}-{_new_key()}")
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
     return redirect(f"/properties/{property_id}")
+
+
+@bp.post("/properties/<int:property_id>/delete")
+@login_required
+def property_delete(property_id):
+    if current_user.role == "viewer":
+        abort(403)
+    from app.services.pending import commit_apply
+
+    result = commit_apply(
+        current_user,
+        "delete_property",
+        {"property_id": property_id},
+        "human",
+        _key() or f"del-prop-{property_id}-{_new_key()}",
+    )
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect("/places")
 
 
 @bp.get("/units/<int:unit_id>")

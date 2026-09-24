@@ -133,30 +133,53 @@ def route(user, text: str, key: str, source: str) -> dict:
             "ok": True,
             "reply": "Next door. Tell me the unit number when you are there, or say skip — nobody home.",
         }
+    model = _from_model(user, text, key, source)
+    if model is not None:
+        return model
+    return _local_fallback(user, text, key, source, "")
+
+
+def _from_model(user, text: str, key: str, source: str):
+    """The saved model answers first. Local phrases run only when it has nothing to say."""
+    from app.services.providers import collect_tool_calls
+
+    heard = collect_tool_calls(user, text)
+    if not heard:
+        return None
+    note = (heard.get("note") or "").strip()
+    calls = heard.get("calls") or []
+    if calls:
+        result = _from_calls(user, calls, key, source, note)
+        return result
+    prose = (heard.get("text") or "").strip()
+    if prose:
+        if note:
+            prose = note + " " + prose
+        return {"ok": True, "reply": prose}
+    if note:
+        return _local_fallback(user, text, key, source, note)
+    return None
+
+
+def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:
     direct = _direct_action(user, text, key, source)
     if direct:
-        return direct
-    continued = _continue_open(user, text, key, source)
-    if continued:
-        return continued
-    outing = _start_outing(user, text, key, source)
-    if outing:
-        return outing
-    arrived = _start_here(user, text, key, source)
-    if arrived:
-        return arrived
-    quota_note = ""
-    calls = _gemini_calls(user, text)
-    if isinstance(calls, str):
-        quota_note = calls
-        calls = None
-    if calls:
-        return _from_calls(user, calls, key, source, quota_note)
-    parsed = interpret(user, text, key, source)
-    if quota_note:
-        parsed["reply"] = quota_note + " " + (parsed.get("reply") or "")
-        parsed["quota"] = True
-    return parsed
+        result = direct
+    else:
+        continued = _continue_open(user, text, key, source)
+        if continued:
+            result = continued
+        else:
+            outing = _start_outing(user, text, key, source)
+            if outing:
+                result = outing
+            else:
+                arrived = _start_here(user, text, key, source)
+                result = arrived or interpret(user, text, key, source)
+    if note:
+        result["reply"] = note + " " + (result.get("reply") or "")
+        result["quota"] = True
+    return result
 
 
 def _unconfirmed(user) -> bool:
@@ -830,6 +853,49 @@ def _appliance_place(text: str) -> dict | None:
     }
 
 
+def _property_delete(text: str) -> dict | None:
+    raw = (text or "").strip()
+    if not re.search(r"\b(delete|remove)\b", raw, re.I):
+        return None
+    if re.search(r"\b(plan|plans|trip|trips|job|jobs|unit|units|expense|expenses|miles)\b", raw, re.I):
+        return None
+    cleaned = re.sub(
+        r"\b(please|delete|remove|the|my|our|this|that|property|properties|site|sites|place|places|apartment|apartments)\b",
+        " ",
+        raw,
+        flags=re.I,
+    )
+    cleaned = _clean_slot(cleaned)
+    if not cleaned:
+        return None
+    slots = _slots_from_destination(cleaned)
+    name = slots.get("property_name") or slots.get("place") or cleaned
+    if not name:
+        return None
+    return {"property_name": name, "city": slots.get("city") or "", "region": slots.get("region") or ""}
+
+
+def _property_rename(text: str) -> dict | None:
+    raw = (text or "").strip().rstrip(".")
+    match = re.search(r"\brename\s+(.+?)\s+to\s+(.+)$", raw, re.I)
+    if not match:
+        match = re.search(r"\bchange\s+(?:the\s+)?address\s+(?:of|for)\s+(.+?)\s+to\s+(.+)$", raw, re.I)
+        if not match:
+            return None
+        slots = _slots_from_destination(match.group(1))
+        return {
+            "match_name": slots.get("property_name") or slots.get("place") or match.group(1).strip(),
+            "city": slots.get("city") or "",
+            "address": match.group(2).strip(),
+        }
+    slots = _slots_from_destination(match.group(1))
+    return {
+        "match_name": slots.get("property_name") or slots.get("place") or match.group(1).strip(),
+        "city": slots.get("city") or "",
+        "new_name": _tidy_place(match.group(2)),
+    }
+
+
 def _named_place(text: str) -> dict | None:
     match = ITS_AT.match((text or "").strip().rstrip("."))
     if not match:
@@ -849,13 +915,19 @@ def _direct_action(user, text: str, key: str, source: str):
     named = _named_place(text)
     plan = _plan_delete(text)
     miles = _miles_numbers(text)
-    if not work and not gear and not named and not plan and not miles:
+    gone = _property_delete(text)
+    renamed = _property_rename(text)
+    if not any((work, gear, named, plan, miles, gone, renamed)):
         return None
     _close_questions(user)
     from app.services.pending import commit_apply
 
     if work or gear:
         return commit_apply(user, "log_work", work or gear, source, key)
+    if gone:
+        return commit_apply(user, "delete_property", gone, source, key)
+    if renamed:
+        return commit_apply(user, "update_property", renamed, source, key)
     if named:
         return commit_apply(user, "upsert_property", named, source, key)
     if plan:
@@ -912,6 +984,8 @@ def _is_fresh_command(text: str) -> bool:
     if REPORT.search(raw) or SETTINGS.search(raw) or DELETE.search(raw):
         return True
     if _plan_delete(raw) or _miles_numbers(raw) or _named_place(raw) or _backdated_work(raw) or _appliance_place(raw):
+        return True
+    if _property_delete(raw) or _property_rename(raw):
         return True
     return False
 
