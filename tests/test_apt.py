@@ -1661,6 +1661,8 @@ Lubbock — 2 outside compressor installs"""
                 created_at=utcnow(),
             )
         )
+        for older in ("one", "two", "three", "four", "five", "six"):
+            db.session.add(ChatMessage(user_id=user.id, role="user", body=f"earlier {older}", created_at=utcnow()))
         db.session.add(ChatMessage(user_id=user.id, role="user", body="create a property in lubbock", created_at=utcnow()))
         db.session.add(ChatMessage(user_id=user.id, role="assistant", body="What's the street address?", created_at=utcnow()))
         db.session.add(ChatMessage(user_id=user.id, role="user", body="4330 N Grandview Ave Lubbock Texas", created_at=utcnow()))
@@ -1680,7 +1682,14 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn("create property", seen["text"])
         self.assertNotIn("create property", "\n".join(bodies))
         self.assertIn("name", heard["reply"].lower())
-        self.assertLessEqual(len(seen["history"]), 5)
+        self.assertIn("earlier one", bodies)
+        self.assertGreater(len(seen["history"]), 5)
+        from app.services.talk import clear_chat
+
+        clear_chat(user)
+        with patch("app.services.providers.chat_with_tools", side_effect=fake):
+            handle_message(user, "hello again", idempotency_key="fresh")
+        self.assertEqual(seen["history"], [])
 
 
 if __name__ == "__main__":

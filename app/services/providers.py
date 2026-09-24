@@ -211,20 +211,13 @@ def _model(row) -> str:
     return models[0] if models else ""
 
 
-def chat_history(user, current: str, limit: int = 5) -> list[dict]:
-    """The last few saved lines, not counting the message she just sent."""
+def chat_history(user, current: str) -> list[dict]:
+    """The whole saved thread, not counting the line she just sent. Clear is the only reset."""
     from app.models import ChatMessage
 
-    rows = (
-        ChatMessage.query.filter_by(user_id=user.id)
-        .order_by(ChatMessage.id.desc())
-        .limit(limit + 1)
-        .all()
-    )
-    rows = list(reversed(rows))
+    rows = ChatMessage.query.filter_by(user_id=user.id).order_by(ChatMessage.id.asc()).all()
     if rows and rows[-1].role == "user" and (rows[-1].body or "").strip() == (current or "").strip():
         rows = rows[:-1]
-    rows = rows[-limit:]
     return [{"role": row.role, "body": (row.body or "")[:1500]} for row in rows]
 
 
