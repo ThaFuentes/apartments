@@ -133,6 +133,9 @@ def route(user, text: str, key: str, source: str) -> dict:
             "ok": True,
             "reply": "Next door. Tell me the unit number when you are there, or say skip — nobody home.",
         }
+    direct = _direct_action(user, text, key, source)
+    if direct:
+        return direct
     continued = _continue_open(user, text, key, source)
     if continued:
         return continued
@@ -604,6 +607,124 @@ def _bare_day(user, text: str, key: str, source: str):
     return commit_apply(user, "update_trip", {"trip_id": trip.id, "starts_on": starts}, source, key)
 
 
+def _close_questions(user) -> None:
+    from app.services.pending import discard_id
+
+    rows = PendingAction.query.filter_by(user_id=user.id, status="needs_answer").all()
+    for row in rows:
+        discard_id(user, row.id)
+
+
+def _plan_delete(text: str) -> dict | None:
+    raw = (text or "").strip()
+    if not re.search(r"\b(delete|remove|cancel|drop|clear|erase)\b|\bget rid of\b", raw, re.I):
+        return None
+    if not re.search(r"\b(plan|plans|trip|trips|stop|stops)\b", raw, re.I):
+        return None
+    whole = bool(re.search(r"\btrips?\b", raw, re.I))
+    everything = bool(re.search(r"\ball\b", raw, re.I))
+    cleaned = re.sub(
+        r"\b(please|delete|remove|cancel|drop|clear|erase|get|rid|of|the|my|our|todays|today's|today|this|that|open|whole|all|from|on|a|an|plan|plans|trip|trips|stop|stops)\b",
+        " ",
+        raw,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" .")
+    return {"property_name": cleaned, "title": cleaned, "trip": whole, "all": everything}
+
+
+def _miles_numbers(text: str) -> dict | None:
+    raw = (text or "").strip()
+    low = raw.lower()
+    if parse_outing(raw):
+        return None
+    if re.search(r"\b(my miles|how many miles|miles so far|miles have i|total miles)\b", low):
+        return None
+    if not re.search(r"\bmiles\b", low):
+        return None
+    stripped = re.sub(r"\b\d{1,4}(?:\.\d)?\s*miles\b", " ", low)
+    stripped = re.sub(
+        r"\b(finish(?:ed)?|actual|drove|driven|drive|was|add(?:ed)?|set|make|change|plan(?:ned)?|estimate(?:d)?|about|around|ended|with|wound|up|came|out|to|were|are|of|the|my|back|today|total|just|it|on|this|that|trip|please|and|for|a|an)\b",
+        " ",
+        stripped,
+    )
+    if re.search(r"[a-z]{3,}", re.sub(r"[^a-z\s]", " ", stripped)):
+        return None
+    finished = re.search(
+        r"\b(?:finish(?:ed)?|actual|ended with|wound up|came out to)\s+(\d{1,4}(?:\.\d)?)\s*miles\b",
+        low,
+    ) or re.search(r"\b(\d{1,4}(?:\.\d)?)\s*(?:finished|actual)\s*miles\b", low) or re.search(
+        r"\b(?:finished|actual)\s+miles(?:\s+(?:were|was|are|of))?\s*(\d{1,4}(?:\.\d)?)",
+        low,
+    )
+    planned = re.search(
+        r"\b(?:set|make|change|plan(?:ned)?|estimate(?:d)?|about|around)\s+(\d{1,4}(?:\.\d)?)\s*miles\b",
+        low,
+    ) or re.search(r"\b(\d{1,4}(?:\.\d)?)\s*(?:planned|estimated)\s*miles\b", low)
+    drove = re.search(r"\b(?:drove|driven|drive was|add(?:ed)?)\s+(\d{1,4}(?:\.\d)?)\s*miles\b", low)
+    if finished or planned or drove:
+        return {
+            "actual": float(finished.group(1)) if finished else None,
+            "estimate": float(planned.group(1)) if planned else None,
+            "stated": float(drove.group(1)) if drove else None,
+        }
+    bare = MILES.search(raw)
+    if not bare:
+        return None
+    number = float(bare.group(1))
+    if re.search(r"\b(set|estimate|planned|plan|about|around)\b", low):
+        return {"actual": None, "estimate": number, "stated": None}
+    if re.search(r"\b(finish|finished|actual|drove|driven|add|added)\b", low):
+        if re.search(r"\b(finish|finished|actual)\b", low):
+            return {"actual": number, "estimate": None, "stated": None}
+        return {"actual": None, "estimate": None, "stated": number}
+    return {"actual": number, "estimate": None, "stated": None}
+
+
+def _direct_action(user, text: str, key: str, source: str):
+    """A finished sentence is the action. An older question does not get to ask it again."""
+    plan = _plan_delete(text)
+    miles = _miles_numbers(text)
+    if not plan and not miles:
+        return None
+    _close_questions(user)
+    from app.services.pending import commit_apply
+
+    if plan:
+        return commit_apply(user, "clear_plan", plan, source, key)
+    bits = []
+    ok = True
+    if miles.get("estimate") is not None:
+        result = commit_apply(user, "estimate_miles", {"miles": miles["estimate"]}, source, key + ":est")
+        bits.append(result.get("reply") or "")
+        ok = bool(result.get("ok"))
+    if miles.get("stated") is not None:
+        result = commit_apply(
+            user,
+            "log_miles",
+            {"miles": miles["stated"], "note": text.strip()[:200]},
+            source,
+            key + ":drove",
+        )
+        bits.append(result.get("reply") or "")
+        ok = ok and bool(result.get("ok"))
+    if miles.get("actual") is not None:
+        result = commit_apply(user, "update_trip", {"miles_actual": miles["actual"]}, source, key + ":actual")
+        if result.get("ok"):
+            bits.append(f"Finished miles are {miles['actual']:g}.")
+        else:
+            result = commit_apply(
+                user,
+                "log_miles",
+                {"miles": miles["actual"], "note": text.strip()[:200]},
+                source,
+                key + ":actual-log",
+            )
+            bits.append(result.get("reply") or "")
+        ok = ok and bool(result.get("ok"))
+    return {"ok": ok, "reply": " ".join(bit for bit in bits if bit)}
+
+
 def _is_fresh_command(text: str) -> bool:
     raw = (text or "").strip()
     if parse_outing(raw):
@@ -621,6 +742,8 @@ def _is_fresh_command(text: str) -> bool:
     if QUESTION.search(raw) or raw.endswith("?"):
         return True
     if REPORT.search(raw) or SETTINGS.search(raw) or DELETE.search(raw):
+        return True
+    if _plan_delete(raw) or _miles_numbers(raw):
         return True
     return False
 
@@ -859,9 +982,10 @@ def interpret(user, text: str, key: str, source: str) -> dict:
             key,
             source,
         )
-    miles = MILES.search(text)
-    if miles and re.search(r"\b(set|make|change|miles)\b", text, re.I):
-        return _offer(user, "estimate_miles", {"miles": float(miles.group(1))}, f"Set miles to {miles.group(1)}.", "low", key, source)
+    if _miles_numbers(text):
+        done = _direct_action(user, text, key, source)
+        if done:
+            return done
     if re.search(r"\bestimate miles\b|\bhow far\b", text, re.I):
         return _offer(user, "estimate_miles", {}, "Estimate miles from home.", "low", key, source)
     if SETTINGS.search(text):

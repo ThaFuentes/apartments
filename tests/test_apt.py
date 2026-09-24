@@ -523,6 +523,43 @@ Lubbock — 2 outside compressor installs"""
         self.assertEqual(madison["unit_count"], 2)
         self.assertIn("compressor", madison["last_title"].lower())
 
+    def test_chat_deletes_a_plan_and_files_finished_miles(self):
+        from app.models import MilesEntry, PlanItem
+        from app.services.miles import traveled_total
+        from app.services.pending import propose
+
+        user = self.owner()
+        handle_message(
+            user,
+            "I'm going to Madison Sq Lubbock Thursday for compressor installs",
+            idempotency_key="go-madison",
+        )
+        self.assertGreater(PlanItem.query.filter(PlanItem.deleted_at.is_(None)).count(), 0)
+        propose(
+            user,
+            "plan_trip",
+            {"city": "Lubbock", "needs_answer": True, "waiting_for": "trip"},
+            "Which property?",
+            "low",
+            "stuck",
+            "stuck",
+            "ai",
+        )
+        removed = handle_message(user, "delete the madison plan", idempotency_key="del-plan")
+        self.assertIn("Madison", removed["reply"])
+        self.assertNotIn("Which property", removed["reply"])
+        self.assertEqual(PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial"))).count(), 0)
+        self.assertEqual(PendingAction.query.filter_by(status="needs_answer").count(), 0)
+        handle_message(user, "I'm going to Woodview Odessa Friday for an eval", idempotency_key="go-wood")
+        done = handle_message(user, "finished 90 miles", idempotency_key="fin-90")
+        self.assertIn("90", done["reply"])
+        trip = Trip.query.filter(Trip.deleted_at.is_(None)).order_by(Trip.id.desc()).first()
+        self.assertEqual(float(trip.miles_actual), 90.0)
+        self.assertEqual(MilesEntry.query.filter_by(source="trip").one().miles, 90.0)
+        added = handle_message(user, "add 12 miles", idempotency_key="add-12")
+        self.assertTrue(added.get("ok"))
+        self.assertGreaterEqual(traveled_total(user.id), 102.0)
+
 
 if __name__ == "__main__":
     unittest.main()

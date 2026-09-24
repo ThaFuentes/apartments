@@ -237,7 +237,7 @@ def chat_with_tools(row, text: str, timeout: int = 25) -> dict:
     messages = [
         {
             "role": "system",
-            "content": "You help one regional manager log property work. Use tools for saves. Do not claim something is saved.",
+            "content": "You help one regional manager. Use tools and save immediately. Do not ask again for something she already said. Delete plans and trips when asked. Finished miles are the trip actual. Drove or add miles are traveled miles. Set miles are the estimate.",
         },
         {"role": "user", "content": text},
     ]

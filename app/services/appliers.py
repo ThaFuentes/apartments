@@ -1118,6 +1118,70 @@ def _entity(name: str, entity_id: int):
     return db.session.get(model, entity_id)
 
 
+def apply_clear_plan(user, payload, source) -> dict:
+    """Remove plan lines she named, and the trip when she said to delete the trip."""
+    source = _src(source)
+    from app.models import PlanItem
+
+    name = (payload.get("property_name") or payload.get("title") or "").strip()
+    whole_trip = bool(payload.get("trip"))
+    items = PlanItem.query.filter(
+        PlanItem.deleted_at.is_(None),
+        PlanItem.status.in_(("open", "partial")),
+    )
+    props = []
+    if name:
+        props = (
+            Property.query.filter(Property.deleted_at.is_(None), Property.name.ilike(f"%{name}%"))
+            .order_by(Property.id.asc())
+            .all()
+        )
+        if props:
+            items = items.filter(PlanItem.property_id.in_([prop.id for prop in props]))
+        else:
+            items = items.filter(PlanItem.title.ilike(f"%{name}%"))
+    rows = items.order_by(PlanItem.id.asc()).all()
+    removed = []
+    for row in rows:
+        prop = db.session.get(Property, row.property_id)
+        label = f"{prop.name}: {row.title}" if prop else row.title
+        row.deleted_at = utcnow()
+        removed.append(label)
+        audit(user.id, source, "delete", "plan_item", row.id, {"deleted_at": None}, {"deleted_at": row.deleted_at.isoformat(), "title": row.title})
+    trip_titles = []
+    if whole_trip or (not rows and not name):
+        trip_query = Trip.query.filter(Trip.deleted_at.is_(None), Trip.status.in_(("staged", "active")))
+        if props:
+            trip_query = trip_query.join(TripProperty, TripProperty.trip_id == Trip.id).filter(
+                TripProperty.property_id.in_([prop.id for prop in props])
+            )
+        elif name and not rows:
+            trip_query = trip_query.filter(Trip.title.ilike(f"%{name}%"))
+        seen = set()
+        trips = []
+        for trip in trip_query.order_by(Trip.id.desc()).all():
+            if trip.id in seen:
+                continue
+            seen.add(trip.id)
+            trips.append(trip)
+        if not payload.get("all"):
+            trips = trips[:1]
+        for trip in trips:
+            if trip.deleted_at:
+                continue
+            trip.deleted_at = utcnow()
+            trip_titles.append(trip.title)
+            audit(user.id, source, "delete", "trip", trip.id, {"deleted_at": None}, {"deleted_at": trip.deleted_at.isoformat()})
+    if not removed and not trip_titles:
+        return {"ok": False, "reply": "There's no open plan to remove."}
+    bits = []
+    if removed:
+        bits.append("Removed " + "; ".join(removed) + ".")
+    if trip_titles:
+        bits.append("Removed the trip " + "; ".join(trip_titles) + ".")
+    return {"ok": True, "reply": " ".join(bits)}
+
+
 def apply_soft_delete(user, payload, source) -> dict:
     source = _src(source)
     name = (payload.get("entity") or "").strip().lower()
@@ -1181,6 +1245,7 @@ APPLIERS = {
     "plan_day": apply_plan_day,
     "log_work": apply_log_work,
     "plan_outcome": apply_plan_outcome,
+    "clear_plan": apply_clear_plan,
     "update_trip": apply_update_trip,
     "upsert_property": apply_upsert_property,
     "record_unit_visit": apply_record_unit_visit,

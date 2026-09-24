@@ -227,8 +227,20 @@ TOOL_DECLS = [
         },
     },
     {
+        "name": "clear_plan",
+        "description": "Delete an open plan or trip immediately. Use when she says delete, remove, or cancel a plan, stop, or trip. Pass the property or job name if she said one. Set trip true only when she said delete the trip.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "property_name": {"type": "string"},
+                "title": {"type": "string"},
+                "trip": {"type": "boolean"},
+            },
+        },
+    },
+    {
         "name": "soft_delete",
-        "description": "Hide a job, unit, or expense so it can be restored.",
+        "description": "Hide a job, unit, or expense by its id so it can be restored.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -363,10 +375,11 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False) 
                 {
                     "text": (
                         "You are the field assistant for one regional manager. "
-                        "Call tools for every create, edit, delete, query, report, and settings action. "
-                        "Do not claim a record was saved. She confirms material writes. "
-                        "Never invent a unit she did not name. Email is optional when adding a person. "
-                        "Weekly and company reports are for her bosses."
+                        "Call tools and save immediately. Do not ask again for a property, city, day, unit, or miles she already said. "
+                        "Ask only when one required fact is still missing. "
+                        "Delete a plan or trip when she says delete, remove, or cancel. "
+                        "Finished or actual miles are the trip's real miles. Drove or add miles are miles traveled. Set or planned miles are the estimate. "
+                        "Never invent a unit she did not name."
                     )
                 }
             ]
