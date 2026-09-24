@@ -3,86 +3,100 @@
 {% block main %}
 <section class="sheet">
   <div class="hero">
-    <h1>Home</h1>
-    <p class="lead">Chat is the button. This page is the record: open a site, a trip, or add it yourself.</p>
+    <p class="kicker">{{ board.today.strftime("%A, %b %d").replace(" 0", " ") }}</p>
+    <h1>Today</h1>
+    <p class="lead">What’s still open, where you’ve been, and the latest work.</p>
   </div>
 
-  <h2>Add a site</h2>
-  <form method="post" action="/sites" class="card stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="site-{{ msg_key }}">
-    <label>Property name <input name="name" required autocomplete="off"></label>
-    <label>City <input name="city" required autocomplete="off"></label>
-    <label>State <input name="region" autocomplete="off" maxlength="32"></label>
-    <button type="submit">Save site</button>
-  </form>
+  <div class="stats">
+    <a class="stat" href="/places"><strong>{{ board.place_count }}</strong><span>Places</span></a>
+    <a class="stat" href="/plan"><strong>{{ board.open_count }}</strong><span>Open plan</span></a>
+    <a class="stat" href="/miles"><strong>{{ board.miles }}</strong><span>Miles</span></a>
+  </div>
 
-  <h2>Your sites</h2>
-  {% if not sites %}
-  <p class="empty">No sites yet. Save one above, or say it in Chat.</p>
+  <h2>Still open</h2>
+  {% if not board.plan %}
+  <p class="empty">Nothing is open on the plan.</p>
   {% else %}
-  <ul class="list">
-    {% for site in sites %}
-    <li>
-      <a href="/properties/{{ site.id }}">
-        <strong>{{ site.name }}</strong>
-        <span class="hint">{{ site.city.name if site.city else "" }}{% if site.city and site.city.region %} {{ site.city.region }}{% endif %}</span>
-      </a>
-    </li>
+  <div class="stack">
+    {% for item in board.plan %}
+    <a class="unit-card" href="{% if item.trip_id %}/trips/{{ item.trip_id }}{% else %}/plan{% endif %}">
+      <strong>{{ item.title }}</strong>
+      <span class="unit-meta">{{ item.property }}{% if item.left %} · {{ item.left }}{% endif %} · {{ item.status }}</span>
+    </a>
     {% endfor %}
-  </ul>
+  </div>
   {% endif %}
 
-  <h2>Log work</h2>
-  <form method="post" action="/log" class="card stack" data-place-search data-mode="one">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="log-{{ msg_key }}">
-    <label>Property
-      <input data-search autocomplete="off" placeholder="Type two letters of the name">
-    </label>
-    <div class="search-results" data-results></div>
-    <input type="hidden" name="property_id" data-property-id value="">
-    <p data-chosen class="lead"></p>
-    <label>Not in the list
-      <input name="new_name" autocomplete="off" placeholder="Property name">
-    </label>
-    <label>City <input name="new_city" autocomplete="off"></label>
-    <label>Unit number <input name="unit_number" autocomplete="off" placeholder="Only if you have it"></label>
-    <label>What you did <input name="title" required placeholder="What happened"></label>
-    <button type="submit">Save this work</button>
-  </form>
-
-  <h2>Trips</h2>
-  {% if not trips %}
-  <p class="empty">No trips yet.</p>
+  <h2>Where you’ve been</h2>
+  {% if not board.places %}
+  <p class="empty">No places yet.</p>
   {% else %}
-  <ul class="list">
-    {% for trip in trips %}
-    <li>
-      <a href="/trips/{{ trip.id }}">
-        <strong>{{ trip.title }}</strong>
-        <span class="hint">{{ trip.starts_on or "" }}{% if trip.purpose %} · {{ trip.purpose }}{% endif %}{% if trip.miles_estimate %} · {{ trip.miles_estimate|round|int }} mi{% endif %}</span>
-      </a>
-    </li>
+  <div class="stack">
+    {% for place in board.places %}
+    <a class="unit-card" href="/properties/{{ place.id }}">
+      <strong>{{ place.name }}</strong>
+      <span class="unit-meta">
+        {{ place.city_label }}
+        {% if place.unit_count %} · {{ place.unit_count }} unit{% if place.unit_count != 1 %}s{% endif %}{% endif %}
+        {% if place.last %} · {{ place.last|apt_when }}{% endif %}
+        {% if place.last_title %} · {{ place.last_title }}{% endif %}
+      </span>
+    </a>
     {% endfor %}
-  </ul>
+  </div>
+  <p><a href="/places">All places</a></p>
   {% endif %}
-  <p><a href="/trips">All trips</a> · <a href="/plan">Plan today</a></p>
 
-  <h2>Work logged</h2>
-  {% if not jobs %}
+  <h2>Latest work</h2>
+  {% if not board.jobs %}
   <p class="empty">Nothing logged yet.</p>
   {% else %}
-  <ul class="list">
-    {% for job in jobs %}
-    <li>
-      <a href="/properties/{{ job.property_id }}">
-        <strong>{{ job.title }}</strong>
-        <span class="hint">{{ job.status }}{% if job.unit %} · unit {{ job.unit.unit_number }}{% endif %}{% if job.property %} · {{ job.property.name }}{% endif %}</span>
-      </a>
-    </li>
+  <div class="stack">
+    {% for job in board.jobs %}
+    <a class="unit-card" href="{% if job.unit_id %}/units/{{ job.unit_id }}{% else %}/properties/{{ job.property_id }}{% endif %}">
+      <strong>{{ job.title }}</strong>
+      <span class="unit-meta">
+        {{ job.created_at|apt_when }}
+        {% if job.unit %} · unit {{ job.unit.unit_number }}{% endif %}
+        {% if job.property %} · {{ job.property.name }}{% endif %}
+      </span>
+    </a>
     {% endfor %}
-  </ul>
+  </div>
   {% endif %}
+
+  <details>
+    <summary>Add a site</summary>
+    <form method="post" action="/sites" class="card stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="idempotency_key" value="site-{{ msg_key }}">
+      <label>Property name <input name="name" required autocomplete="off"></label>
+      <label>City <input name="city" required autocomplete="off"></label>
+      <label>State <input name="region" autocomplete="off" maxlength="32"></label>
+      <button type="submit">Save site</button>
+    </form>
+  </details>
+
+  <details>
+    <summary>Log work</summary>
+    <form method="post" action="/log" class="card stack" data-place-search data-mode="one">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="idempotency_key" value="log-{{ msg_key }}">
+      <label>Property
+        <input data-search autocomplete="off" placeholder="Type two letters of the name">
+      </label>
+      <div class="search-results" data-results></div>
+      <input type="hidden" name="property_id" data-property-id value="">
+      <p data-chosen class="lead"></p>
+      <label>Not in the list
+        <input name="new_name" autocomplete="off" placeholder="Property name">
+      </label>
+      <label>City <input name="new_city" autocomplete="off"></label>
+      <label>Unit number <input name="unit_number" autocomplete="off" placeholder="Only if you have it"></label>
+      <label>What you did <input name="title" required placeholder="What happened"></label>
+      <button type="submit">Save this work</button>
+    </form>
+  </details>
 </section>
 {% endblock %}

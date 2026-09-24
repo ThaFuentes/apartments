@@ -22,6 +22,55 @@ def gear_blurb(item: Equipment) -> str:
     return text or "Equipment"
 
 
+def home_board(user_id: int) -> dict:
+    """The numbers and lists on the home dashboard."""
+    from app.models import PlanItem
+    from app.services.clock import local_today
+    from app.services.miles import traveled_total
+
+    today = local_today()
+    groups = place_groups()
+    places = []
+    for group in groups:
+        for place in group["places"]:
+            places.append({**place, "city_label": group["city"]})
+    places.sort(key=lambda row: (row["last"] is None, -(row["last"].timestamp() if row["last"] else 0), row["name"].lower()))
+    been = [row for row in places if row["last"]][:5]
+    open_items = (
+        PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial")))
+        .order_by(PlanItem.id.desc())
+        .limit(6)
+        .all()
+    )
+    plan = []
+    for item in open_items:
+        prop = item.property
+        left = ""
+        if item.status == "partial":
+            left = f"{item.done_qty} of {item.planned_qty}"
+        plan.append(
+            {
+                "title": item.title,
+                "status": item.status,
+                "left": left,
+                "property": prop.name if prop else "",
+                "property_id": item.property_id,
+                "trip_id": item.trip_id,
+            }
+        )
+    jobs = Job.query.filter(Job.deleted_at.is_(None)).order_by(Job.created_at.desc(), Job.id.desc()).limit(6).all()
+    miles = traveled_total(user_id)
+    return {
+        "today": today,
+        "place_count": len(places),
+        "open_count": PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial"))).count(),
+        "miles": int(miles) if float(miles).is_integer() else miles,
+        "places": been or places[:5],
+        "plan": plan,
+        "jobs": jobs,
+    }
+
+
 def place_groups(city_id: int | None = None) -> list[dict]:
     query = Property.query.filter(Property.deleted_at.is_(None))
     if city_id:

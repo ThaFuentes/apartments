@@ -156,24 +156,9 @@ def join(token):
 def home():
     if current_user.role == "viewer":
         return redirect("/reports")
-    sites = (
-        Property.query.filter(Property.deleted_at.is_(None))
-        .order_by(Property.name.asc())
-        .all()
-    )
-    trips = (
-        Trip.query.filter(Trip.deleted_at.is_(None))
-        .order_by(Trip.id.desc())
-        .limit(6)
-        .all()
-    )
-    jobs = (
-        Job.query.filter(Job.deleted_at.is_(None))
-        .order_by(Job.id.desc())
-        .limit(8)
-        .all()
-    )
-    return render_template("home.html", sites=sites, trips=trips, jobs=jobs, msg_key=_new_key())
+    from app.services.browse import home_board
+
+    return render_template("home.html", board=home_board(current_user.id), msg_key=_new_key())
 
 
 @bp.post("/sites")
