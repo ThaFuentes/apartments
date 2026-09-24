@@ -3,9 +3,24 @@
 {% block main %}
 <section class="sheet">
   <div class="hero">
-    <h1>Plan today</h1>
-    <p class="lead">Search for the places you're actually going. Only the ones you tap get added.</p>
+    <h1>Make a plan</h1>
+    <p class="lead">Pick a property you already have and say what needs doing. That saves the plan.</p>
   </div>
+  <form method="post" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <label>Day <input type="date" name="day" value="{{ today }}"></label>
+    <label>Property
+      <select name="property_id" required>
+        <option value="">Choose</option>
+        {% for prop in properties %}
+        <option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>What to do <textarea name="work" required placeholder="Replace the AC"></textarea></label>
+    <button type="submit">Save this plan</button>
+  </form>
   <form method="post" class="stack" id="plan-form" data-place-search data-mode="many">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">

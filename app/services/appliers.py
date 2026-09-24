@@ -1582,6 +1582,19 @@ def apply_lookup_address(user, payload, source) -> dict:
 
 def apply_delete_property(user, payload, source) -> dict:
     source = _src(source)
+    ids = payload.get("property_ids") or []
+    if ids:
+        places = []
+        for raw_id in ids:
+            prop = db.session.get(Property, int(raw_id))
+            if not prop or prop.deleted_at:
+                continue
+            prop.deleted_at = utcnow()
+            audit(user.id, source, "delete", "property", prop.id, {"deleted_at": None}, {"deleted_at": prop.deleted_at.isoformat(), "name": prop.name})
+            places.append(property_place(prop))
+        if not places:
+            return {"ok": False, "reply": "Those are already gone."}
+        return {"ok": True, "reply": "Removed " + ", ".join(places) + "."}
     prop, missing = _property_match(payload)
     if not prop:
         return {"ok": False, "reply": missing}

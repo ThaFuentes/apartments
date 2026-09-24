@@ -379,7 +379,7 @@ def _given_property_address(text: str) -> dict | None:
         if zip_code:
             address = f"{address} {zip_code}"
     name = re.sub(
-        r"\b(please|can|you|add|create|save|put|this|the|a|an|property|properties|place|site|sites|name|called|named|is|its|it's|new|my|list|to)\b",
+        r"\b(please|can|you|add|create|save|put|edit|update|change|correct|this|the|a|an|property|properties|place|site|sites|name|called|named|is|its|it's|new|my|list|to)\b",
         " ",
         head,
         flags=re.I,
@@ -908,6 +908,12 @@ def _from_model(user, text: str, key: str, source: str):
     heard = collect_tool_calls(user, text)
     if not heard:
         return None
+    edited = _file_edit(user, text, key, source)
+    if edited:
+        return edited
+    removed = _file_remove(user, text, key, source)
+    if removed:
+        return removed
     if not _is_trip_plan(text):
         given = _given_property_address(text)
         if given:
@@ -1160,6 +1166,12 @@ def _file_named_unit(user, text: str, key: str, source: str):
 
 
 def _local_fallback(user, text: str, key: str, source: str, note: str) -> dict:
+    edited = _file_edit(user, text, key, source)
+    if edited:
+        return edited
+    removed = _file_remove(user, text, key, source)
+    if removed:
+        return removed
     person = _person_to_add(user, text, key, source)
     if person:
         return person
@@ -1889,47 +1901,115 @@ def _appliance_place(text: str) -> dict | None:
     }
 
 
+def _is_edit(text: str) -> bool:
+    return bool(re.search(r"\b(edit|update|change|correct)\b", text or "", re.I))
+
+
 def _property_delete(text: str) -> dict | None:
     raw = (text or "").strip()
-    if not re.search(r"\b(delete|remove)\b", raw, re.I):
+    if not re.search(r"\b(delete|remove|removed|removing)\b", raw, re.I):
         return None
-    if re.search(r"\b(plan|plans|trip|trips|job|jobs|unit|units|expense|expenses|miles)\b", raw, re.I):
+    if re.search(r"\b(plan|plans|trip|trips|job|jobs|unit|units|expense|expenses|miles|work)\b", raw, re.I):
         return None
+    delete_all = bool(re.search(r"\b(all|every)\b", raw, re.I))
     cleaned = re.sub(
-        r"\b(please|delete|remove|the|my|our|this|that|property|properties|site|sites|place|places|apartment|apartments)\b",
+        r"\b(please|delete|remove|removed|removing|the|my|our|this|that|all|every|property|properties|site|sites|place|places|apartment|apartments)\b",
         " ",
         raw,
         flags=re.I,
     )
-    cleaned = _clean_slot(cleaned)
-    if not cleaned:
+    name = _clean_slot(cleaned)
+    if not name or name.lower() in {"all", "every"}:
         return None
-    slots = _slots_from_destination(cleaned)
-    name = slots.get("property_name") or slots.get("place") or cleaned
-    if not name:
-        return None
-    return {"property_name": name, "city": slots.get("city") or "", "region": slots.get("region") or ""}
+    return {"property_name": name, "delete_all": delete_all}
 
 
 def _ask_remove(user, parsed: dict, key: str, source: str) -> dict:
-    from app.services.appliers import _property_match
     from app.services.pending import propose
-    from app.services.records import property_place
+    from app.services.records import fuzzy_properties, properties_like, property_place
 
-    prop, missing = _property_match(parsed)
-    if not prop:
-        return {"ok": False, "reply": missing}
-    place = property_place(prop)
+    hint = (parsed.get("property_name") or "").strip()
+    if parsed.get("delete_all"):
+        matches = properties_like(hint)
+        if not matches:
+            return {"ok": False, "reply": f"No property named {hint}."}
+        lines = "\n".join(property_place(prop) for prop in matches)
+        if len(matches) == 1:
+            summary = f"Remove {property_place(matches[0])}? Say yes."
+            payload = {"property_id": matches[0].id}
+        else:
+            summary = f"Remove all {len(matches)} {hint} apartments?\n{lines}\nSay yes."
+            payload = {"property_ids": [prop.id for prop in matches]}
+        return propose(user, "delete_property", payload, summary, "material", key, key, source)
+    matches = fuzzy_properties(hint)
+    if not matches:
+        return {"ok": False, "reply": f"No property named {hint}."}
+    if len(matches) > 1:
+        lines = "\n".join(property_place(prop) for prop in matches)
+        return {
+            "ok": True,
+            "reply": f"There is more than one {hint}. Say the city, or say delete all {hint}.\n{lines}",
+        }
+    place = property_place(matches[0])
     return propose(
         user,
         "delete_property",
-        {"property_id": prop.id},
+        {"property_id": matches[0].id},
         f"Remove {place}? Say yes.",
         "material",
         key,
         key,
         source,
     )
+
+
+def _file_remove(user, text: str, key: str, source: str):
+    parsed = _property_delete(text)
+    if not parsed:
+        return None
+    _close_questions(user)
+    return _ask_remove(user, parsed, key, source)
+
+
+def _file_edit(user, text: str, key: str, source: str):
+    """Edit the property she named. Do not create a second one."""
+    if not _is_edit(text):
+        return None
+    if re.search(r"\b(plan|trip)\b", text or "", re.I) and not re.search(r"\b(address|addy|property)\b", text or "", re.I):
+        return None
+    from app.services.pending import commit_apply
+    from app.services.records import fuzzy_properties, property_place
+
+    parsed = _given_property_address(text) or {}
+    typed = _typed_address(text) or {}
+    if typed.get("address") and not parsed.get("address"):
+        parsed = {**parsed, "address": typed["address"]}
+    hint = parsed.get("property_name") or typed.get("property_name") or ""
+    if not hint:
+        cleaned = re.sub(
+            r"\b(please|edit|update|change|correct|the|this|my|property|properties|apartment|apartments|address|addy|name)\b",
+            " ",
+            text or "",
+            flags=re.I,
+        )
+        hint = _tidy_place(_clean_slot(cleaned))
+    if not hint:
+        return {"ok": True, "reply": "Which property should I edit?"}
+    matches = fuzzy_properties(hint)
+    if not matches:
+        return {"ok": False, "reply": f"I don't have {hint} yet, so I didn't create one. Say add {hint} if it is new."}
+    if len(matches) > 1:
+        lines = "\n".join(property_place(prop) for prop in matches)
+        return {"ok": True, "reply": f"Which {hint} should I edit?\n{lines}"}
+    prop = matches[0]
+    payload = {"property_id": prop.id}
+    if parsed.get("address"):
+        payload["address"] = parsed["address"]
+    if parsed.get("city"):
+        payload["city"] = parsed["city"]
+        payload["region"] = parsed.get("region") or ""
+    _close_questions(user)
+    return commit_apply(user, "update_property", payload, source, key)
 
 
 def _typed_address(text: str) -> dict | None:

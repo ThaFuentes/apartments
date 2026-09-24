@@ -161,6 +161,22 @@ def find_properties(name: str, city_name: str = "") -> list[Property]:
     return q.order_by(Property.id.asc()).all()
 
 
+def properties_like(hint: str) -> list[Property]:
+    """Every saved property whose name contains the hint, such as every Bentwood."""
+    from app.services.geo import city_parts, place_title
+
+    hint = re.sub(r"[^a-z0-9 ]", "", (hint or "").lower()).strip()
+    if len(hint) < 4:
+        return []
+    found = []
+    for prop in Property.query.filter(Property.deleted_at.is_(None)).all():
+        city_name, state = city_parts(prop.city.name, prop.city.region) if prop.city else ("", "")
+        title = place_title(prop.name, city_name, state).lower()
+        if hint == title or title.startswith(hint) or hint in title:
+            found.append(prop)
+    return found
+
+
 def fuzzy_properties(hint: str) -> list[Property]:
     """brookv matches Brookview. A short name does not have to be typed exactly."""
     from app.services.geo import city_parts, place_title

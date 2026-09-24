@@ -89,15 +89,16 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="idempotency_key" value="log-{{ msg_key }}">
       <label>Property
-        <input data-search autocomplete="off" placeholder="Type two letters of the name">
+        <input data-search autocomplete="off" placeholder="Type two letters, then tap the property">
       </label>
       <div class="search-results" data-results></div>
       <input type="hidden" name="property_id" data-property-id value="">
-      <p data-chosen class="lead"></p>
-      <label>Not in the list
-        <input name="new_name" autocomplete="off" placeholder="Property name">
-      </label>
-      <label>City <input name="new_city" autocomplete="off"></label>
+      <p data-chosen class="lead" hidden></p>
+      <div data-new-place>
+        <p class="hint">Use this only when the property is not saved yet.</p>
+        <label>Property name <input name="new_name" data-name autocomplete="off"></label>
+        <label>City <input name="new_city" data-city autocomplete="off"></label>
+      </div>
       <label>Unit number <input name="unit_number" autocomplete="off" placeholder="Only if you have it"></label>
       <label>What you did <input name="title" required placeholder="What happened"></label>
       <button type="submit">Save this work</button>

@@ -73,10 +73,19 @@
                   picked.appendChild(block);
                 } else if (hidden) {
                   hidden.value = row.id;
-                  if (chosen) chosen.textContent = row.name + (row.city ? " · " + row.city : "");
+                  if (chosen) {
+                    chosen.hidden = false;
+                    chosen.textContent = row.name + (row.city ? " · " + row.city : "");
+                  }
+                  const nameBox = root.querySelector("[data-name]");
+                  const cityBox = root.querySelector("[data-city]");
+                  if (nameBox) nameBox.value = row.name || "";
+                  if (cityBox) cityBox.value = row.city || "";
+                  const extra = root.querySelector("[data-new-place]");
+                  if (extra) extra.hidden = true;
                 }
                 results.innerHTML = "";
-                input.value = "";
+                input.value = row.name || "";
               });
               results.appendChild(button);
             });

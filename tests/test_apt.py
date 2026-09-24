@@ -1460,6 +1460,73 @@ Lubbock — 2 outside compressor installs"""
         self.assertEqual(keys_for(user)[0].use_order, 1)
         self.assertEqual(keys_for(user)[1].use_order, 2)
 
+    def test_delete_all_edit_and_a_plan_you_can_save(self):
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Bentwood", "Odessa", "Texas", user.id, address="1 Main St")
+        ensure_property("Bentwood", "Lubbock", "Texas", user.id, address="2 Main St")
+        wood = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={
+                "ok": True,
+                "text": "Added a new Bentwood.",
+                "calls": [{"name": "upsert_property", "args": {"property_name": "Bentwood", "city": "Dallas"}}],
+            },
+        ):
+            asked = handle_message(user, "delete all bentwood apartments", idempotency_key="del-all")
+            self.assertNotIn("named all", asked["reply"].lower())
+            self.assertIn("Say yes", asked["reply"])
+            self.assertIn("Odessa", asked["reply"])
+            self.assertIn("Lubbock", asked["reply"])
+            self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 3)
+            done = handle_message(user, "yes", idempotency_key="del-all-yes")
+            self.assertIn("Removed", done["reply"])
+            self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+            edited = handle_message(
+                user,
+                "edit woodview the address is 4330 N Grandview Ave Odessa Texas",
+                idempotency_key="edit-w",
+            )
+        self.assertIn("Updated", edited["reply"])
+        self.assertNotIn("Added", edited["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        db.session.refresh(wood)
+        self.assertIn("4330 N Grandview", wood.address)
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        home = client.get("/")
+        self.assertNotIn(b"Not in the list", home.data)
+        self.assertIn(b"data-name", home.data)
+        plan = client.get("/plan")
+        self.assertEqual(plan.status_code, 200)
+        self.assertIn(b"Make a plan", plan.data)
+        self.assertIn(b"Woodview", plan.data)
+        trips = client.get("/trips")
+        self.assertIn(b"Make a plan", trips.data)
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        saved = client.post(
+            "/plan",
+            data={"csrf_token": token, "day": "2026-09-24", "property_id": str(wood.id), "work": "Replace the AC"},
+            follow_redirects=True,
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertIn(b"Replace the AC", saved.data)
+
 
 if __name__ == "__main__":
     unittest.main()

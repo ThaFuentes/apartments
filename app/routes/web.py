@@ -215,6 +215,9 @@ def plan_day():
 
     profile = profile_for()
     today = local_today(profile.timezone if profile else None).isoformat()
+    from app.models import Property
+
+    properties = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
     if request.method == "POST":
         stops = []
         ids = request.form.getlist("property_id")
@@ -247,7 +250,7 @@ def plan_day():
             stops.append({"property_name": new_name, "city": new_city, "region": "", "items": items})
         if not stops:
             flash("Search for a property and tap it. Nothing was added.", "warn")
-            return render_template("plan.html", today=today, msg_key=_new_key())
+            return render_template("plan.html", today=today, properties=properties, msg_key=_new_key())
         result = commit_apply(
             current_user,
             "plan_day",
@@ -259,7 +262,7 @@ def plan_day():
         if result.get("trip_id"):
             return redirect(f"/trips/{result['trip_id']}")
         return redirect("/trips")
-    return render_template("plan.html", today=today, msg_key=_new_key())
+    return render_template("plan.html", today=today, properties=properties, msg_key=_new_key())
 
 
 @bp.post("/log")
