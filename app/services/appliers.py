@@ -23,7 +23,7 @@ from app.models import (
     User,
 )
 from app.services.clock import local_today, money, next_named_day, utcnow
-from app.services.geo import geocode, haversine_miles
+from app.services.geo import geocode, haversine_miles, lookup_place
 from app.services.people import create_user, find_user
 from app.services.records import (
     CONFIDENCE_FLOOR,
@@ -65,6 +65,27 @@ def _trip_for(payload, user) -> Trip | None:
     )
 
 
+def _locate_property(prop: Property, name: str, city: str, region: str, given_address: str = "") -> str:
+    """Look the place up and keep the street only when it is in that city."""
+    given = (given_address or "").strip()
+    if given:
+        if given != (prop.address or ""):
+            prop.address = given[:300]
+        _pin_property(prop, given)
+        return prop.address or ""
+    if (prop.address or "").strip() and prop.lat is not None:
+        return prop.address
+    found = lookup_place(name, city, region)
+    if not found:
+        _pin_property(prop, "")
+        return prop.address or ""
+    prop.address = found["address"][:300]
+    if found.get("lat") is not None and found.get("lng") is not None:
+        prop.lat = found["lat"]
+        prop.lng = found["lng"]
+    return prop.address
+
+
 def _pin_property(prop: Property, address: str = "") -> None:
     if prop.lat is not None and prop.lng is not None and not address:
         return
@@ -99,7 +120,7 @@ def apply_plan_trip(user, payload, source) -> dict:
         lng=payload.get("lng"),
         source=source,
     )
-    _pin_property(prop, (payload.get("address") or "").strip())
+    _locate_property(prop, name, city, region, (payload.get("address") or "").strip())
     starts = payload.get("starts_on")
     if isinstance(starts, str) and len(starts) >= 10:
         from datetime import date
@@ -251,6 +272,8 @@ def _trip_sentence(prop, starts_on, purpose, miles, created_prop, updated, day_a
         line += f" {float(miles):g} miles."
     if created_prop:
         line += f" I added {prop.name} to your sites."
+    if prop.address:
+        line += f" Address: {prop.address}."
     if day_assumed and not updated:
         line += " I put it on today. Tell me the day if it's different."
     return line
@@ -460,11 +483,17 @@ def apply_upsert_property(user, payload, source) -> dict:
         lng=payload.get("lng"),
         source=source,
     )
-    _pin_property(prop, (payload.get("address") or "").strip())
+    address = _locate_property(prop, name, city, region, (payload.get("address") or "").strip())
+    where = prop.city.name if prop.city else city
+    if address:
+        reply = f"Added {prop.name} in {where}. {address}. That's the address on the map."
+    elif prop.lat is not None:
+        reply = f"Added {prop.name} in {where}. I found it in {where} on the map, but not a street number."
+    else:
+        reply = f"Added {prop.name} in {where}. I couldn't confirm a street address in {where}."
     return {
         "ok": True,
-        "reply": f"Added {prop.name} in {prop.city.name if prop.city else city}. It's on your sites."
-        + (" Pin saved." if prop.lat is not None else ""),
+        "reply": reply,
         "property_id": prop.id,
     }
 

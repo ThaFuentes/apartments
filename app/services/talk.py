@@ -324,11 +324,20 @@ def _slots_from_destination(body: str) -> dict:
         property_name = _clean_slot(body[: in_match.start()])
     else:
         words = [word for word in body.split() if word]
+        state_word = ""
+        if len(words) >= 3 and " ".join(words[-2:]).lower() in STATES:
+            state_word = " ".join(words[-2:])
+            words = words[:-2]
+        elif len(words) >= 2 and words[-1].lower() in STATES:
+            state_word = words[-1]
+            words = words[:-1]
         if len(words) >= 2:
             property_name = " ".join(words[:-1])
             city = words[-1]
         elif words:
             place = words[0]
+        if state_word and city:
+            city = f"{city} {state_word}"
     city, region = _split_state(city)
     return {
         "property_name": _tidy_place(property_name) if property_name else "",
@@ -681,15 +690,33 @@ def _miles_numbers(text: str) -> dict | None:
     return {"actual": number, "estimate": None, "stated": None}
 
 
+ITS_AT = re.compile(r"^(?:it(?:'s| is)|its)\s+at\s+(.+)$", re.I)
+
+
+def _named_place(text: str) -> dict | None:
+    match = ITS_AT.match((text or "").strip().rstrip("."))
+    if not match:
+        return None
+    slots = _slots_from_destination(match.group(1))
+    name = slots.get("property_name") or slots.get("place") or ""
+    city = slots.get("city") or ""
+    if not name or not city:
+        return None
+    return {"property_name": name, "city": city, "region": slots.get("region") or ""}
+
+
 def _direct_action(user, text: str, key: str, source: str):
     """A finished sentence is the action. An older question does not get to ask it again."""
+    named = _named_place(text)
     plan = _plan_delete(text)
     miles = _miles_numbers(text)
-    if not plan and not miles:
+    if not named and not plan and not miles:
         return None
     _close_questions(user)
     from app.services.pending import commit_apply
 
+    if named:
+        return commit_apply(user, "upsert_property", named, source, key)
     if plan:
         return commit_apply(user, "clear_plan", plan, source, key)
     bits = []
@@ -743,7 +770,7 @@ def _is_fresh_command(text: str) -> bool:
         return True
     if REPORT.search(raw) or SETTINGS.search(raw) or DELETE.search(raw):
         return True
-    if _plan_delete(raw) or _miles_numbers(raw):
+    if _plan_delete(raw) or _miles_numbers(raw) or _named_place(raw):
         return True
     return False
 

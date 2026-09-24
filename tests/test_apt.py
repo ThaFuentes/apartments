@@ -560,6 +560,64 @@ Lubbock — 2 outside compressor installs"""
         self.assertTrue(added.get("ok"))
         self.assertGreaterEqual(traveled_total(user.id), 102.0)
 
+    def test_place_lookup_keeps_the_city_she_named(self):
+        from app.services.geo import place_from_hits
+
+        rows = [
+            {
+                "lat": "32.0",
+                "lon": "-102.0",
+                "name": "Woodview Apartments",
+                "display_name": "Woodview Apartments, Midland, Texas",
+                "address": {"house_number": "1", "road": "Main St", "city": "Midland", "state": "Texas"},
+            },
+            {
+                "lat": "31.88",
+                "lon": "-102.36",
+                "name": "Woodview Apartments",
+                "display_name": "Woodview Apartments, 4101 East 42nd Street, Odessa, Texas",
+                "address": {
+                    "house_number": "4101",
+                    "road": "East 42nd Street",
+                    "city": "Odessa",
+                    "state": "Texas",
+                    "postcode": "79762",
+                },
+            },
+        ]
+        found = place_from_hits(rows, "Woodview", "Odessa", "TX")
+        self.assertIn("4101 East 42nd Street", found["address"])
+        self.assertIn("Odessa", found["address"])
+        self.assertNotIn("Midland", found["address"])
+        self.assertIsNone(place_from_hits(rows, "Woodview", "Lubbock", "TX"))
+        from app.services.geo import address_from_listings
+
+        page = (
+            "Woodview Apartments 4330 N Grandview Ave, Odessa, TX 79762 listing. "
+            "Woodview 4330 N Grandview Ave Odessa, TX 79762 again. "
+            "Other Place 10 Main St, Midland, TX 79701."
+        )
+        self.assertIn("4330 N Grandview Ave", address_from_listings(page, "Woodview", "Odessa", "TX"))
+        self.assertNotIn("Midland", address_from_listings(page, "Woodview", "Odessa", "TX"))
+        self.assertEqual(address_from_listings(page, "Woodview", "Lubbock", "TX"), "")
+
+    def test_its_at_saves_the_looked_up_address(self):
+        user = self.owner()
+        hit = {
+            "address": "4101 East 42nd Street, Odessa, TX 79762",
+            "lat": 31.88,
+            "lng": -102.36,
+            "label": "Woodview Apartments",
+        }
+        with patch("app.services.appliers.lookup_place", return_value=hit):
+            result = handle_message(user, "it's at woodview odessa texas", idempotency_key="addy")
+        self.assertIn("4101 East 42nd Street", result["reply"])
+        prop = Property.query.filter(db.func.lower(Property.name) == "woodview").one()
+        self.assertEqual(prop.city.name, "Odessa")
+        self.assertEqual(prop.city.region, "TX")
+        self.assertEqual(prop.address, hit["address"])
+        self.assertAlmostEqual(prop.lat, 31.88)
+
 
 if __name__ == "__main__":
     unittest.main()
