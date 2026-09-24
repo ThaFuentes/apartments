@@ -46,7 +46,7 @@ from app.services.pending import batch_confirm, confirm_id, confirm_property, di
 from app.services.people import create_user, find_user
 from app.services.records import audit, loads, open_shift, site_profile
 from app.services.reports import build_snapshot, load_snapshot, render_pdf, signature_ok
-from app.services.talk import handle_message, handle_photo
+from app.services.talk import clear_chat, handle_message, handle_photo
 
 bp = Blueprint("desk", __name__)
 
@@ -156,7 +156,47 @@ def join(token):
 def home():
     if current_user.role == "viewer":
         return redirect("/reports")
-    return render_template("chat_home.html")
+    sites = (
+        Property.query.filter(Property.deleted_at.is_(None))
+        .order_by(Property.name.asc())
+        .all()
+    )
+    trips = (
+        Trip.query.filter(Trip.deleted_at.is_(None))
+        .order_by(Trip.id.desc())
+        .limit(6)
+        .all()
+    )
+    jobs = (
+        Job.query.filter(Job.deleted_at.is_(None))
+        .order_by(Job.id.desc())
+        .limit(8)
+        .all()
+    )
+    return render_template("home.html", sites=sites, trips=trips, jobs=jobs, msg_key=_new_key())
+
+
+@bp.post("/sites")
+@login_required
+def add_site():
+    if current_user.role == "viewer":
+        abort(403)
+    from app.services.pending import commit_apply
+
+    name = (request.form.get("name") or "").strip()
+    city = (request.form.get("city") or "").strip()
+    if not name or not city:
+        flash("Need a property name and a city.", "warn")
+        return redirect("/")
+    result = commit_apply(
+        current_user,
+        "upsert_property",
+        {"property_name": name, "city": city, "region": (request.form.get("region") or "").strip()},
+        "human",
+        _key() or _new_key(),
+    )
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect("/")
 
 
 @bp.get("/api/places")
@@ -287,6 +327,17 @@ def chat():
     if request.is_json or request.headers.get("Accept") == "application/json":
         return jsonify(result)
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect("/")
+
+
+@bp.post("/chat/new")
+@login_required
+def chat_new():
+    if current_user.role == "viewer":
+        abort(403)
+    result = clear_chat(current_user)
+    if request.headers.get("Accept") == "application/json":
+        return jsonify(result)
     return redirect("/")
 
 

@@ -81,10 +81,13 @@
   const panel = document.getElementById("chat-panel");
   const openChat = document.getElementById("chat-open");
   const closeChat = document.getElementById("chat-close");
+  const newChat = document.getElementById("chat-new");
   function setChat(open) {
     if (!panel || !openChat) return;
     panel.hidden = !open;
-    openChat.classList.toggle("is-open", open);
+    panel.classList.toggle("is-open", !!open);
+    openChat.hidden = !!open;
+    openChat.setAttribute("aria-expanded", open ? "true" : "false");
     if (open) {
       const box = panel.querySelector("textarea");
       if (box) box.focus();
@@ -94,6 +97,20 @@
   }
   if (openChat) openChat.addEventListener("click", function () { setChat(true); });
   if (closeChat) closeChat.addEventListener("click", function () { setChat(false); });
+  if (newChat) {
+    newChat.addEventListener("click", function () {
+      fetch("/chat/new", {
+        method: "POST",
+        headers: { "X-CSRF-Token": token, Accept: "application/json" }
+      }).catch(function () {});
+      const thread = document.getElementById("thread");
+      if (thread) {
+        thread.innerHTML = "";
+        addBubble("assistant", "New chat. Tell me what you're doing.");
+      }
+    });
+  }
+  setChat(false);
 
   function addBubble(role, text) {
     const thread = document.getElementById("thread");

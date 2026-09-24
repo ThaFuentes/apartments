@@ -12,14 +12,14 @@ from sqlalchemy import text
 
 from app import create_app
 from app.builddb.builddb import db
-from app.models import ApiCredential, City, Expense, Job, PendingAction, Property, Report, Shift, Trip, Unit, User
+from app.models import ApiCredential, ChatMessage, City, Expense, Job, PendingAction, Property, Report, Shift, Trip, Unit, User
 from app.services.clock import utcnow
 from app.services.crypto import encrypt_text
 from app.services.gemini import pick_free_model
 from app.services.people import create_user
 from app.services.reports import signature_ok, sign_report
 from app.services.share import enforce_share
-from app.services.talk import handle_message
+from app.services.talk import clear_chat, handle_message
 
 APP = create_app()
 
@@ -461,6 +461,13 @@ Lubbock — 2 outside compressor installs"""
         done = handle_message(user, "12", idempotency_key="unit12")
         self.assertEqual(Job.query.count(), 1)
         self.assertIn("12", done["reply"])
+
+    def test_new_chat_clears_the_thread(self):
+        user = self.owner()
+        handle_message(user, "add park place from lubbock texas to my sites", idempotency_key="park")
+        self.assertGreater(ChatMessage.query.filter_by(user_id=user.id).count(), 0)
+        clear_chat(user)
+        self.assertEqual(ChatMessage.query.filter_by(user_id=user.id).count(), 0)
 
 
 if __name__ == "__main__":

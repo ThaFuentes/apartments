@@ -1,14 +1,11 @@
-<button type="button" class="chat-fab" id="chat-open">Chat</button>
+<button type="button" class="chat-fab" id="chat-open" aria-expanded="false" aria-controls="chat-panel">Chat</button>
 <section class="chat-panel" id="chat-panel" hidden>
   <header class="chat-bar">
-    <div class="peer">
-      <span class="avatar" aria-hidden="true">A</span>
-      <div>
-        <strong>Apt</strong>
-        <small>Chat</small>
-      </div>
+    <strong>Chat</strong>
+    <div class="chat-actions">
+      <button type="button" class="quiet" id="chat-new">New</button>
+      <button type="button" class="quiet" id="chat-close">Close</button>
     </div>
-    <button type="button" class="ghost" id="chat-close">Close</button>
   </header>
   {% include "chat_thread.html" %}
 </section>

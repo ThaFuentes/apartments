@@ -84,6 +84,12 @@ def _save_chat(user, role: str, body: str) -> None:
     db.session.commit()
 
 
+def clear_chat(user) -> dict:
+    ChatMessage.query.filter_by(user_id=user.id).delete()
+    db.session.commit()
+    return {"ok": True, "reply": "New chat."}
+
+
 def handle_message(user, text: str, *, idempotency_key: str, source: str = "ai") -> dict:
     text = (text or "").strip()
     if not text:

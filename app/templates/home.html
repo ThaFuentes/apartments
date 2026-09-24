@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <h1>Home</h1>
+    <p class="lead">Chat is the button. This page is the record: open a site, a trip, or add it yourself.</p>
+  </div>
+
+  <h2>Add a site</h2>
+  <form method="post" action="/sites" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="site-{{ msg_key }}">
+    <label>Property name <input name="name" required autocomplete="off"></label>
+    <label>City <input name="city" required autocomplete="off"></label>
+    <label>State <input name="region" autocomplete="off" maxlength="32"></label>
+    <button type="submit">Save site</button>
+  </form>
+
+  <h2>Your sites</h2>
+  {% if not sites %}
+  <p class="empty">No sites yet. Save one above, or say it in Chat.</p>
+  {% else %}
+  <ul class="list">
+    {% for site in sites %}
+    <li>
+      <a href="/properties/{{ site.id }}">
+        <strong>{{ site.name }}</strong>
+        <span class="hint">{{ site.city.name if site.city else "" }}{% if site.city and site.city.region %} {{ site.city.region }}{% endif %}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <h2>Log work</h2>
+  <form method="post" action="/log" class="card stack" data-place-search data-mode="one">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="log-{{ msg_key }}">
+    <label>Property
+      <input data-search autocomplete="off" placeholder="Type two letters of the name">
+    </label>
+    <div class="search-results" data-results></div>
+    <input type="hidden" name="property_id" data-property-id value="">
+    <p data-chosen class="lead"></p>
+    <label>Not in the list
+      <input name="new_name" autocomplete="off" placeholder="Property name">
+    </label>
+    <label>City <input name="new_city" autocomplete="off"></label>
+    <label>Unit number <input name="unit_number" autocomplete="off" placeholder="Only if you have it"></label>
+    <label>What you did <input name="title" required placeholder="What happened"></label>
+    <button type="submit">Save this work</button>
+  </form>
+
+  <h2>Trips</h2>
+  {% if not trips %}
+  <p class="empty">No trips yet.</p>
+  {% else %}
+  <ul class="list">
+    {% for trip in trips %}
+    <li>
+      <a href="/trips/{{ trip.id }}">
+        <strong>{{ trip.title }}</strong>
+        <span class="hint">{{ trip.starts_on or "" }}{% if trip.purpose %} · {{ trip.purpose }}{% endif %}{% if trip.miles_estimate %} · {{ trip.miles_estimate|round|int }} mi{% endif %}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p><a href="/trips">All trips</a> · <a href="/plan">Plan today</a></p>
+
+  <h2>Work logged</h2>
+  {% if not jobs %}
+  <p class="empty">Nothing logged yet.</p>
+  {% else %}
+  <ul class="list">
+    {% for job in jobs %}
+    <li>
+      <a href="/properties/{{ job.property_id }}">
+        <strong>{{ job.title }}</strong>
+        <span class="hint">{{ job.status }}{% if job.unit %} · unit {{ job.unit.unit_number }}{% endif %}{% if job.property %} · {{ job.property.name }}{% endif %}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}
