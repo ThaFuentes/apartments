@@ -534,13 +534,14 @@ def apply_upsert_property(user, payload, source) -> dict:
         source=source,
     )
     address = _locate_property(prop, name, city, region, (payload.get("address") or "").strip())
-    where = prop.city.name if prop.city else city
+    where = property_place(prop)
+    city_name = prop.city.name if prop.city else city
     if address:
-        reply = f"Added {prop.name} in {where}. {address}. That's the address on the map."
+        reply = f"Added {where}. {address}."
     elif prop.lat is not None:
-        reply = f"Added {prop.name} in {where}. I found it in {where} on the map, but not a street number."
+        reply = f"Added {where}. I couldn't find a street number online. Say: update {prop.name} in {city_name} with the full address."
     else:
-        reply = f"Added {prop.name} in {where}. I couldn't confirm a street address in {where}."
+        reply = f"Added {where}. I couldn't find a street address online. Say: update {prop.name} in {city_name} with the full address."
     return {
         "ok": True,
         "reply": reply,
@@ -1314,15 +1315,37 @@ def _property_match(payload) -> tuple[Property | None, str]:
     city = (payload.get("city") or "").strip()
     if not name:
         return None, "Which property?"
-    rows = Property.query.filter(Property.deleted_at.is_(None), Property.name.ilike(f"%{name}%")).all()
+    catalog = Property.query.filter(Property.deleted_at.is_(None)).all()
+    skip = {"the", "and", "apartment", "apartments", "property", "properties", "please"}
+    words = [word for word in re.findall(r"[a-z0-9]+", name.lower()) if word not in skip and len(word) > 2]
+    city_words = [word for word in words if any(row.city and word == row.city.name.lower() for row in catalog)]
     if city:
-        rows = [row for row in rows if row.city and row.city.name.lower() == city.lower()]
+        city_words.append(city.lower())
+    name_words = [word for word in words if word not in city_words]
+    rows = []
+    for row in catalog:
+        label = row.name.lower()
+        town = row.city.name.lower() if row.city else ""
+        if city_words and not any(word == town or word in town for word in city_words):
+            continue
+        if name_words and not any(word in label for word in name_words):
+            continue
+        if not name_words and not city_words:
+            continue
+        rows.append(row)
     exact = [row for row in rows if row.name.lower() == name.lower()]
     rows = exact or rows
     if not rows:
         return None, f"No property named {name}."
     if len(rows) > 1:
-        bits = [f"{row.id} {row.name} in {row.city.name if row.city else ''}" for row in rows[:6]]
+        from app.services.geo import state_name
+
+        bits = []
+        for row in rows[:6]:
+            city = row.city.name if row.city else ""
+            state = state_name(row.city.region) if row.city else ""
+            where = ", ".join(bit for bit in (city, state) if bit)
+            bits.append(f"{row.name} in {where}" if where else row.name)
         return None, "More than one match: " + "; ".join(bits) + "."
     return rows[0], ""
 
@@ -1371,7 +1394,22 @@ def apply_update_property(user, payload, source) -> dict:
         region = (payload.get("region") or (prop.city.region if prop.city else "") or "").strip()
         prop.city = ensure_city(city, region, user.id)
     if payload.get("address") is not None and str(payload.get("address")).strip():
-        prop.address = str(payload["address"]).strip()[:300]
+        from app.services.geo import state_name
+
+        address = re.sub(
+            r"\b(TX|OK|NM|LA|AR|CO|KS)\b",
+            lambda match: state_name(match.group(1)),
+            str(payload["address"]).strip(),
+            flags=re.I,
+        )
+        state = state_name(prop.city.region) if prop.city else ""
+        city_name = prop.city.name if prop.city else ""
+        if state and state.lower() not in address.lower():
+            if city_name and city_name.lower() not in address.lower():
+                address = f"{address}, {city_name}, {state}"
+            else:
+                address = f"{address}, {state}"
+        prop.address = address[:300]
         _pin_property(prop, prop.address)
     audit(user.id, source, "update", "property", prop.id, before, {"name": prop.name, "address": prop.address})
     where = property_place(prop)

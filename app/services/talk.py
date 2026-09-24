@@ -54,13 +54,20 @@ ADD_SITE = re.compile(
     re.I,
 )
 STATES = {
-    "texas": "TX",
-    "oklahoma": "OK",
-    "new mexico": "NM",
-    "louisiana": "LA",
-    "arkansas": "AR",
-    "colorado": "CO",
-    "kansas": "KS",
+    "texas": "Texas",
+    "tx": "Texas",
+    "oklahoma": "Oklahoma",
+    "ok": "Oklahoma",
+    "new mexico": "New Mexico",
+    "nm": "New Mexico",
+    "louisiana": "Louisiana",
+    "la": "Louisiana",
+    "arkansas": "Arkansas",
+    "ar": "Arkansas",
+    "colorado": "Colorado",
+    "co": "Colorado",
+    "kansas": "Kansas",
+    "ks": "Kansas",
 }
 ADD_USER = re.compile(
     r"\b(?:add|invite|give)\s+(?:my\s+)?(?:a\s+)?(viewer|boss|user|field|read-only|readonly)\s+([a-z0-9][a-z0-9._-]{1,40})",
@@ -243,6 +250,18 @@ def _from_model(user, text: str, key: str, source: str):
     wanted = _address_she_wants(text)
     if wanted:
         return _online_address(wanted)
+    typed = _typed_address(text)
+    if typed:
+        _close_questions(user)
+        return _save_typed_address(user, typed, key, source)
+    gone = _property_delete(text)
+    if gone:
+        _close_questions(user)
+        return _ask_remove(user, gone, key, source)
+    named = _named_place(text)
+    if named:
+        _close_questions(user)
+        return commit_apply(user, "upsert_property", named, source, key)
     place = _place_she_named(text)
     if place:
         _close_questions(user)
@@ -981,6 +1000,67 @@ def _property_delete(text: str) -> dict | None:
     return {"property_name": name, "city": slots.get("city") or "", "region": slots.get("region") or ""}
 
 
+def _ask_remove(user, parsed: dict, key: str, source: str) -> dict:
+    from app.services.appliers import _property_match
+    from app.services.pending import propose
+    from app.services.records import property_place
+
+    prop, missing = _property_match(parsed)
+    if not prop:
+        return {"ok": False, "reply": missing}
+    place = property_place(prop)
+    return propose(
+        user,
+        "delete_property",
+        {"property_id": prop.id},
+        f"Remove {place}? Say yes.",
+        "material",
+        key,
+        key,
+        source,
+    )
+
+
+def _typed_address(text: str) -> dict | None:
+    raw = (text or "").strip().rstrip(".")
+    if not re.search(r"\b(update|set|change|correct|address|addy)\b", raw, re.I):
+        return None
+    found = re.search(r"(\d{2,6}\s+[A-Za-z0-9.'#\- ]{2,80})", raw)
+    if not found:
+        return None
+    from app.services.geo import state_name
+
+    address = re.sub(r"\b(TX|OK|NM|LA|AR|CO|KS)\b", lambda match: state_name(match.group(1)), found.group(1), flags=re.I)
+    address = re.sub(r"\s+", " ", address).strip(" .,")
+    head = raw[: found.start()]
+    hint = re.sub(
+        r"\b(please|update|set|change|correct|the|this|full|apartment|apartments|property|properties|with|address|addy|to|in|at|for)\b",
+        " ",
+        head,
+        flags=re.I,
+    )
+    hint = _clean_slot(hint)
+    if not hint:
+        return None
+    return {"property_name": hint, "address": address}
+
+
+def _save_typed_address(user, parsed: dict, key: str, source: str) -> dict:
+    from app.services.appliers import _property_match
+    from app.services.pending import commit_apply
+
+    prop, missing = _property_match({"property_name": parsed["property_name"]})
+    if not prop:
+        return {"ok": False, "reply": missing}
+    return commit_apply(
+        user,
+        "update_property",
+        {"property_id": prop.id, "address": parsed["address"]},
+        source,
+        key,
+    )
+
+
 def _property_rename(text: str) -> dict | None:
     raw = (text or "").strip().rstrip(".")
     match = re.search(r"\brename\s+(.+?)\s+to\s+(.+)$", raw, re.I)
@@ -1031,7 +1111,7 @@ def _direct_action(user, text: str, key: str, source: str):
     if work or gear:
         return commit_apply(user, "log_work", work or gear, source, key)
     if gone:
-        return commit_apply(user, "delete_property", gone, source, key)
+        return _ask_remove(user, gone, key, source)
     if renamed:
         return commit_apply(user, "update_property", renamed, source, key)
     if named:

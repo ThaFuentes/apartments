@@ -2,7 +2,7 @@
 {% block title %}{{ prop.name }}{% endblock %}
 {% block main %}
 <section class="sheet">
-  <p><a href="/places{% if prop.city_id %}/{{ prop.city_id }}{% endif %}">{{ prop.city.name if prop.city else "Places" }}{% if prop.city and prop.city.region %}, {{ prop.city.region }}{% endif %}</a></p>
+  <p><a href="/places{% if prop.city_id %}/{{ prop.city_id }}{% endif %}">{{ prop.city.name if prop.city else "Places" }}{% if prop.city and prop.city.region %}, {{ prop.city.region|full_state }}{% endif %}</a></p>
   <h1>{{ prop.name }}</h1>
   <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} logged here.</p>
   <label class="find-unit">Find a unit
@@ -46,7 +46,7 @@
     <input type="hidden" name="idempotency_key" value="edit-{{ msg_key }}">
     <label>Name <input name="name" value="{{ prop.name }}" required></label>
     <label>City <input name="city" value="{{ prop.city.name if prop.city else '' }}" required></label>
-    <label>State <input name="region" value="{{ prop.city.region if prop.city else '' }}"></label>
+    <label>State <input name="region" value="{{ prop.city.region|full_state if prop.city else '' }}"></label>
     <label>Address <input name="address" value="{{ prop.address }}"></label>
     <button type="submit">Save</button>
   </form>

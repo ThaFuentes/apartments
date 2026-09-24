@@ -71,6 +71,12 @@ def create_app() -> Flask:
             return ""
         return _local_moment(value).strftime("%I:%M %p").lstrip("0")
 
+    @app.template_filter("full_state")
+    def full_state(value):
+        from app.services.geo import state_name
+
+        return state_name(value or "")
+
     @app.template_filter("apt_when")
     def apt_when(value):
         if not value:

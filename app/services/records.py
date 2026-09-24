@@ -110,21 +110,31 @@ def match_unit(property_id: int, number: str) -> tuple[Unit | None, Unit | None]
 
 
 def find_city(name: str, region: str = "") -> City | None:
+    from app.services.geo import state_name
+
     name = (name or "").strip()
     if not name:
         return None
-    q = City.query.filter(db.func.lower(City.name) == name.lower())
-    region = (region or "").strip()
-    if region:
-        q = q.filter(db.func.lower(City.region) == region.lower())
-    return q.order_by(City.id.asc()).first()
+    rows = City.query.filter(db.func.lower(City.name) == name.lower()).order_by(City.id.asc()).all()
+    region = state_name(region)
+    if not region:
+        return rows[0] if rows else None
+    for row in rows:
+        if state_name(row.region).lower() == region.lower():
+            return row
+    return None
 
 
 def ensure_city(name: str, region: str, actor_id: int | None, source: str = "human") -> City:
+    from app.services.geo import state_name
+
+    region = state_name(region)
     row = find_city(name, region)
     if row:
+        if region and row.region != region:
+            row.region = region
         return row
-    row = City(name=name.strip(), region=(region or "").strip(), created_by_id=actor_id, created_at=utcnow())
+    row = City(name=name.strip(), region=region, created_by_id=actor_id, created_at=utcnow())
     db.session.add(row)
     db.session.flush()
     audit(actor_id, source, "create", "city", row.id, {}, {"name": row.name, "region": row.region})
@@ -207,10 +217,16 @@ def open_shift(user: User) -> Shift | None:
 
 
 def property_place(prop: Property | None) -> str:
+    from app.services.geo import state_name
+
     if not prop:
         return "this property"
     city = prop.city.name if prop.city else ""
-    return f"{prop.name} {city}".strip()
+    state = state_name(prop.city.region) if prop.city else ""
+    where = ", ".join(bit for bit in (city, state) if bit)
+    if where:
+        return f"{prop.name} in {where}"
+    return prop.name
 
 
 def shift_question(shift: Shift) -> str:

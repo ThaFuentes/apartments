@@ -4,7 +4,7 @@
 <section class="sheet">
   {% if city %}
   <p><a href="/places">All places</a></p>
-  <h1>{{ city.name }}{% if city.region %}, {{ city.region }}{% endif %}</h1>
+  <h1>{{ city.name }}{% if city.region %}, {{ city.region|full_state }}{% endif %}</h1>
   {% else %}
   <h1>Places</h1>
   <p class="lead">Open a location to see the units, what was done, and the equipment.</p>

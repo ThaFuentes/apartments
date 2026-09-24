@@ -32,14 +32,28 @@ def haversine_meters(lat1, lng1, lat2, lng2) -> float | None:
 
 
 _STATE = {
-    "tx": "texas",
-    "ok": "oklahoma",
-    "nm": "new mexico",
-    "la": "louisiana",
-    "ar": "arkansas",
-    "co": "colorado",
-    "ks": "kansas",
+    "tx": "Texas",
+    "texas": "Texas",
+    "ok": "Oklahoma",
+    "oklahoma": "Oklahoma",
+    "nm": "New Mexico",
+    "new mexico": "New Mexico",
+    "la": "Louisiana",
+    "louisiana": "Louisiana",
+    "ar": "Arkansas",
+    "arkansas": "Arkansas",
+    "co": "Colorado",
+    "colorado": "Colorado",
+    "ks": "Kansas",
+    "kansas": "Kansas",
 }
+
+
+def state_name(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    return _STATE.get(text.lower(), text)
 
 
 def geocode_enabled() -> bool:
@@ -80,8 +94,7 @@ def _state_ok(region: str, found: str) -> bool:
     found = (found or "").strip().lower()
     if not region or not found:
         return True
-    full = _STATE.get(region, region)
-    return found == region or found == full or _STATE.get(found, found) == full
+    return state_name(region).lower() == state_name(found).lower()
 
 
 def place_from_hits(rows: list, name: str, city: str, region: str = "") -> dict | None:
@@ -118,7 +131,7 @@ def place_from_hits(rows: list, name: str, city: str, region: str = "") -> dict 
         if not street or score <= best_score:
             continue
         if score > best_score:
-            state = (region or "").strip().upper() if len((region or "").strip()) <= 3 else (addr.get("state") or "")
+            state = state_name(addr.get("state") or region)
             tail = ", ".join(bit for bit in (place_city or city, state, (addr.get("postcode") or "").strip()) if bit)
             try:
                 lat = float(row["lat"])
@@ -132,35 +145,33 @@ def place_from_hits(rows: list, name: str, city: str, region: str = "") -> dict 
 
 _STREET = re.compile(
     r"(\d{2,6}\s+[A-Za-z0-9.'\- ]{2,42}?(?:Ave|Avenue|St|Street|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Pkwy|Parkway|Ct|Court)\.?)"
-    r"(?:\s*,?\s*([A-Za-z .'-]{2,40}?)\s*,?\s*([A-Z]{2}))?"
-    r"(?:\s*(\d{5}))?",
+    r"\s*,\s*([A-Za-z][A-Za-z .'-]{1,40}?)\s*,\s*"
+    r"(Texas|Oklahoma|New Mexico|Louisiana|Arkansas|Colorado|Kansas|TX|OK|NM|LA|AR|CO|KS)"
+    r"(?:\s+(\d{5}))?",
     re.I,
 )
 
 
-def address_from_listings(page: str, name: str, city: str, region: str = "") -> str:
+def address_from_listings(page: str, name: str, city: str, region: str = "", minimum: int = 2, name_anywhere: bool = False) -> str:
     """The street that keeps showing up for this name in this city. A one-off hit in another town is ignored."""
     name_l = (name or "").strip().lower()
     city_l = (city or "").strip().lower()
     if not name_l or not city_l or not page:
         return ""
-    state = (region or "").strip().upper()
-    if len(state) > 2:
-        state = ""
     counts: dict[str, tuple[int, str]] = {}
     for match in _STREET.finditer(page):
         street = re.sub(r"\s+", " ", match.group(1)).strip(" ,.")
         town = re.sub(r"\s+", " ", (match.group(2) or "")).strip(" ,.")
-        found_state = (match.group(3) or state or "").upper()
+        found_state = (match.group(3) or "").strip()
         postal = (match.group(4) or "").strip()
-        window = page[max(0, match.start() - 120) : match.end() + 80].lower()
+        window = page[max(0, match.start() - 600) : match.end() + 200].lower()
         town_l = town.lower()
         if city_l not in town_l and city_l not in window:
             continue
-        if name_l not in window and name_l.split()[0] not in window:
+        if name_l not in window and name_l.split()[0] not in window and not (name_anywhere and name_l in page.lower()):
             continue
         tail_city = city.strip()
-        tail_state = found_state or state
+        tail_state = state_name(found_state or region)
         line = ", ".join(bit for bit in (street, tail_city, f"{tail_state} {postal}".strip()) if bit)
         key = re.sub(r"[^a-z0-9]", "", street.lower())
         count, _old = counts.get(key, (0, line))
@@ -168,9 +179,27 @@ def address_from_listings(page: str, name: str, city: str, region: str = "") -> 
     if not counts:
         return ""
     count, line = max(counts.values(), key=lambda item: item[0])
-    if count < 2:
+    if count < minimum:
         return ""
     return line
+
+
+def _community_html(name: str) -> str:
+    """The apartment site often prints the office address when search snippets do not."""
+    slug = re.sub(r"[^a-z0-9]", "", (name or "").lower())
+    if len(slug) < 4:
+        return ""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
+    pages = []
+    for url in (f"https://www.{slug}apartments.com/", f"https://www.{slug}apartmenthomes.com/"):
+        try:
+            resp = requests.get(url, headers=headers, timeout=8)
+        except Exception:
+            continue
+        if resp.status_code != 200 or name.lower() not in (resp.text or "").lower():
+            continue
+        pages.append(resp.text or "")
+    return "\n".join(pages)
 
 
 def _listing_page(name: str, city: str, region: str) -> str:
@@ -205,7 +234,9 @@ def lookup_place(name: str, city: str, region: str = "") -> dict | None:
     map_hit = place_from_hits(rows, name, city, region)
     if map_hit and map_hit.get("address"):
         return map_hit
-    line = address_from_listings(_listing_page(name, city, region), name, city, region)
+    line = address_from_listings(_listing_page(name, city, state_name(region) or region), name, city, region)
+    if not line:
+        line = address_from_listings(_community_html(name), name, city, region, minimum=1, name_anywhere=True)
     if not line:
         return None
     point = geocode(line)

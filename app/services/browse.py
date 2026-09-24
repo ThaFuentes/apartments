@@ -94,9 +94,11 @@ def place_groups(city_id: int | None = None) -> list[dict]:
     grouped: dict[int, dict] = {}
     for prop in props:
         city = prop.city
+        from app.services.geo import state_name
+
         label = city.name if city else "No city"
         if city and city.region:
-            label = f"{label}, {city.region}"
+            label = f"{label}, {state_name(city.region)}"
         prop_jobs = jobs_by.get(prop.id) or []
         prop_visits = visits_by.get(prop.id) or []
         latest_job = max(prop_jobs, key=lambda row: row.created_at or _EMPTY) if prop_jobs else None

@@ -96,7 +96,7 @@ class AptTests(unittest.TestCase):
         self.assertIn("Woodview Apartments", result.get("reply") or "")
         prop = Property.query.filter(db.func.lower(Property.name) == "woodview apartments").one()
         self.assertEqual(prop.city.name, "Odessa")
-        self.assertEqual(prop.city.region, "TX")
+        self.assertEqual(prop.city.region, "Texas")
         again = handle_message(
             user,
             "add woodview apartments from odessa texas to my sites",
@@ -160,7 +160,7 @@ class AptTests(unittest.TestCase):
         handle_message(user, "I'm going to Woodview Odessa Thursday for AC evals", idempotency_key="t")
         handle_message(user, "yes, save it", idempotency_key="t-yes")
         arrived = handle_message(user, "I'm at Woodview Odessa", idempotency_key="arrive")
-        self.assertIn("Is this Woodview Odessa", arrived["reply"])
+        self.assertIn("Is this Woodview in Odessa", arrived["reply"])
         handle_message(user, "304 — AC install done", idempotency_key="job")
         self.assertEqual(Unit.query.count(), 0)
         blocked = handle_message(user, "304 — AC install done", idempotency_key="job")
@@ -594,7 +594,7 @@ Lubbock — 2 outside compressor installs"""
 
         page = (
             "Woodview Apartments 4330 N Grandview Ave, Odessa, TX 79762 listing. "
-            "Woodview 4330 N Grandview Ave Odessa, TX 79762 again. "
+            "Woodview 4330 N Grandview Ave, Odessa, TX 79762 again. "
             "Other Place 10 Main St, Midland, TX 79701."
         )
         self.assertIn("4330 N Grandview Ave", address_from_listings(page, "Woodview", "Odessa", "TX"))
@@ -718,7 +718,7 @@ Lubbock — 2 outside compressor installs"""
         place = _place_she_named(said)
         self.assertEqual(place["property_name"], "Woodview")
         self.assertEqual(place["city"], "Odessa")
-        self.assertEqual(place["region"], "TX")
+        self.assertEqual(place["region"], "Texas")
         self.assertIsNone(_place_she_named("i said add a property please pay attention"))
         user = self.owner()
         db.session.add(
@@ -757,7 +757,7 @@ Lubbock — 2 outside compressor installs"""
         place = _address_she_wants(asked)
         self.assertEqual(place["property_name"], "Brookview")
         self.assertEqual(place["city"], "Odessa")
-        self.assertEqual(place["region"], "TX")
+        self.assertEqual(place["region"], "Texas")
         again = _address_she_wants("search online not my site for the brookview odessa address")
         self.assertEqual(again["property_name"], "Brookview")
         self.assertEqual(again["city"], "Odessa")
@@ -784,6 +784,46 @@ Lubbock — 2 outside compressor installs"""
         self.assertNotIn("current records", heard["reply"])
         self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
 
+    def test_remove_brookview_matches_without_the_full_name(self):
+        user = self.owner()
+        handle_message(user, "it's at brookview odessa texas", idempotency_key="add-b")
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={"ok": True, "text": "I don't have a matching job.", "calls": []},
+        ):
+            heard = handle_message(user, "please remove brookview", idempotency_key="rm-b")
+            self.assertIn("Say yes", heard["reply"])
+            self.assertIn("Brookview", heard["reply"])
+            self.assertIn("Odessa", heard["reply"])
+            self.assertIn("Texas", heard["reply"])
+            self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+            done = handle_message(user, "yes", idempotency_key="rm-yes")
+            self.assertIn("Removed", done["reply"])
+            self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
+            handle_message(user, "it's at brookview lubbock texas", idempotency_key="add-l")
+            updated = handle_message(
+                user,
+                "update the lubbock apartment brookview with 3843 Penbrook St, Lubbock, TX",
+                idempotency_key="addr-l",
+            )
+        self.assertIn("Lubbock, Texas", updated["reply"])
+        self.assertIn("3843 Penbrook", updated["reply"])
+        self.assertNotIn(" TX", updated["reply"])
+        saved = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertIn("Texas", saved.address)
+        self.assertNotIn("TX", saved.address)
+
     def test_its_at_saves_the_looked_up_address(self):
         user = self.owner()
         hit = {
@@ -797,7 +837,7 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn("4101 East 42nd Street", result["reply"])
         prop = Property.query.filter(db.func.lower(Property.name) == "woodview").one()
         self.assertEqual(prop.city.name, "Odessa")
-        self.assertEqual(prop.city.region, "TX")
+        self.assertEqual(prop.city.region, "Texas")
         self.assertEqual(prop.address, hit["address"])
         self.assertAlmostEqual(prop.lat, 31.88)
 
