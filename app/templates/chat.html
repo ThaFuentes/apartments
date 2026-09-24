@@ -1,11 +1,14 @@
 {% extends "base.html" %}
-{% block title %}Chat{% endblock %}
+{% block title %}Home{% endblock %}
 {% block main %}
 <section class="chat">
+  {% if not messages %}
+  <div class="hero">
+    <h1>What are you doing today?</h1>
+    <p class="lead">Tell it in a sentence. You can talk, type, or take a photo of the unit.</p>
+  </div>
+  {% endif %}
   <div class="thread" id="thread">
-    {% if not messages %}
-    <p class="empty">Try: Tuesday plan in Odessa. Then one line each — Woodview — work order, Brookview — AC install, Madison Sq — employee eval. Later, say what you actually did.</p>
-    {% endif %}
     {% for msg in messages %}
     <p class="bubble {{ msg.role }}">{{ msg.body }}</p>
     {% endfor %}
@@ -13,75 +16,81 @@
   {% if pending %}
   <form method="post" action="/review" class="review">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <h2>Waiting on you</h2>
+    <h2>Save this?</h2>
     {% for row in pending %}
     <label class="check">
       {% if row.status == 'pending' %}
-      <input type="checkbox" name="id" value="{{ row.id }}" {% if row.risk == 'low' %}checked{% endif %}>
+      <input type="checkbox" name="id" value="{{ row.id }}" checked>
       {% endif %}
-      <span><strong>{{ row.summary }}</strong> <em>{{ row.risk }}</em></span>
+      <span>{{ row.summary }}</span>
     </label>
-    <div class="row-actions">
+    <div class="actions">
       {% if row.status == 'pending' %}
-      <button formaction="/pending/{{ row.id }}/confirm" formmethod="post" type="submit">Save this</button>
+      <button formaction="/pending/{{ row.id }}/confirm" formmethod="post" type="submit">Save</button>
       {% endif %}
-      <button formaction="/pending/{{ row.id }}/discard" formmethod="post" type="submit">Discard</button>
+      <button class="ghost" formaction="/pending/{{ row.id }}/discard" formmethod="post" type="submit">Don't save</button>
     </div>
-    {% set payload = row.payload_json %}
     {% endfor %}
-    <div class="row-actions">
-      <button type="submit">Save checked</button>
-      <button type="submit" name="accept_all" value="1">Accept low-risk only</button>
-    </div>
   </form>
   {% for row in pending %}
-  <form method="post" action="/pending/{{ row.id }}/edit" class="edit stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {% if row.tool == 'plan_trip' %}
-    <label>Property <input name="property_name" value=""></label>
-    <label>City <input name="city"></label>
-    <label>Date <input name="starts_on" placeholder="YYYY-MM-DD"></label>
-    <label>Purpose <input name="purpose"></label>
-    {% elif row.tool == 'record_unit_visit' %}
-    <label>Unit <input name="unit_number"></label>
-    <label>What you did <input name="title"></label>
-    {% elif row.tool == 'log_expense' %}
-    <label>Kind
-      <select name="kind">
-        <option value="gas">Gas</option>
-        <option value="food">Food</option>
-        <option value="other">Other</option>
-      </select>
-    </label>
-    <label>Amount <input name="amount" inputmode="decimal" placeholder="42.18"></label>
-    <label>Merchant <input name="merchant"></label>
-    <label>Odometer <input name="odometer" inputmode="numeric"></label>
-    {% elif row.tool == 'estimate_miles' %}
-    <label>Miles <input name="miles" inputmode="decimal"></label>
-    {% endif %}
-    <button type="submit">Update this draft</button>
-  </form>
+  <details class="edit">
+    <summary>Change it before saving</summary>
+    <form method="post" action="/pending/{{ row.id }}/edit" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if row.tool == 'plan_trip' %}
+      <label>Property <input name="property_name"></label>
+      <label>City <input name="city"></label>
+      <label>Date <input name="starts_on" placeholder="YYYY-MM-DD"></label>
+      <label>What for <input name="purpose"></label>
+      {% elif row.tool == 'record_unit_visit' %}
+      <label>Unit <input name="unit_number"></label>
+      <label>What you did <input name="title"></label>
+      {% elif row.tool == 'log_expense' %}
+      <label>Kind
+        <select name="kind">
+          <option value="gas">Gas</option>
+          <option value="food">Food</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+      <label>Amount <input name="amount" inputmode="decimal" placeholder="42.18"></label>
+      <label>Where <input name="merchant"></label>
+      <label>Odometer <input name="odometer" inputmode="numeric"></label>
+      {% elif row.tool == 'estimate_miles' %}
+      <label>Miles <input name="miles" inputmode="decimal"></label>
+      {% endif %}
+      <button type="submit" class="quiet">Update</button>
+    </form>
+  </details>
   {% endfor %}
   {% endif %}
-  <form method="post" action="/chat" class="composer" id="composer">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
-    <label class="grow">Say it
-      <textarea name="message" rows="3" required placeholder="304 — Carrier 3 ton, model 24ACC, serial AB12, install done"></textarea>
-    </label>
-    <div class="composer-actions">
-      <button type="button" id="mic" class="btn-quiet">Mic</button>
-      <button type="submit">Send</button>
-    </div>
-  </form>
-  <form method="post" action="/media" enctype="multipart/form-data" class="composer camera">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="photo-{{ msg_key }}">
-    <label>Photo, receipt, or nameplate
-      <input type="file" name="photo" accept="image/*" capture="environment" required>
-    </label>
-    <label>Caption <input name="message" placeholder="304, or leave blank and I'll read the nameplate"></label>
-    <button type="submit">Keep photo</button>
-  </form>
+  <div class="chips" id="chips">
+    <button type="button" data-say="Tuesday plan in &#10;Woodview — &#10;Brookview — &#10;Madison Sq — ">Plan my day</button>
+    <button type="button" data-say="I'm at ">I'm here</button>
+    <button type="button" data-say="304 — ">Log a unit</button>
+    <button type="button" data-say="odometer ">Odometer</button>
+  </div>
+  <div class="composer-dock">
+    <form method="post" action="/chat" class="composer" id="composer">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+      <label class="grow">Tell Apt
+        <textarea name="message" rows="3" required placeholder="Woodview — AC install, or 304 — compressor done"></textarea>
+      </label>
+      <div class="actions">
+        <button type="button" id="mic" class="quiet">Speak</button>
+        <button type="submit">Send</button>
+      </div>
+    </form>
+    <form method="post" action="/media" enctype="multipart/form-data" class="camera stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="idempotency_key" value="photo-{{ msg_key }}">
+      <label>Photo of the unit, sticker, or receipt
+        <input type="file" name="photo" accept="image/*" capture="environment" required>
+      </label>
+      <label>Add a few words if you want <input name="message" placeholder="Unit 304, or leave blank"></label>
+      <button type="submit" class="quiet">Save photo</button>
+    </form>
+  </div>
 </section>
 {% endblock %}

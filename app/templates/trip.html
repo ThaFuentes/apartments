@@ -2,62 +2,76 @@
 {% block title %}{{ trip.title }}{% endblock %}
 {% block main %}
 <section class="sheet">
-  <h1>{{ trip.title }}</h1>
-  <p>{{ trip.starts_on }} · {{ trip.status }}{% if trip.purpose %} · {{ trip.purpose }}{% endif %}</p>
+  <div class="hero">
+    <p class="kicker">{{ trip.starts_on }}</p>
+    <h1>{{ trip.title }}</h1>
+  </div>
   {% if trip.checklist %}
-  <h2>Before you roll</h2>
+  <h2>Before you leave</h2>
   <pre class="note">{{ trip.checklist }}</pre>
   {% endif %}
-  <h2>Plan</h2>
+  <h2>The work</h2>
   {% if not items %}
-  <p class="empty">No work lined up yet. In chat: Tuesday plan in Odessa, then one line per stop. Woodview — the work order. Brookview — AC install.</p>
+  <p class="empty">Nothing is listed yet. On Home, say the stop and the job. Woodview — AC install.</p>
   {% endif %}
   {% for item in items %}
   <article class="card">
-    <h3>{{ item.property.name }} — {{ item.title }}</h3>
-    <p>{{ status_line(item) }}{% if item.planned_qty > 1 and item.status == 'open' %} · {{ item.planned_qty }} planned{% endif %}</p>
+    <p class="pill {{ item.status }}">{{ status_line(item) }}</p>
+    <h3>{{ item.property.name }}</h3>
+    <p><strong>{{ item.title }}</strong></p>
     {% if item.detail %}<pre class="note">{{ item.detail }}</pre>{% endif %}
-    {% if item.outcome_note and item.status != 'open' %}<p>{{ item.outcome_note }}</p>{% endif %}
+    {% if item.outcome_note and item.status != 'open' %}<p class="lead">{{ item.outcome_note }}</p>{% endif %}
     {% if current_user.role != 'viewer' and item.status in ['open', 'partial'] %}
-    <form method="post" action="/plan-items/{{ item.id }}" class="stack">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label>What happened
-        <select name="status">
-          <option value="done">I did all of it</option>
-          <option value="partial">I did some, leave the rest open</option>
-          <option value="closed_by_other">Someone else closed it</option>
-          <option value="not_needed">No longer needed</option>
-          <option value="open">Leave it open</option>
-        </select>
-      </label>
-      <label>How many I did <input name="done_qty" inputmode="numeric" placeholder="{{ item.done_qty }}"></label>
-      <label>Closed by <input name="closed_by" placeholder="Name, if someone else finished it"></label>
-      <label>Note <input name="note" placeholder="They only had equipment for 1"></label>
-      <button type="submit">Update this plan line</button>
-    </form>
+    <div class="actions">
+      <form method="post" action="/plan-items/{{ item.id }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button name="status" value="done">I did this</button>
+      </form>
+      <form method="post" action="/plan-items/{{ item.id }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="quiet" name="status" value="not_needed">Don't need it</button>
+      </form>
+      <form method="post" action="/plan-items/{{ item.id }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="ghost" name="status" value="open">Leave open</button>
+      </form>
+    </div>
+    <details>
+      <summary>I only finished some</summary>
+      <form method="post" action="/plan-items/{{ item.id }}" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="status" value="partial">
+        <label>How many I finished <input name="done_qty" inputmode="numeric" placeholder="1"></label>
+        <label>What happened <input name="note" placeholder="They only had equipment for 1"></label>
+        <button type="submit">Save</button>
+      </form>
+    </details>
+    <details>
+      <summary>Someone else finished it</summary>
+      <form method="post" action="/plan-items/{{ item.id }}" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="status" value="closed_by_other">
+        <label>Their name <input name="closed_by" placeholder="Dana"></label>
+        <button type="submit">Save</button>
+      </form>
+    </details>
     {% endif %}
   </article>
   {% endfor %}
   <h2>Stops</h2>
   <ul class="list">
     {% for link in links %}
-    <li><a href="/properties/{{ link.property_id }}">{{ link.property.name }}{% if link.property.city %} · {{ link.property.city.name }}{% endif %}</a>
-      {% if link.property.lat %}Pin {{ '%.5f'|format(link.property.lat) }}, {{ '%.5f'|format(link.property.lng) }}{% else %}No pin yet{% endif %}
-      {% if link.confirmed_at %} · property confirmed{% endif %}
-    </li>
+    <li><a href="/properties/{{ link.property_id }}"><strong>{{ link.property.name }}</strong>{% if link.property.city %}{{ link.property.city.name }}{% endif %}</a></li>
     {% endfor %}
   </ul>
   {% if current_user.role != 'viewer' %}
-  <form method="post" action="/trips/{{ trip.id }}/miles" class="stack">
+  <form method="post" action="/trips/{{ trip.id }}/miles" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Estimated miles <input name="miles_estimate" value="{{ trip.miles_estimate or '' }}" inputmode="decimal"></label>
-    <label>Actual miles <input name="miles_actual" value="{{ trip.miles_actual or '' }}" inputmode="decimal"></label>
+    <h3>Miles for this day</h3>
+    <label>About how far <input name="miles_estimate" value="{{ trip.miles_estimate or '' }}" inputmode="decimal"></label>
+    <label>What you actually drove <input name="miles_actual" value="{{ trip.miles_actual or '' }}" inputmode="decimal"></label>
     <button type="submit">Save miles</button>
   </form>
-  {% endif %}
-  {% if trip.handoff %}
-  <h2>Handoff</h2>
-  <pre class="note">{{ trip.handoff }}</pre>
   {% endif %}
 </section>
 {% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}More{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <h1>More</h1>
+    <p class="lead">Miles, receipts, reports, and the map. Home is still the fastest way.</p>
+  </div>
+  <div class="menu">
+    <a href="/miles">Miles <span>→</span></a>
+    <a href="/expenses">Gas and receipts <span>→</span></a>
+    <a href="/reports">Reports <span>→</span></a>
+    <a href="/map">Map <span>→</span></a>
+    {% if current_user.role == 'owner' %}
+    <a href="/settings">Settings and people <span>→</span></a>
+    {% endif %}
+  </div>
+  <form method="post" action="/drive" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="/">
+    <h3>Driving</h3>
+    <p class="lead">Bigger buttons. Hides this menu while you're on the road.</p>
+    {% if drive %}
+    <input type="hidden" name="on" value="0">
+    <button type="submit" class="quiet">Turn driving view off</button>
+    {% else %}
+    <input type="hidden" name="on" value="1">
+    <button type="submit">I'm driving</button>
+    {% endif %}
+  </form>
+</section>
+{% endblock %}

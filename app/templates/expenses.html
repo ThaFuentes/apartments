@@ -2,8 +2,8 @@
 {% block title %}Expenses{% endblock %}
 {% block main %}
 <section class="sheet">
-  <h1>Expenses</h1>
-  <p class="lead">Gas, food, or other. Nothing here is a tax filing. A receipt still waits for you to confirm the amount.</p>
+  <h1>Gas and receipts</h1>
+  <p class="lead">Snap the receipt or type the amount. Nothing is saved until you say it's right.</p>
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">

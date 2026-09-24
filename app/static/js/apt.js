@@ -1,5 +1,14 @@
 (function () {
   const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
+  document.querySelectorAll("[data-say]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      const box = document.querySelector("#composer textarea");
+      if (!box) return;
+      box.value = button.getAttribute("data-say") || "";
+      box.focus();
+    });
+  });
+
   const mic = document.getElementById("mic");
   const composer = document.getElementById("composer");
   if (mic && composer && (window.SpeechRecognition || window.webkitSpeechRecognition)) {

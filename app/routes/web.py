@@ -326,6 +326,12 @@ def miles_save():
     return redirect("/miles")
 
 
+@bp.get("/more")
+@login_required
+def more():
+    return render_template("more.html")
+
+
 @bp.get("/trips")
 @login_required
 def trips():

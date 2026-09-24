@@ -1,33 +1,45 @@
 {% extends "base.html" %}
-{% block title %}Trips{% endblock %}
+{% block title %}Plan{% endblock %}
 {% block main %}
 <section class="sheet">
-  <h1>Trips</h1>
-  {% if not trips %}
-  <p class="empty">No trips yet. Try: I'm going to Woodview Odessa Thursday for AC evals.</p>
-  {% endif %}
-  <ul class="list">
-    {% for trip in trips %}
-    <li><a href="/trips/{{ trip.id }}"><strong>{{ trip.title }}</strong> {{ trip.starts_on or '' }} · {{ trip.status }}{% if trip.miles_estimate %} · {{ trip.miles_estimate }} mi{% endif %}</a></li>
-    {% endfor %}
-  </ul>
-  <h2>Still on the plan</h2>
+  <div class="hero">
+    <h1>Your plan</h1>
+    <p class="lead">What you meant to do, and what's still open.</p>
+  </div>
+  <h2>Still to do</h2>
   {% if not open_plan %}
-  <p>Nothing is waiting. A Tuesday plan stays here until you mark it done, leave it open, say someone else closed it, or say it is no longer needed.</p>
+  <p class="empty">Nothing is waiting. On Home, tap Plan my day and list the stops.</p>
   {% else %}
   <ul class="list">
     {% for item in open_plan %}
-    <li><a href="/trips/{{ item.trip_id }}">{{ item.property.name }} — {{ item.title }}</a> · {% if item.status == 'partial' %}did {{ item.done_qty }} of {{ item.planned_qty }}, rest open{% else %}open{% if item.planned_qty > 1 %}, {{ item.planned_qty }} planned{% endif %}{% endif %}</li>
+    <li>
+      <a href="/trips/{{ item.trip_id }}">
+        <strong>{{ item.property.name }}</strong>
+        {{ item.title }}
+        {% if item.status == 'partial' %}
+        <span class="pill partial">Did {{ item.done_qty }} of {{ item.planned_qty }}</span>
+        {% else %}
+        <span class="pill open">{% if item.planned_qty > 1 %}{{ item.planned_qty }} planned{% else %}Open{% endif %}</span>
+        {% endif %}
+      </a>
+    </li>
     {% endfor %}
   </ul>
   {% endif %}
-  <h2>Follow-up</h2>
-  {% if not followups %}
-  <p>Nothing is waiting on a return visit.</p>
-  {% else %}
+  <h2>Days</h2>
+  {% if not trips %}
+  <p class="empty">No days yet.</p>
+  {% endif %}
+  <ul class="list">
+    {% for trip in trips %}
+    <li><a href="/trips/{{ trip.id }}"><strong>{{ trip.title }}</strong><span class="hint">{{ trip.starts_on or '' }}</span></a></li>
+    {% endfor %}
+  </ul>
+  {% if followups %}
+  <h2>Come back for these</h2>
   <ul class="list">
     {% for job in followups %}
-    <li>{{ job.title }} · {{ job.status }} <a href="/properties/{{ job.property_id }}">Open property</a></li>
+    <li><a href="/properties/{{ job.property_id }}"><strong>{{ job.title }}</strong></a></li>
     {% endfor %}
   </ul>
   {% endif %}

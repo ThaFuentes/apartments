@@ -2,8 +2,8 @@
 {% block title %}Miles{% endblock %}
 {% block main %}
 <section class="sheet">
-  <h1>Miles traveled</h1>
-  <p class="lead">{{ total }} miles on the record. An odometer reading counts the miles since the last one. You can also say “drove 86 miles” or type them here.</p>
+  <h1>{{ total }} miles</h1>
+  <p class="lead">Put in the odometer when you stop. The miles since the last reading add up here. You can also say “drove 86 miles”.</p>
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
