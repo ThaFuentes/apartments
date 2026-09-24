@@ -93,7 +93,7 @@ def _gate(user, row: PendingAction) -> dict | None:
         return None
     from app.services.records import shift_question
 
-    reply = shift_question(shift) if shift else "Which property is this? Say: I'm at Woodview Odessa."
+    reply = shift_question(shift) if shift else "Which property is this?"
     return {"ok": False, "needs_property_confirm": True, "reply": reply, "pending_id": row.id}
 
 
@@ -208,7 +208,7 @@ def confirm_property(user, source: str = "human") -> dict:
 
     shift = open_shift(user)
     if not shift:
-        return {"ok": False, "reply": "You are not checked in. Say: I'm at Woodview Odessa."}
+        return {"ok": False, "reply": "You are not checked in at a property yet."}
     prop_reply = ""
     from app.services.records import property_place, shift_question
 

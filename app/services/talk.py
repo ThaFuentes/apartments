@@ -389,7 +389,7 @@ def interpret(user, text: str, key: str, source: str) -> dict:
         "ok": True,
         "reply": (
             f"{name} can stage a trip, log a unit, file gas, or build the company report. "
-            "Try: I'm going to Woodview Odessa Thursday for AC evals."
+            "Tell me the property and what you did, or open Plan today and search for the stops."
         ),
     }
 
@@ -683,7 +683,7 @@ def _with_place_prompt(user, card: dict) -> dict:
         card["reply"] = shift_question(shift) + " " + (card.get("reply") or "")
         card["needs_property_confirm"] = True
     elif not shift:
-        card["reply"] = "Which property is this? Say: I'm at Woodview Odessa. " + (card.get("reply") or "")
+        card["reply"] = "Which property is this? " + (card.get("reply") or "")
         card["needs_property_confirm"] = True
     return card
 

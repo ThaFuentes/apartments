@@ -9,7 +9,7 @@
   <title>{% block title %}Apt{% endblock %}</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=3">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=4">
 </head>
 <body class="{% if drive %}drive{% endif %}" data-share="{{ '1' if share.on else '0' }}">
   <header class="top">
@@ -68,6 +68,6 @@
     {% endif %}
   </nav>
   {% endif %}
-  <script src="{{ url_for('static', filename='js/apt.js') }}?v=3"></script>
+  <script src="{{ url_for('static', filename='js/apt.js') }}?v=4"></script>
 </body>
 </html>

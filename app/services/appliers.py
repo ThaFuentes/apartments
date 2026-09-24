@@ -177,6 +177,66 @@ def apply_plan_trip(user, payload, source) -> dict:
     }
 
 
+def apply_log_work(user, payload, source) -> dict:
+    """Work she picked on the screen. The property is the one she tapped, not a guessed unit."""
+    source = _src(source)
+    prop = None
+    if payload.get("property_id"):
+        prop = db.session.get(Property, int(payload["property_id"]))
+    elif (payload.get("property_name") or "").strip() and (payload.get("city") or "").strip():
+        profile = site_profile()
+        prop = ensure_property(
+            payload["property_name"].strip(),
+            payload["city"].strip(),
+            (payload.get("region") or (profile.default_region if profile else "") or "").strip(),
+            user.id,
+            source=source,
+        )
+    if not prop or prop.deleted_at:
+        return {"ok": False, "reply": "Search for the property and tap it."}
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return {"ok": False, "reply": "What did you do there?"}
+    number = normalize_unit(payload.get("unit_number") or "")
+    unit = None
+    if number:
+        exact, near = match_unit(prop.id, number)
+        if near and not exact and not payload.get("force_new"):
+            return {
+                "ok": False,
+                "needs_answer": True,
+                "reply": f"{number} is close to unit {near.unit_number} at {prop.name}. Use {near.unit_number}, or say it's a new unit.",
+            }
+        if exact:
+            unit = exact
+        else:
+            unit = Unit(property_id=prop.id, unit_number=number, created_by_id=user.id, created_at=utcnow())
+            db.session.add(unit)
+            db.session.flush()
+            audit(user.id, source, "create", "unit", unit.id, {}, {"unit_number": number, "property_id": prop.id})
+    job = Job(
+        property_id=prop.id,
+        unit_id=unit.id if unit else None,
+        title=title[:300],
+        detail=(payload.get("note") or "")[:4000],
+        status=(payload.get("status") or "done"),
+        source=source,
+        created_by_id=user.id,
+        created_at=utcnow(),
+    )
+    if job.status not in ("done", "planned", "blocked", "followup"):
+        job.status = "done"
+    db.session.add(job)
+    db.session.flush()
+    db.session.add(JobEvent(job_id=job.id, body=title, actor_id=user.id, source=source, created_at=utcnow()))
+    audit(user.id, source, "create", "job", job.id, {}, {"title": job.title, "property_id": prop.id, "unit": number})
+    from app.services.plan import note_work_against_plan
+
+    plan_note = note_work_against_plan(user, prop.id, title, source) if job.status == "done" else ""
+    where = f"unit {number} at {prop.name}" if number else prop.name
+    return {"ok": True, "reply": f"Saved {title} at {where}.{plan_note}", "job_id": job.id, "property_id": prop.id}
+
+
 def apply_plan_day(user, payload, source) -> dict:
     from app.services.plan import save_plan_day
 
@@ -328,12 +388,12 @@ def apply_record_unit_visit(user, payload, source) -> dict:
     if not shift or not shift.confirmed:
         from app.services.records import shift_question
 
-        reply = shift_question(shift) if shift else "Which property is this? Say: I'm at Woodview Odessa."
+        reply = shift_question(shift) if shift else "Which property is this?"
         return {"ok": False, "needs_property_confirm": True, "reply": reply}
     raw_number = payload.get("unit_number") or ""
     number = normalize_unit(raw_number)
     if not number:
-        return {"ok": False, "reply": "Which unit? Say the number, like 304."}
+        return {"ok": False, "reply": "Which unit number?"}
     exact, near = match_unit(shift.property_id, number)
     if near and not exact and not payload.get("force_new"):
         return {
@@ -1021,6 +1081,7 @@ def apply_update_settings(user, payload, source) -> dict:
 APPLIERS = {
     "plan_trip": apply_plan_trip,
     "plan_day": apply_plan_day,
+    "log_work": apply_log_work,
     "plan_outcome": apply_plan_outcome,
     "update_trip": apply_update_trip,
     "upsert_property": apply_upsert_property,

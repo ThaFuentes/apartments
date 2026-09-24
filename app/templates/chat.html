@@ -2,12 +2,11 @@
 {% block title %}Home{% endblock %}
 {% block main %}
 <section class="chat">
-  {% if not messages %}
   <div class="hero">
-    <h1>What are you doing today?</h1>
-    <p class="lead">Tell it in a sentence. You can talk, type, or take a photo of the unit.</p>
+    <h1>{% if here %}At {{ here.name }}{% else %}Home{% endif %}</h1>
+    <p class="lead">Search your properties when you plan the day. Type the real unit number only when you have one.</p>
+    <a class="menu-link" href="/plan">Plan today</a>
   </div>
-  {% endif %}
   <div class="thread" id="thread">
     {% for msg in messages %}
     <p class="bubble {{ msg.role }}">{{ msg.body }}</p>
@@ -64,18 +63,30 @@
   </details>
   {% endfor %}
   {% endif %}
-  <div class="chips" id="chips">
-    <button type="button" data-say="Tuesday plan in &#10;Woodview — &#10;Brookview — &#10;Madison Sq — ">Plan my day</button>
-    <button type="button" data-say="I'm at ">I'm here</button>
-    <button type="button" data-say="304 — ">Log a unit</button>
-    <button type="button" data-say="odometer ">Odometer</button>
-  </div>
+  <form method="post" action="/log" class="card stack" data-place-search data-mode="one">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="log-{{ msg_key }}">
+    {% if here %}
+    <input type="hidden" name="property_id" value="{{ here.id }}">
+    <p>Logging work at <strong>{{ here.name }}</strong></p>
+    {% else %}
+    <label>Property
+      <input data-search autocomplete="off" placeholder="Type two letters of the name">
+    </label>
+    <div class="search-results" data-results></div>
+    <input type="hidden" name="property_id" data-property-id value="">
+    <p data-chosen class="lead"></p>
+    {% endif %}
+    <label>Unit number <input name="unit_number" inputmode="text" autocomplete="off" placeholder="Only if you have it"></label>
+    <label>What you did <input name="title" required placeholder="AC install, work order, eval…"></label>
+    <button type="submit">Save this work</button>
+  </form>
   <div class="composer-dock">
     <form method="post" action="/chat" class="composer" id="composer">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
       <label class="grow">Tell Apt
-        <textarea name="message" rows="3" required placeholder="Woodview — AC install, or 304 — compressor done"></textarea>
+        <textarea name="message" rows="3" required placeholder="Or just say what happened"></textarea>
       </label>
       <div class="actions">
         <button type="button" id="mic" class="quiet">Speak</button>
@@ -88,7 +99,7 @@
       <label>Photo of the unit, sticker, or receipt
         <input type="file" name="photo" accept="image/*" capture="environment" required>
       </label>
-      <label>Add a few words if you want <input name="message" placeholder="Unit 304, or leave blank"></label>
+      <label>Add a few words if you want <input name="message" placeholder="Optional"></label>
       <button type="submit" class="quiet">Save photo</button>
     </form>
   </div>

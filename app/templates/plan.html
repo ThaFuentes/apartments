@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Plan today{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <h1>Plan today</h1>
+    <p class="lead">Search for the places you're actually going. Only the ones you tap get added.</p>
+  </div>
+  <form method="post" class="stack" id="plan-form" data-place-search data-mode="many">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <label>Day <input type="date" name="day" value="{{ today }}"></label>
+    <label>Find a property
+      <input data-search autocomplete="off" placeholder="Type two letters">
+    </label>
+    <div class="search-results" data-results></div>
+    <div class="picked-list" data-picked></div>
+    <details>
+      <summary>It isn't in the list yet</summary>
+      <div class="stack">
+        <label>Property name <input name="new_name" autocomplete="off"></label>
+        <label>City <input name="new_city" autocomplete="off"></label>
+        <label>Job there, if you know it <textarea name="new_work" placeholder="One job per line"></textarea></label>
+      </div>
+    </details>
+    <button type="submit">Save this plan</button>
+  </form>
+</section>
+{% endblock %}

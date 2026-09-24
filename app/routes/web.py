@@ -168,13 +168,116 @@ def home():
         .order_by(PendingAction.id.asc())
         .all()
     )
+    from app.services.records import open_shift
+
+    shift = open_shift(current_user)
+    here = shift.property if shift and shift.confirmed and shift.property else None
     return render_template(
         "chat.html",
         messages=messages,
         pending=pending,
         msg_key=_new_key(),
         profile=site_profile(),
+        here=here,
     )
+
+
+@bp.get("/api/places")
+@login_required
+def place_search():
+    if current_user.role == "viewer" and not current_user.can_see_history:
+        abort(403)
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 2:
+        return jsonify([])
+    like = f"%{q}%"
+    rows = (
+        Property.query.filter(Property.deleted_at.is_(None), Property.name.ilike(like))
+        .order_by(Property.name.asc())
+        .limit(8)
+        .all()
+    )
+    return jsonify(
+        [{"id": row.id, "name": row.name, "city": row.city.name if row.city else ""} for row in rows]
+    )
+
+
+@bp.route("/plan", methods=["GET", "POST"])
+@login_required
+def plan_day():
+    if current_user.role == "viewer":
+        abort(403)
+    from app.services.clock import local_today
+    from app.services.pending import commit_apply
+    from app.services.records import site_profile as profile_for
+
+    profile = profile_for()
+    today = local_today(profile.timezone if profile else None).isoformat()
+    if request.method == "POST":
+        stops = []
+        ids = request.form.getlist("property_id")
+        works = request.form.getlist("work")
+        for prop_id, work in zip(ids, works):
+            prop = db.session.get(Property, int(prop_id))
+            if not prop or prop.deleted_at:
+                continue
+            items = []
+            for line in (work or "").splitlines():
+                line = line.strip()
+                if line:
+                    items.append({"title": line[:200], "detail": "", "planned_qty": 1})
+            stops.append(
+                {
+                    "property_name": prop.name,
+                    "city": prop.city.name if prop.city else "",
+                    "region": prop.city.region if prop.city else "",
+                    "items": items,
+                }
+            )
+        new_name = (request.form.get("new_name") or "").strip()
+        new_city = (request.form.get("new_city") or "").strip()
+        if new_name and new_city:
+            items = []
+            for line in (request.form.get("new_work") or "").splitlines():
+                line = line.strip()
+                if line:
+                    items.append({"title": line[:200], "detail": "", "planned_qty": 1})
+            stops.append({"property_name": new_name, "city": new_city, "region": "", "items": items})
+        if not stops:
+            flash("Search for a property and tap it. Nothing was added.", "warn")
+            return render_template("plan.html", today=today, msg_key=_new_key())
+        result = commit_apply(
+            current_user,
+            "plan_day",
+            {"starts_on": request.form.get("day") or today, "stops": stops},
+            "human",
+            _key() or _new_key(),
+        )
+        flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+        if result.get("trip_id"):
+            return redirect(f"/trips/{result['trip_id']}")
+        return redirect("/trips")
+    return render_template("plan.html", today=today, msg_key=_new_key())
+
+
+@bp.post("/log")
+@login_required
+def log_work():
+    if current_user.role == "viewer":
+        abort(403)
+    from app.services.pending import commit_apply
+
+    payload = {
+        "property_id": request.form.get("property_id") or "",
+        "property_name": request.form.get("new_name") or "",
+        "city": request.form.get("new_city") or "",
+        "unit_number": request.form.get("unit_number") or "",
+        "title": request.form.get("title") or "",
+        "status": "done",
+    }
+    result = commit_apply(current_user, "log_work", payload, "human", _key() or _new_key())
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect("/")
 
 
 @bp.post("/chat")
@@ -813,7 +916,7 @@ def _photo_proposal(user, media, merged, quota: str) -> dict:
             summary = merged["conflict"]
         else:
             summary = f"{summary} I still need {missing} before this is filed."
-    summary += " Which unit? Say the number, like 304." if not number else ""
+    summary += " Which unit number?" if not number else ""
     if not number:
         needs = True
     payload = {

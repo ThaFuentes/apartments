@@ -273,7 +273,7 @@ def save_plan_day(user, payload: dict, source: str) -> dict:
         starts_on = today
     stops = payload.get("stops") or []
     if not stops:
-        return {"ok": False, "reply": "Tell me the stops. Woodview — the work order, Brookview — AC install."}
+        return {"ok": False, "reply": "Search for the properties you're going to, then say the job at each one."}
     missing = [stop.get("property_name") for stop in stops if not (stop.get("city") or "").strip()]
     if missing and not (profile and profile.default_city):
         return {

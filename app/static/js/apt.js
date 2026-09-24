@@ -1,11 +1,56 @@
 (function () {
   const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
-  document.querySelectorAll("[data-say]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      const box = document.querySelector("#composer textarea");
-      if (!box) return;
-      box.value = button.getAttribute("data-say") || "";
-      box.focus();
+  document.querySelectorAll("[data-place-search]").forEach(function (root) {
+    const input = root.querySelector("[data-search]");
+    const results = root.querySelector("[data-results]");
+    const many = root.getAttribute("data-mode") === "many";
+    const picked = root.querySelector("[data-picked]");
+    const hidden = root.querySelector("[data-property-id]");
+    const chosen = root.querySelector("[data-chosen]");
+    if (!input || !results) return;
+    let timer = null;
+    input.addEventListener("input", function () {
+      window.clearTimeout(timer);
+      const q = input.value.trim();
+      if (q.length < 2) {
+        results.innerHTML = "";
+        return;
+      }
+      timer = window.setTimeout(function () {
+        fetch("/api/places?q=" + encodeURIComponent(q), { headers: { Accept: "application/json" } })
+          .then(function (resp) { return resp.json(); })
+          .then(function (rows) {
+            results.innerHTML = "";
+            if (!rows.length) {
+              results.innerHTML = "<p class=\"lead\">No property with that name yet.</p>";
+              return;
+            }
+            rows.forEach(function (row) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.innerHTML = row.name + "<small>" + (row.city || "") + "</small>";
+              button.addEventListener("click", function () {
+                if (many && picked) {
+                  if (picked.querySelector("[data-id='" + row.id + "']")) return;
+                  const block = document.createElement("div");
+                  block.className = "job";
+                  block.setAttribute("data-id", String(row.id));
+                  block.innerHTML = "<strong></strong><input type=\"hidden\" name=\"property_id\"><label>Job here<textarea name=\"work\" placeholder=\"One job per line\"></textarea></label><button type=\"button\" class=\"ghost\">Remove</button>";
+                  block.querySelector("strong").textContent = row.name + (row.city ? " · " + row.city : "");
+                  block.querySelector("input").value = row.id;
+                  block.querySelector("button").addEventListener("click", function () { block.remove(); });
+                  picked.appendChild(block);
+                } else if (hidden) {
+                  hidden.value = row.id;
+                  if (chosen) chosen.textContent = row.name + (row.city ? " · " + row.city : "");
+                }
+                results.innerHTML = "";
+                input.value = "";
+              });
+              results.appendChild(button);
+            });
+          });
+      }, 200);
     });
   });
 
