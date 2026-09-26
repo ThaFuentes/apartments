@@ -104,40 +104,41 @@ def split_needs(text: str) -> list[str]:
     return titles
 
 
-def _properties() -> list[Property]:
-    return Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
+def _properties(user=None) -> list[Property]:
+    from app.services.parse import property_catalog
+
+    return property_catalog(user)
 
 
-def resolve_property(hint: str = "", unit_number: str = "") -> tuple[Property | None, str]:
+def resolve_property(hint: str = "", unit_number: str = "", user=None) -> tuple[Property | None, str]:
     hint = (hint or "").strip()
     if hint:
-        matches = fuzzy_properties(hint)
-        if len(matches) == 1:
-            return matches[0], ""
-        if len(matches) > 1:
-            lines = "\n".join(property_place(prop) for prop in matches[:8])
-            return None, f"Which one?\n{lines}"
-        return None, f"Nothing on your list matches {hint}."
+        from app.services.parse import resolve_or_lines, resolve_property as resolve_saved
+
+        verdict = resolve_saved(hint, user=user)
+        if verdict["state"] == "resolved":
+            return verdict["property"], ""
+        _prop, question = resolve_or_lines(hint, user=user)
+        return None, question
     number = normalize_unit(unit_number)
+    props = _properties(user)
+    allowed = {prop.id for prop in props}
     if number:
         rows = (
-            Unit.query.filter(Unit.deleted_at.is_(None), db.func.lower(Unit.unit_number) == number.lower())
+            Unit.query.filter(
+                Unit.deleted_at.is_(None),
+                Unit.property_id.in_(allowed or {-1}),
+                db.func.lower(Unit.unit_number) == number.lower(),
+            )
             .all()
         )
-        props = []
-        seen = set()
-        for row in rows:
-            if row.property_id not in seen:
-                prop = db.session.get(Property, row.property_id)
-                if prop and not prop.deleted_at:
-                    seen.add(prop.id)
-                    props.append(prop)
-        if len(props) == 1:
-            return props[0], ""
-        if len(props) > 1:
-            lines = "\n".join(property_place(prop) for prop in props[:8])
+        matches = {row.property_id for row in rows}
+        found = [prop for prop in props if prop.id in matches]
+        if len(found) == 1:
+            return found[0], ""
+        if len(found) > 1:
+            lines = "\n".join(property_place(prop) for prop in found[:8])
             return None, f"Unit {number} is on more than one property.\n{lines}"
-    props = _properties()
     if len(props) == 1:
         return props[0], ""
     if props:
@@ -156,10 +157,15 @@ def ensure_unit(prop: Property, number: str, user, source: str, building: str = 
     )
     if row:
         if building and not row.building:
+            before = {"unit_number": row.unit_number, "building": row.building}
             row.building = building
+            audit(user.id, source, "update", "unit", row.id, before, {"unit_number": row.unit_number, "building": row.building, "property_id": prop.id})
             return row, "assigned"
         if building and row.building != building:
-            return row, "other"
+            before = {"unit_number": row.unit_number, "building": row.building}
+            row.building = building
+            audit(user.id, source, "update", "unit", row.id, before, {"unit_number": row.unit_number, "building": building, "property_id": prop.id})
+            return row, "assigned"
         return row, "kept"
     row = Unit(
         property_id=prop.id,
@@ -333,7 +339,7 @@ def complete_task(user, unit: Unit, hint: str, source: str) -> tuple[UnitTask | 
 def apply_unit_board(user, payload, source) -> dict:
     source = source if source in ("ai", "human") else "human"
     action = (payload.get("action") or "").strip()
-    prop, problem = resolve_property(payload.get("property_hint") or "", payload.get("unit_number") or "")
+    prop, problem = resolve_property(payload.get("property_hint") or "", payload.get("unit_number") or "", user=user)
     if problem:
         return {"ok": True, "reply": problem}
     if prop is None:
@@ -342,6 +348,34 @@ def apply_unit_board(user, payload, source) -> dict:
     if action == "add_units":
         return add_units(user, prop, payload.get("units") or "", source, building=payload.get("building") or "")
     number = normalize_unit(payload.get("unit_number") or "")
+    if action == "set_unit_number":
+        new_number = normalize_unit(payload.get("new_number") or "")
+        if not number or not new_number:
+            return {"ok": False, "reply": "Which existing unit should I rename, and what is the new number?"}
+        unit = Unit.query.filter_by(property_id=prop.id, unit_number=number).filter(Unit.deleted_at.is_(None)).first()
+        if not unit:
+            return {"ok": False, "reply": f"I can't find unit {number} at {prop.name}."}
+        taken = Unit.query.filter_by(property_id=prop.id, unit_number=new_number).filter(Unit.deleted_at.is_(None), Unit.id != unit.id).first()
+        if taken:
+            return {"ok": False, "reply": f"Unit {new_number} is already active at {prop.name}. Nothing changed."}
+        before = {"unit_number": unit.unit_number, "building": unit.building}
+        unit.unit_number = new_number
+        audit(user.id, source, "update", "unit", unit.id, before, {"unit_number": unit.unit_number, "building": unit.building, "property_id": prop.id})
+        return {"ok": True, "reply": f"Renamed unit {number} to {new_number} at {prop.name}; the change is in its history.", "unit_id": unit.id, "property_id": prop.id}
+    if action == "set_building":
+        if not number:
+            return {"ok": False, "reply": "Which unit number should I move between buildings?"}
+        unit = Unit.query.filter_by(property_id=prop.id, unit_number=number).filter(Unit.deleted_at.is_(None)).first()
+        if not unit:
+            return {"ok": False, "reply": f"I can't find unit {number} at {prop.name}."}
+        building = clean_building(payload.get("building") or "")
+        if building.lower() in {"none", "unassigned", "no building"}:
+            building = ""
+        before = {"unit_number": unit.unit_number, "building": unit.building}
+        unit.building = building
+        audit(user.id, source, "update", "unit", unit.id, before, {"unit_number": unit.unit_number, "building": building, "property_id": prop.id})
+        return {"ok": True, "reply": f"Moved unit {number} to {building_label(building) or 'No building'} at {prop.name}.", "unit_id": unit.id, "property_id": prop.id}
+
     if not number:
         return {"ok": False, "reply": "Which unit number?"}
     unit, _status = ensure_unit(prop, number, user, source)
@@ -433,6 +467,26 @@ def open_task_count(unit_id: int) -> int:
         .filter(UnitTask.deleted_at.is_(None), UnitTask.status == "needed")
         .count()
     )
+
+
+def unit_history(unit_id: int, limit: int = 100) -> list[dict]:
+    from app.models import UnitChange
+    from app.services.records import loads
+
+    rows = UnitChange.query.filter_by(unit_id=unit_id).order_by(UnitChange.id.desc()).limit(limit).all()
+    history = []
+    for row in rows:
+        details = loads(row.details_json)
+        history.append({
+            "when": row.created_at,
+            "who": person_label(row.actor_id) or "Someone",
+            "action": row.action.replace("_", " "),
+            "summary": row.summary,
+            "before": details.get("before") or {},
+            "after": details.get("after") or {},
+            "source": row.source,
+        })
+    return history
 
 
 def recent_changes(property_id: int, limit: int = 12) -> list[dict]:

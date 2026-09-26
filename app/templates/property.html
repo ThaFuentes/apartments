@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block title %}{{ prop.name }}{% endblock %}
+{% block body_class %}property-office{% endblock %}
 {% block main %}
 <section class="sheet">
   <p><a href="/places{% if prop.city_id %}/{{ prop.city_id }}{% endif %}">{{ city_name }}{% if state_name %}, {{ state_name }}{% endif %}</a></p>
   <h1>{{ place_name }}</h1>
   <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} here.</p>
-  <p class="hint">Green is a make ready. Blue is occupied, someone living there.</p>
+  <p class="hint">Green units need make-ready work · Blue units are occupied · Search records across equipment, jobs, vendors, and notes.</p>
   {% if editable %}
   <form method="post" action="/properties/{{ prop.id }}/units" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -15,18 +16,25 @@
     <button type="submit">Add these units</button>
   </form>
   {% endif %}
-  <label class="find-unit">Find a unit
-    <input data-unit-find autocomplete="off" inputmode="text" placeholder="804">
-  </label>
-  <div class="unit-tools">
-    <a href="?sort=recent" {% if sort == "recent" and not show %}aria-current="page"{% endif %}>Most recent</a>
-    <a href="?sort=number" {% if sort == "number" and not show %}aria-current="page"{% endif %}>Unit number</a>
-    <a href="?show=worked&sort=recent" {% if show == "worked" %}aria-current="page"{% endif %}>Had work</a>
-    <a href="?show=make_ready" {% if show == "make_ready" %}aria-current="page"{% endif %}>Make ready</a>
-    <a href="?show=occupied" {% if show == "occupied" %}aria-current="page"{% endif %}>Occupied</a>
-    <a href="?show=needs" {% if show == "needs" %}aria-current="page"{% endif %}>Needs work</a>
+  <form method="get" class="unit-search-form">
+    <label class="find-unit">Search unit records
+      <input data-unit-find name="q" value="{{ query }}" autocomplete="off" inputmode="search" placeholder="Unit number, appliance, work note, vendor…">
+    </label>
+    {% if show %}<input type="hidden" name="show" value="{{ show }}">{% endif %}
+    {% if sort %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    {% if building %}<input type="hidden" name="building" value="{{ building }}">{% endif %}
+    <button type="submit" class="quiet">Search records</button>
+  </form>
+  <div class="unit-tools" aria-label="Filter units">
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort='recent', show='', building=building or '', q=query or '') }}" {% if sort == "recent" and not show %}aria-current="page"{% endif %}>Most recent</a>
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort='number', show=show or '', building=building or '', q=query or '') }}" {% if sort == "number" and not show %}aria-current="page"{% endif %}>Unit number</a>
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='worked', building=building or '', q=query or '') }}" {% if show == "worked" %}aria-current="page"{% endif %}>Had work</a>
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='make_ready', building=building or '', q=query or '') }}" {% if show == "make_ready" %}aria-current="page"{% endif %}>Make ready</a>
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='occupied', building=building or '', q=query or '') }}" {% if show == "occupied" %}aria-current="page"{% endif %}>Occupied</a>
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='needs', building=building or '', q=query or '') }}" {% if show == "needs" %}aria-current="page"{% endif %}>Needs work</a>
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show=show or '', building='', q=query or '') }}" {% if not building %}aria-current="page"{% endif %}>All buildings</a>
     {% for name in building_names %}
-    <a href="?building={{ name }}" {% if building == name %}aria-current="page"{% endif %}>Building {{ name }}</a>
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show=show or '', building=name, q=query or '') }}" {% if building == name %}aria-current="page"{% endif %}>Building {{ name }}</a>
     {% endfor %}
   </div>
   {% if not cards %}
@@ -54,21 +62,33 @@
       {% if card.gear_lines %}
       <span class="unit-gear">{% for line in card.gear_lines %}{{ line }}{% if not loop.last %} · {% endif %}{% endfor %}{% if card.gear_more %} · {{ card.gear_more }} more{% endif %}</span>
       {% endif %}
+      <span class="unit-search-data" hidden>{{ card.search_blob }}</span>
       {% if editable %}
-      <form method="post" action="/units/{{ card.unit.id }}" class="inline">
+      <form method="post" action="/units/{{ card.unit.id }}" class="inline unit-edit-inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input name="unit_number" value="{{ card.unit.unit_number }}" aria-label="Unit number">
-        <button type="submit" class="quiet">Save number</button>
+        <label>Unit number <input name="unit_number" value="{{ card.unit.unit_number }}" aria-label="Unit number"></label>
+        <label>Building <input name="building" value="{{ card.unit.building }}" aria-label="Building" placeholder="Unassigned"></label>
+        <button type="submit" class="quiet">Save unit</button>
       </form>
-      <form method="post" action="/units/{{ card.unit.id }}/delete">
+      <form method="post" action="/units/{{ card.unit.id }}/delete" onsubmit="return confirm('Move unit {{ card.unit.unit_number }} and its records to the restore bin?');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="ghost">Delete unit</button>
+        <button type="submit" class="ghost">Remove unit</button>
       </form>
       {% endif %}
     </article>
     {% endfor %}
   </div>
   <p class="empty" data-unit-empty hidden>No unit matches.</p>
+  {% if deleted_units and editable %}
+  <details class="restore-bin">
+    <summary>Recently removed units · {{ deleted_units|length }}</summary>
+    <ul class="list">
+      {% for removed_unit in deleted_units %}
+      <li class="restore-row"><strong>Unit {{ removed_unit.unit_number }}{% if removed_unit.building %} · Building {{ removed_unit.building }}{% endif %}</strong><span class="hint">Restore the unit and records removed with it.</span><form method="post" action="/units/{{ removed_unit.id }}/restore"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="quiet">Restore unit</button></form></li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
   {% if changes %}
   <h2>Who changed what</h2>
   <ul class="list">

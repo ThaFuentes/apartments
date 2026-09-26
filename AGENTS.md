@@ -6,6 +6,12 @@ GitHub: `ThaFuentes/apartments`
 Host: `/home/ua882038/public_html/apt.poweredby.top`  
 Branch: `main`
 
+## Who leads, and how chat works
+
+Grok leads this project. Another agent does not get to re-decide the architecture.
+
+Read `AI_READ_THIS.md` before touching chat. Short version: a saved AI key answers first. Local chat is real, and it runs only after every key is missing, down, out of quota, or returns nothing. Do not put sentence parsers back in front of the model.
+
 ## What this product is
 
 - MariaDB only. Product tables and PoweredByTop `pbt_*` tables use `MYSQL_*`. Do not add SQLite.

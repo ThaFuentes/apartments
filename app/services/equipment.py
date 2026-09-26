@@ -241,7 +241,7 @@ def gemini_key(user):
     from app.services.crypto import decrypt_text
     from app.services.gemini import resolve_model
 
-    owner = user if getattr(user, "role", "") == "owner" else User.query.filter_by(role="owner").order_by(User.id.asc()).first()
+    owner = user if getattr(user, "role", "") in ("owner", "admin") else User.query.filter_by(role="owner").order_by(User.id.asc()).first()
     if not owner:
         return "", None
     cred = (

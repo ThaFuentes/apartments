@@ -1,19 +1,28 @@
 {% extends "base.html" %}
-{% block title %}{% if city %}{{ city.name }}{% else %}Places{% endif %}{% endblock %}
+{% block title %}{% if city %}{{ city.name }}{% else %}Properties{% endif %}{% endblock %}
 {% block main %}
 <section class="sheet">
   {% if city %}
-  <p><a href="/places">All places</a></p>
-  <h1>{{ groups[0].city if groups else city.name }}</h1>
+  <p><a href="/places">All properties</a></p>
+  <h1>{{ groups[0].city if groups and not groups[0].pinned else city.name }}</h1>
   {% else %}
-  <h1>Places</h1>
-  <p class="lead">Open a location to see the units, what was done, and the equipment.</p>
+  <h1>Properties</h1>
+  <p class="lead">Every property, by state and city.</p>
   {% endif %}
   {% if not groups %}
-  <p class="empty">{% if current_user.role == 'owner' %}No places yet. Add one on Home.{% else %}No properties are on this login yet.{% endif %}</p>
+  <p class="empty">{% if current_user.role == 'owner' %}No properties yet. Add one on Home.{% else %}No properties are on this login yet.{% endif %}</p>
   {% endif %}
+  {% set ns = namespace(state='') %}
   {% for group in groups %}
-  {% if not city %}<h2>{{ group.city }}</h2>{% endif %}
+  {% if not city %}
+    {% if group.pinned %}
+    <h2>Pinned</h2>
+    {% elif group.state != ns.state %}
+    {% set ns.state = group.state %}
+    <h2>{{ group.state or 'Other' }}</h2>
+    {% endif %}
+    {% if not group.pinned %}<h3>{{ group.city_name }}</h3>{% endif %}
+  {% endif %}
   <div class="stack">
     {% for place in group.places %}
     <article class="unit-card{% if place.pinned %} pinned{% endif %}">

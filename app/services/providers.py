@@ -10,6 +10,7 @@ from app.models import ApiCredential, User
 from app.services.clock import utcnow
 from app.services.crypto import decrypt_text, encrypt_text, last4
 from app.services.gemini import CHAT_RULES, TOOL_DECLS, backoff_until, complete as gemini_complete, read_nameplate, resolve_model
+from app.services.parse import catalog_lines, parse_rules
 
 PROVIDERS = {
     "gemini": {
@@ -86,7 +87,18 @@ PROVIDERS = {
     },
 }
 
-ROLE_LABELS = {"owner": "owner", "field": "employee", "viewer": "boss"}
+ROLE_LABELS = {
+    "owner": "owner",
+    "admin": "admin",
+    "regional_manager": "regional manager",
+    "property_manager": "property manager",
+    "assistant_manager": "assistant manager",
+    "office": "office",
+    "maintenance_manager": "maintenance manager",
+    "maintenance_person": "maintenance person",
+    "field": "maintenance person",
+    "viewer": "office",
+}
 
 
 def provider_spec(name: str) -> dict:
@@ -346,7 +358,9 @@ def check_key(provider: str, api_key: str, model: str, base_url: str = "") -> di
 
 
 def keys_for(user) -> list:
-    owner = user if getattr(user, "role", "") == "owner" else User.query.filter_by(role="owner").order_by(User.id.asc()).first()
+    from app.services.access import can_manage_company_settings
+
+    owner = user if can_manage_company_settings(user) else User.query.filter_by(role="owner").order_by(User.id.asc()).first()
     if not owner:
         return []
     rows = ApiCredential.query.filter_by(user_id=owner.id).order_by(ApiCredential.id.asc()).all()
@@ -376,12 +390,19 @@ def voice_brief() -> str:
     return "\n".join(lines)
 
 
-def record_brief() -> str:
-    """What she already has, so the model can see duplicates instead of guessing."""
+def record_brief(user=None) -> str:
+    """Only put the caller's visible records in the model context."""
     from app.models import Equipment, Job, Property
+    from app.services.access import sees_all, visible_property_ids
 
-    props = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).limit(40).all()
-    lines = ["Her record:"]
+    prop_query = Property.query.filter(Property.deleted_at.is_(None))
+    allowed = None
+    if user is not None and not sees_all(user):
+        allowed = visible_property_ids(user)
+        prop_query = prop_query.filter(Property.id.in_(allowed or {-1}))
+    props = prop_query.order_by(Property.name.asc()).limit(40).all()
+    prop_ids = [prop.id for prop in props]
+    lines = ["Her record:", catalog_lines(props)]
     if not props:
         lines.append("No properties yet.")
     names = {}
@@ -394,10 +415,15 @@ def record_brief() -> str:
     dupes = [name for name, count in names.items() if count > 1]
     if dupes:
         lines.append("Same name more than once: " + ", ".join(dupes))
-    jobs = Job.query.filter(Job.deleted_at.is_(None)).order_by(Job.id.desc()).limit(8).all()
+    jobs_query = Job.query.filter(Job.deleted_at.is_(None))
+    gear_query = Equipment.query.filter(Equipment.deleted_at.is_(None))
+    if allowed is not None:
+        jobs_query = jobs_query.filter(Job.property_id.in_(prop_ids or {-1}))
+        gear_query = gear_query.filter(Equipment.property_id.in_(prop_ids or {-1}))
+    jobs = jobs_query.order_by(Job.id.desc()).limit(8).all()
     for job in jobs:
         lines.append(f"job {job.id}: {job.title} at property {job.property_id}")
-    gear = Equipment.query.filter(Equipment.deleted_at.is_(None)).order_by(Equipment.id.desc()).limit(6).all()
+    gear = gear_query.order_by(Equipment.id.desc()).limit(6).all()
     for item in gear:
         bits = " ".join(bit for bit in (item.brand, item.style, item.kind, item.serial_number) if bit)
         unit = item.unit.unit_number if item.unit else "-"
@@ -414,9 +440,12 @@ def collect_tool_calls(user, text: str):
     prompt = (
         voice_brief()
         + "\n\n"
-        + record_brief()
+        + record_brief(user)
+        + "\n\n"
+        + parse_rules()
         + "\n\nEach appliance is its own card on one unit. A serial, style, or note belongs to that one item. "
         + "A washer in unit 26 does not share a note with any other washer. "
+        + "When she says she added, installed, or replaced an appliance in a unit, call record_unit_visit with equipment filled in: kind, brand, model, serial, size, style, color, notes. Equipment saves even without a work title. "
         + "A trip plan is a plan. Gas is a line on that plan, not a place. "
         + "Make-ready units and occupied units are statuses on that unit. "
         + "A note, task, or vendor on one unit stays on that unit. "

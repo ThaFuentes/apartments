@@ -10,6 +10,13 @@ from app.services.records import audit, dumps, loads, open_shift
 IMMEDIATE = {"query_record"}
 
 
+def _authorized(user, tool: str, payload: dict) -> dict | None:
+    from app.services.access import authorize_tool
+
+    verdict = authorize_tool(user, tool, payload or {})
+    return None if verdict.get("ok") else verdict
+
+
 def _prior(user_id: int, key: str) -> dict | None:
     row = IdempotencyKey.query.filter_by(user_id=user_id, key_text=key).first()
     if not row or not row.result_json:
@@ -21,6 +28,11 @@ def _prior(user_id: int, key: str) -> dict | None:
 
 
 def commit_apply(user, tool: str, payload: dict, source: str, key: str) -> dict:
+    payload = payload or {}
+    blocked = _authorized(user, tool, payload)
+    if blocked:
+        db.session.rollback()
+        return blocked
     prior = _prior(user.id, key)
     if prior:
         return prior
@@ -107,13 +119,17 @@ def confirm_one(user, row: PendingAction, source: str) -> dict:
     blocked = _gate(user, row)
     if blocked:
         return blocked
+    payload = loads(row.payload_json)
+    blocked = _authorized(user, row.tool, payload)
+    if blocked:
+        db.session.rollback()
+        return blocked
     prior = _prior(user.id, row.idempotency_key)
     if prior:
         row.status = "accepted"
         row.result_json = dumps(prior)
         db.session.commit()
         return prior
-    payload = loads(row.payload_json)
     payload["fields_confirmed"] = True
     result = apply_tool(user, row.tool, payload, source)
     if not result.get("ok"):
@@ -223,11 +239,7 @@ def confirm_property(user, source: str = "human") -> dict:
         audit(user.id, source, "confirm_property", "shift", shift.id, {"confirmed": False}, {"confirmed": True, "property_id": shift.property_id})
         db.session.commit()
         prop_reply = f"This is {property_place(shift.property)}."
-    waiting = [
-        row
-        for row in latest_batch(user)
-        if row.status == "pending"
-    ]
+    waiting = [row for row in latest_batch(user) if row.status == "pending"]
     if waiting:
         names = "; ".join(row.summary for row in waiting[:4])
         prop_reply += f" Ready to save: {names}"

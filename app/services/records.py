@@ -9,6 +9,7 @@ from app.models import (
     AssistantProfile,
     AuditLog,
     City,
+    UnitChange,
     Job,
     Property,
     Shift,
@@ -34,10 +35,11 @@ def loads(text) -> dict:
 
 
 def audit(actor_id, source, action, entity, entity_id, before, after) -> None:
+    source = source if source in ("ai", "human") else "human"
     db.session.add(
         AuditLog(
             actor_id=actor_id,
-            source=source if source in ("ai", "human") else "human",
+            source=source,
             action=action[:64],
             entity=entity[:40],
             entity_id=entity_id,
@@ -46,10 +48,58 @@ def audit(actor_id, source, action, entity, entity_id, before, after) -> None:
             created_at=utcnow(),
         )
     )
+    before = before if isinstance(before, dict) else {}
+    after = after if isinstance(after, dict) else {}
+    data = after or before or {}
+    property_id = data.get("property_id") or before.get("property_id")
+    unit_id = data.get("unit_id") or before.get("unit_id")
+    if entity == "unit":
+        unit_id = entity_id
+        unit = db.session.get(Unit, int(unit_id)) if unit_id else None
+        property_id = property_id or (unit.property_id if unit else None)
+    if entity in {"job", "unit_visit", "equipment", "unit_task"} and entity_id:
+        from app.models import Equipment, Job, UnitTask, UnitVisit
+
+        model = {"job": Job, "unit_visit": UnitVisit, "equipment": Equipment, "unit_task": UnitTask}.get(entity)
+        row = db.session.get(model, int(entity_id)) if model else None
+        unit_id = unit_id or (getattr(row, "unit_id", None) if row else None)
+        property_id = property_id or (getattr(row, "property_id", None) if row else None)
+    if entity in {"job", "unit_visit", "equipment", "unit_task"} and unit_id:
+        unit = db.session.get(Unit, int(unit_id))
+        property_id = property_id or (unit.property_id if unit else None)
+    if entity in {"equipment", "job", "unit_task"} and before.get("unit_id") and before.get("unit_id") != unit_id:
+        related = list(data.get("related_unit_ids") or [])
+        related.append(before["unit_id"])
+        data = {**data, "related_unit_ids": related}
+    if entity in {"unit", "job", "unit_visit", "equipment", "unit_task"} and unit_id and property_id:
+        label = data.get("title") or data.get("unit_number") or data.get("kind") or data.get("note") or action.replace("_", " ")
+        details = dumps({"entity": entity, "entity_id": entity_id, "before": before or {}, "after": after or {}})
+        related_ids = {int(unit_id)}
+        for raw_id in data.get("related_unit_ids") or []:
+            try:
+                related_ids.add(int(raw_id))
+            except (TypeError, ValueError):
+                continue
+        for related_id in related_ids:
+            related_unit = db.session.get(Unit, related_id)
+            if not related_unit:
+                continue
+            db.session.add(
+                UnitChange(
+                    property_id=int(related_unit.property_id),
+                    unit_id=related_id,
+                    actor_id=actor_id,
+                    action=action[:64],
+                    summary=str(label)[:500],
+                    details_json=details,
+                    source=source,
+                    created_at=utcnow(),
+                )
+            )
 
 
 def site_profile() -> AssistantProfile | None:
-    owner = User.query.filter_by(role="owner").order_by(User.id.asc()).first()
+    owner = User.query.filter(User.role.in_(("owner", "admin"))).order_by(User.id.asc()).first()
     if not owner:
         return None
     row = AssistantProfile.query.filter_by(user_id=owner.id).first()
@@ -158,13 +208,22 @@ def bare_property_name(name: str, city: str = "") -> str:
 
 
 def not_a_property(name: str) -> bool:
-    """Gas, fuel, and meals are stops on a plan. They are not apartment properties."""
+    """Gas, fuel, meals, vendors, work orders, and buildings are not properties."""
     low = " ".join(re.sub(r"[^a-z ]", " ", (name or "").lower()).split())
     if not low:
         return False
     if low in {"gas", "fuel", "gasoline", "lunch", "dinner", "breakfast", "food", "snack", "coffee"}:
         return True
-    return bool(re.fullmatch(r"(get |getting |stop for |fill up |filling up |grab )?(gas|fuel|gasoline)", low))
+    if re.fullmatch(r"(get |getting |stop for |fill up |filling up |grab )?(gas|fuel|gasoline)", low):
+        return True
+    # Vendors, work orders, buildings, and unit talk never make a place.
+    if re.match(r"^(?:add |new )?(?:vendor|vendors|work order|building)\b", low):
+        return True
+    if re.search(r"\b(?:unit|apt|apartment) \d", low):
+        return True
+    if re.match(r"^(?:fridge|freezer|stove|oven|range|washer|dryer|dishwasher|microwave|ac|air conditioner|heater|water heater|fan)\b", low) and re.search(r"\b(?:to|in|at|unit)\b", low):
+        return True
+    return False
 
 
 def find_properties(name: str, city_name: str = "") -> list[Property]:
@@ -262,6 +321,16 @@ def ensure_property(
         if prop.name != title or prop.city_id != city.id:
             prop.name = title
             prop.city = city
+        if prop.region_id is None and actor_id:
+            from app.models import RegionCity
+            from app.services.access import region_ids, role_of
+
+            actor = db.session.get(User, actor_id)
+            assigned = region_ids(actor) if actor and role_of(actor) == "regional_manager" else set()
+            prop.region_id = next(
+                (row.region_id for row in RegionCity.query.filter_by(city_id=city.id).all() if row.region_id in assigned),
+                None,
+            ) if assigned else None
         changed = False
         before = {"address": prop.address, "lat": prop.lat, "lng": prop.lng}
         if address and address != prop.address:
@@ -283,10 +352,23 @@ def ensure_property(
             )
         return prop
     city = ensure_city(city_name, region, actor_id, source)
+    from app.services.access import region_ids, role_of
+    from app.models import RegionCity
+
+    region_id = None
+    if actor_id:
+        actor = db.session.get(User, actor_id)
+        scoped_regions = region_ids(actor) if actor and role_of(actor) == "regional_manager" else set()
+        if scoped_regions:
+            region_id = next(
+                (row.region_id for row in RegionCity.query.filter_by(city_id=city.id).all() if row.region_id in scoped_regions),
+                None,
+            )
     prop = Property(
         city_id=city.id,
         name=title[:160],
         address=(address or "").strip(),
+        region_id=region_id,
         lat=lat,
         lng=lng,
         created_by_id=actor_id,

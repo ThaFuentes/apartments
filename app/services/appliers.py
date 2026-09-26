@@ -589,7 +589,7 @@ def apply_upsert_property(user, payload, source) -> dict:
     name = (payload.get("property_name") or "").strip()
     city = (payload.get("city") or "").strip()
     if not_a_property(name):
-        return {"ok": False, "reply": f"{name} stays on the trip plan. It is not a place."}
+        return {"ok": False, "reply": f"{name} stays on the trip plan. It is not a property."}
     name = bare_property_name(name, city)
     if not name:
         where = city or "that city"
@@ -662,6 +662,10 @@ def apply_record_unit_visit(user, payload, source) -> dict:
     status = (payload.get("status") or job_status(payload.get("title") or "")).lower()
     note = (payload.get("note") or "").strip()
     title = (payload.get("title") or "").strip()
+    from app.services.equipment import describe
+
+    if not note and not title:
+        note = describe(payload.get("equipment") or {})
     visit = UnitVisit(
         unit_id=unit.id,
         property_id=shift.property_id,
@@ -675,6 +679,8 @@ def apply_record_unit_visit(user, payload, source) -> dict:
     db.session.add(visit)
     db.session.flush()
     job_id = None
+    plan_note = ""
+    job = None
     if title and status != "skipped":
         job = Job(
             property_id=shift.property_id,
@@ -704,17 +710,20 @@ def apply_record_unit_visit(user, payload, source) -> dict:
                 media.job_id = job.id
                 media.unit_id = unit.id
                 media.property_id = shift.property_id
-        _save_equipment(user, payload, unit, job, shift.property_id, source)
     elif status == "skipped":
         audit(user.id, source, "skip", "unit_visit", visit.id, {}, {"unit": number})
-    from app.services.equipment import describe
+    if status != "skipped":
+        _save_equipment(user, payload, unit, job, shift.property_id, source)
 
     word = "Added" if created else "Updated"
-    equip = describe(payload.get("equipment") or {})
+    gear_bits = [payload.get("equipment") or {}] + [
+        item for item in (payload.get("equipment_items") or []) if isinstance(item, dict)
+    ]
+    equip = " and ".join(bit for bit in (describe(item) for item in gear_bits) if bit)
     bit = f" {equip or title}." if (equip or title) else ""
     return {
         "ok": True,
-        "reply": f"{word} unit {number}.{bit}{plan_note if title and status != 'skipped' else ''}",
+        "reply": f"{word} unit {number}.{bit}{plan_note}",
         "unit_id": unit.id,
         "job_id": job_id,
         "visit_id": visit.id,
@@ -922,6 +931,12 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
     if ambiguous:
         return None, ambiguous
     created = target is None
+    before = {} if created else {
+        "kind": target.kind, "brand": target.brand, "style": target.style,
+        "model": target.model_number, "serial": target.serial_number,
+        "size": target.size_label, "color": target.color, "notes": target.notes,
+        "unit_id": target.unit_id, "property_id": target.property_id,
+    }
     if created:
         row = Equipment(
             property_id=property_id,
@@ -984,15 +999,18 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
         "create" if created else "update",
         "equipment",
         row.id,
-        {},
+        before,
         {
             "kind": row.kind,
             "brand": row.brand,
             "model": row.model_number,
             "serial": row.serial_number,
             "style": row.style,
+            "size": row.size_label,
+            "color": row.color,
             "notes": row.notes,
             "unit_id": row.unit_id,
+            "property_id": row.property_id,
         },
     )
     row._apt_created = created
@@ -1020,14 +1038,109 @@ def _file_pieces(user, pieces, unit, job, property_id, source, stamp):
     return saved, warnings
 
 
-def _save_equipment(user, payload, unit, job, property_id, source) -> None:
-    eq = payload.get("equipment") or {}
-    if not isinstance(eq, dict):
-        return
+def _save_equipment(user, payload, unit, job, property_id, source) -> list:
+    """File every appliance she named on this unit, title or no title."""
+    extra = [item for item in (payload.get("equipment_items") or []) if isinstance(item, dict)]
+    pieces = _gear_pieces(payload.get("equipment") or {}, extra)
     media_id = int(payload["media_id"]) if payload.get("media_id") else None
-    row, _ambiguous = file_piece(user, eq, unit, job, property_id, source)
-    if row is not None and media_id and not row.media_id:
-        row.media_id = media_id
+    rows = []
+    for piece in pieces:
+        row, _ambiguous = file_piece(user, piece, unit, job, property_id, source)
+        if row is None:
+            continue
+        if media_id and not row.media_id and not rows:
+            row.media_id = media_id
+        rows.append(row)
+    return rows
+
+
+def apply_move_equipment(user, payload, source) -> dict:
+    """Move one uniquely identified equipment card between units at one property."""
+    from app.models import UnitChange
+    from app.services.equipment import kind_label
+    from app.services.records import normalize_unit
+
+    try:
+        property_id = int(payload.get("property_id") or 0)
+    except (TypeError, ValueError):
+        property_id = 0
+    prop = db.session.get(Property, property_id)
+    if not prop or prop.deleted_at:
+        return {"ok": False, "reply": "Which assigned property is this for?"}
+
+    source_number = normalize_unit(payload.get("source_unit_number") or "")
+    target_number = normalize_unit(payload.get("target_unit_number") or "")
+    if not source_number or not target_number:
+        return {"ok": False, "reply": "I need the current unit and the new unit number."}
+    source_unit = Unit.query.filter_by(property_id=prop.id, unit_number=source_number).filter(Unit.deleted_at.is_(None)).first()
+    target_unit = Unit.query.filter_by(property_id=prop.id, unit_number=target_number).filter(Unit.deleted_at.is_(None)).first()
+    if not source_unit:
+        return {"ok": False, "reply": f"I can't find unit {source_number} at {prop.name}."}
+    if not target_unit:
+        return {"ok": False, "reply": f"I can't find unit {target_number} at {prop.name}. Add that unit first so I don't guess."}
+    if source_unit.id == target_unit.id:
+        return {"ok": False, "reply": "Those are the same unit. Which unit should receive the appliance?"}
+
+    from app.services.equipment import appliance_kinds
+
+    kind_hint = (payload.get("kind") or "").strip().lower()
+    if not kind_hint:
+        kind_hint = (appliance_kinds(payload.get("item_hint") or "") or [""])[0]
+    serial_hint = (payload.get("serial_number") or "").strip().upper()
+    query = Equipment.query.filter(
+        Equipment.deleted_at.is_(None),
+        Equipment.property_id == prop.id,
+        Equipment.unit_id == source_unit.id,
+    )
+    if payload.get("equipment_id"):
+        try:
+            query = query.filter(Equipment.id == int(payload["equipment_id"]))
+        except (TypeError, ValueError):
+            return {"ok": False, "reply": "I couldn't identify that appliance card."}
+    elif kind_hint:
+        query = query.filter(db.func.lower(Equipment.kind) == kind_hint)
+    else:
+        return {"ok": False, "reply": "Which appliance should I move from that unit?"}
+    if serial_hint:
+        query = query.filter(db.func.upper(Equipment.serial_number) == serial_hint)
+    rows = query.order_by(Equipment.id.asc()).all()
+    if len(rows) != 1:
+        if not rows:
+            return {"ok": False, "reply": f"I can't find a {kind_hint or 'matching appliance'} in unit {source_number}."}
+        options = "; ".join(
+            " ".join(bit for bit in (row.brand, row.model_number, f"serial {row.serial_number}" if row.serial_number else "") if bit)
+            for row in rows[:6]
+        )
+        return {"ok": False, "reply": f"There is more than one match in unit {source_number}. Tell me the serial to choose one: {options}"}
+
+    item = rows[0]
+    if serial_hint and (item.serial_number or "").strip().upper() != serial_hint:
+        return {"ok": False, "reply": f"I didn't find serial {serial_hint} in unit {source_number}. Nothing moved."}
+    before = {"unit_id": source_unit.id, "unit_number": source_unit.unit_number}
+    item.unit_id = target_unit.id
+    audit(
+        user.id,
+        source,
+        "move",
+        "equipment",
+        item.id,
+        before,
+        {
+            "unit_id": target_unit.id,
+            "unit_number": target_unit.unit_number,
+            "property_id": prop.id,
+            "title": f"Moved {kind_label(item.kind) or item.kind} from unit {source_number} to unit {target_number}",
+            "related_unit_ids": [source_unit.id, target_unit.id],
+        },
+    )
+    label = kind_label(item.kind) or item.kind or "appliance"
+    return {
+        "ok": True,
+        "reply": f"Moved the {label} from unit {source_number} to unit {target_number} at {prop.name}. History was saved under your login.",
+        "equipment_id": item.id,
+        "unit_id": target_unit.id,
+        "property_id": prop.id,
+    }
 
 
 def apply_note_equipment(user, payload, source) -> dict:
@@ -1153,17 +1266,25 @@ def apply_estimate_miles(user, payload, source) -> dict:
 
 
 def apply_query_record(user, payload, source) -> dict:
+    from app.services.access import authorize_tool, scoped_property_query, visible_property_ids
+
+    allowed = authorize_tool(user, "query_record", payload or {})
+    if not allowed.get("ok"):
+        return allowed
     question = (payload.get("question") or "").strip()
     if not question:
         return {"ok": False, "reply": "Ask about a property, a unit, or an expense."}
     low = question.lower()
-    props = Property.query.filter(Property.deleted_at.is_(None)).all()
+    props = scoped_property_query(user, Property.query.filter(Property.deleted_at.is_(None)), Property.id).all()
+    visible_ids = None if getattr(user, "role", "") in ("owner", "admin", "office") else visible_property_ids(user)
     hit = None
     for prop in props:
         if prop.name.lower() in low:
             hit = prop
             break
     jobs = Job.query.filter(Job.deleted_at.is_(None))
+    if visible_ids is not None:
+        jobs = jobs.filter(Job.property_id.in_(visible_ids or {-1}))
     if hit:
         jobs = jobs.filter_by(property_id=hit.id)
     rows = jobs.order_by(Job.id.desc()).limit(80).all()
@@ -1218,6 +1339,8 @@ def apply_draft_report(user, payload, source) -> dict:
         found = find_properties(payload["property_name"], payload.get("city") or "")
         if found:
             prop_id = found[0].id
+    if not prop_id and getattr(user, "role", "") not in ("owner", "admin"):
+        return {"ok": False, "reply": "Scoped report packs are not enabled for this role yet."}
     snapshot = build_snapshot(
         kind=kind,
         starts_on=starts,
@@ -1426,10 +1549,12 @@ def _email_report(address: str, report: Report, link: str) -> bool:
 
 def apply_invite_viewer(user, payload, source) -> dict:
     source = _src(source)
-    if user.role != "owner":
-        return {"ok": False, "reply": "Only you can add logins."}
-    username = (payload.get("username") or "").strip()
+    from app.services.access import can_create_user
+
     role = (payload.get("role") or "viewer").strip().lower()
+    if not can_create_user(user, role):
+        return {"ok": False, "reply": "This login cannot add that role or scope."}
+    username = (payload.get("username") or "").strip()
     try:
         created, generated = create_user(
             username=username,
@@ -1476,11 +1601,15 @@ def apply_invite_viewer(user, payload, source) -> dict:
 
 def apply_update_viewer(user, payload, source) -> dict:
     source = _src(source)
-    if user.role != "owner":
-        return {"ok": False, "reply": "Only you can change logins."}
     target = find_user(payload.get("username") or "")
     if not target:
         return {"ok": False, "reply": "I can't find that login."}
+    from app.services.access import can_create_user, can_manage_user
+
+    if not can_manage_user(user, target):
+        return {"ok": False, "reply": "This login cannot manage that person."}
+    if payload.get("role") and not can_create_user(user, payload["role"]):
+        return {"ok": False, "reply": "This login cannot assign that role."}
     before = {
         "role": target.role,
         "email": target.email,
@@ -1489,7 +1618,7 @@ def apply_update_viewer(user, payload, source) -> dict:
         "can_see_live_map": target.can_see_live_map,
         "active": target.active,
     }
-    if payload.get("role") in ("owner", "field", "viewer"):
+    if payload.get("role") in __import__("app.services.people", fromlist=["ROLES"]).ROLES:
         target.role = payload["role"]
     if payload.get("clear_email"):
         first = User.query.filter_by(role="owner").order_by(User.id.asc()).first()
@@ -1514,7 +1643,9 @@ def apply_update_viewer(user, payload, source) -> dict:
 
 
 def _entity(name: str, entity_id: int):
-    model = {"job": Job, "unit": Unit, "expense": Expense}.get(name)
+    from app.models import UnitTask
+
+    model = {"job": Job, "unit": Unit, "expense": Expense, "unit_task": UnitTask, "equipment": Equipment}.get(name)
     if not model:
         return None
     return db.session.get(model, entity_id)
@@ -1709,28 +1840,61 @@ def apply_update_property(user, payload, source) -> dict:
     return {"ok": True, "reply": f"Updated {where}.{extra}", "property_id": prop.id}
 
 
+def _record_snapshot(name: str, row) -> dict:
+    common = {"property_id": row.property_id, "deleted_at": row.deleted_at.isoformat() if row.deleted_at else None}
+    if name == "unit":
+        return {**common, "unit_id": row.id, "unit_number": row.unit_number, "building": row.building, "occupancy": row.occupancy}
+    if name == "job":
+        return {**common, "unit_id": row.unit_id, "title": row.title, "detail": row.detail, "status": row.status}
+    if name == "unit_task":
+        return {**common, "unit_id": row.unit_id, "title": row.title, "kind": row.kind, "status": row.status, "vendor": row.vendor, "notes": row.notes}
+    if name == "equipment":
+        return {**common, "unit_id": row.unit_id, "kind": row.kind, "brand": row.brand, "style": row.style, "model": row.model_number, "serial": row.serial_number, "size": row.size_label, "color": row.color, "notes": row.notes}
+    return {**common}
+
+
 def apply_soft_delete(user, payload, source) -> dict:
     source = _src(source)
     name = (payload.get("entity") or "").strip().lower()
     row = _entity(name, int(payload.get("entity_id") or 0))
     if not row or getattr(row, "deleted_at", None):
         return {"ok": False, "reply": "Nothing to remove."}
-    before = {"deleted_at": None}
-    row.deleted_at = utcnow()
-    audit(user.id, source, "delete", name, row.id, before, {"deleted_at": row.deleted_at.isoformat()})
-    return {"ok": True, "reply": f"Removed {name} {row.id}. Say restore {name} {row.id} if that was the wrong door.", "entity": name, "entity_id": row.id}
+    removed_at = utcnow()
+    if name == "unit":
+        from app.models import Equipment, UnitTask
+        for model in (Job, UnitTask, Equipment):
+            for child in model.query.filter_by(unit_id=row.id).filter(model.deleted_at.is_(None)).all():
+                child_name = {Job: "job", UnitTask: "unit_task", Equipment: "equipment"}[model]
+                before_child = _record_snapshot(child_name, child)
+                child.deleted_at = removed_at
+                audit(user.id, source, "delete", child_name, child.id, before_child, _record_snapshot(child_name, child))
+    before = _record_snapshot(name, row)
+    row.deleted_at = removed_at
+    after = _record_snapshot(name, row)
+    audit(user.id, source, "delete", name, row.id, before, after)
+    return {"ok": True, "reply": f"Removed {name.replace('_', ' ')} {row.id}. Say ‘restore {name.replace('_', ' ')} {row.id}’ if that was a mistake.", "entity": name, "entity_id": row.id, "unit_id": getattr(row, "unit_id", None)}
 
 
 def apply_restore(user, payload, source) -> dict:
     source = _src(source)
     name = (payload.get("entity") or "").strip().lower()
     row = _entity(name, int(payload.get("entity_id") or 0))
-    if row is None:
-        return {"ok": False, "reply": "I can't find that."}
-    before = {"deleted_at": row.deleted_at.isoformat() if row.deleted_at else None}
+    if row is None or not getattr(row, "deleted_at", None):
+        return {"ok": False, "reply": "That record is not in the restore bin."}
+    restore_group = row.deleted_at
+    before = _record_snapshot(name, row)
     row.deleted_at = None
-    audit(user.id, source, "restore", name, row.id, before, {"deleted_at": None})
-    return {"ok": True, "reply": f"Restored {name} {row.id}.", "entity": name, "entity_id": row.id}
+    after = _record_snapshot(name, row)
+    audit(user.id, source, "restore", name, row.id, before, after)
+    if name == "unit":
+        from app.models import Equipment, UnitTask
+        for model in (Job, UnitTask, Equipment):
+            for child in model.query.filter_by(unit_id=row.id, deleted_at=restore_group).all():
+                child_name = {Job: "job", UnitTask: "unit_task", Equipment: "equipment"}[model]
+                before_child = _record_snapshot(child_name, child)
+                child.deleted_at = None
+                audit(user.id, source, "restore", child_name, child.id, before_child, _record_snapshot(child_name, child))
+    return {"ok": True, "reply": f"Restored {name.replace('_', ' ')} {row.id} and its removed unit records.", "entity": name, "entity_id": row.id, "unit_id": getattr(row, "unit_id", None)}
 
 
 def apply_update_settings(user, payload, source) -> dict:
@@ -1792,6 +1956,7 @@ APPLIERS = {
     "add_plan_card": apply_add_plan_card,
     "log_work": apply_log_work,
     "note_equipment": apply_note_equipment,
+    "move_equipment": apply_move_equipment,
     "unit_board": apply_unit_board,
     "plan_outcome": apply_plan_outcome,
     "clear_plan": apply_clear_plan,
@@ -1819,7 +1984,13 @@ APPLIERS = {
 
 
 def apply_tool(user, tool: str, payload: dict, source: str) -> dict:
+    from app.services.access import authorize_tool
+
     fn = APPLIERS.get(tool)
     if not fn:
         return {"ok": False, "reply": "I don't know that action."}
-    return fn(user, payload or {}, source)
+    payload = payload or {}
+    authorized = authorize_tool(user, tool, payload)
+    if not authorized.get("ok"):
+        return authorized
+    return fn(user, payload, source)

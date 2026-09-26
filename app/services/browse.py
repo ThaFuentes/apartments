@@ -1,4 +1,4 @@
-"""Places, unit lists, and the card she opens to see what was done."""
+"""Properties, unit lists, and the card she opens to see what was done."""
 from __future__ import annotations
 
 import re
@@ -159,7 +159,7 @@ def place_groups(city_id: int | None = None, user=None) -> list[dict]:
             title = latest_visit.note or ""
         bucket = grouped.setdefault(
             (city_name.lower(), state.lower()),
-            {"city": label, "city_id": prop.city_id, "places": []},
+            {"city": label, "city_name": city_name or label, "state": state, "city_id": prop.city_id, "places": []},
         )
         access = mine.get(prop.id)
         bucket["places"].append(
@@ -174,7 +174,7 @@ def place_groups(city_id: int | None = None, user=None) -> list[dict]:
             }
         )
     pinned = []
-    groups = sorted(grouped.values(), key=lambda row: row["city"].lower())
+    groups = sorted(grouped.values(), key=lambda row: (row["state"].lower(), row["city_name"].lower()))
     for group in groups:
         stay = []
         for place in group["places"]:
@@ -188,7 +188,7 @@ def place_groups(city_id: int | None = None, user=None) -> list[dict]:
     groups = [group for group in groups if group["places"]]
     if pinned:
         pinned.sort(key=lambda row: (row["sort_order"], row["name"].lower()))
-        groups.insert(0, {"city": "Pinned", "city_id": None, "places": pinned, "pinned": True})
+        groups.insert(0, {"city": "Pinned", "city_name": "Pinned", "state": "", "city_id": None, "places": pinned, "pinned": True})
     return groups
 
 
@@ -239,9 +239,21 @@ def unit_cards(property_id: int, sort: str = "recent", query: str = "", show: st
     needle = (query or "").strip().lower()
     cards = []
     for unit in units:
-        if needle and needle not in (unit.unit_number or "").lower():
-            continue
         unit_jobs = sorted(jobs_by.get(unit.id) or [], key=lambda row: row.created_at or _EMPTY, reverse=True)
+        unit_tasks = [task for task in tasks if task.unit_id == unit.id]
+        unit_gear = gear_by.get(unit.id) or []
+        search_blob = " ".join(
+            [
+                unit.unit_number or "",
+                unit.building or "",
+                unit.occupancy or "",
+                *(f"{job.title} {job.detail}" for job in unit_jobs),
+                *(f"{task.title} {task.vendor} {task.notes}" for task in unit_tasks),
+                *(f"{item.brand} {item.kind} {item.style} {item.model_number} {item.serial_number} {item.notes}" for item in unit_gear),
+            ]
+        ).lower()
+        if needle and needle not in search_blob:
+            continue
         if show == "worked" and not unit_jobs:
             continue
         if show == "make_ready" and (unit.occupancy or "") != "make_ready":
@@ -250,7 +262,7 @@ def unit_cards(property_id: int, sort: str = "recent", query: str = "", show: st
             continue
         if show == "needs" and not needed_by.get(unit.id):
             continue
-        lines = [gear_blurb(item) for item in (gear_by.get(unit.id) or [])]
+        lines = [gear_blurb(item) for item in unit_gear]
         cards.append(
             {
                 "unit": unit,
@@ -260,9 +272,10 @@ def unit_cards(property_id: int, sort: str = "recent", query: str = "", show: st
                 "open_tasks": needed_by.get(unit.id, 0),
                 "part_count": parts_by.get(unit.id, 0),
                 "vendor_count": vendors_by.get(unit.id, 0),
-                "gear_count": len(gear_by.get(unit.id) or []),
+                "gear_count": len(unit_gear),
                 "gear_lines": lines[:2],
                 "gear_more": max(len(lines) - 2, 0),
+                "search_blob": search_blob,
             }
         )
     def _inside(row):

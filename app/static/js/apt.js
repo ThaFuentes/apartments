@@ -102,7 +102,8 @@
       const q = input.value.trim().toLowerCase();
       let shown = 0;
       list.querySelectorAll("[data-unit-card]").forEach(function (card) {
-        const hit = !q || (card.getAttribute("data-number") || "").toLowerCase().indexOf(q) !== -1;
+        const blob = (card.getAttribute("data-number") || "") + " " + (card.getAttribute("data-building") || "") + " " + ((card.querySelector(".unit-search-data") || {}).textContent || "");
+        const hit = !q || blob.toLowerCase().indexOf(q) !== -1;
         card.hidden = !hit;
         if (hit) shown += 1;
       });

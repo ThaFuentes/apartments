@@ -640,7 +640,9 @@ def property_detail(property_id):
     from app.services.people import person_label
 
     city_name, state = city_parts(prop.city.name, prop.city.region) if prop.city else ("", "")
-    packed = unit_cards(prop.id, sort=sort, query=request.args.get("q") or "", show=show, building=building)
+    query = (request.args.get("q") or "").strip()
+    packed = unit_cards(prop.id, sort=sort, query=query, show=show, building=building)
+    deleted_units = Unit.query.filter_by(property_id=prop.id).filter(Unit.deleted_at.isnot(None)).order_by(Unit.unit_number.asc()).all() if can_edit_property(current_user, prop.id) else []
     return render_template(
         "property.html",
         prop=prop,
@@ -654,6 +656,8 @@ def property_detail(property_id):
         show=show,
         building=packed["building"],
         building_names=packed["building_names"],
+        query=query,
+        deleted_units=deleted_units,
         changes=recent_changes(prop.id),
         who=person_label,
         editable=can_edit_property(current_user, prop.id),
@@ -721,7 +725,7 @@ def unit_rename(unit_id):
     from app.services.records import normalize_unit
 
     unit = _editable_unit(unit_id)
-    number = normalize_unit(request.form.get("unit_number") or "")
+    number = normalize_unit(request.form.get("unit_number") or unit.unit_number)
     if not number:
         flash("Type a unit number.", "warn")
         return redirect(f"/properties/{unit.property_id}")
@@ -733,7 +737,14 @@ def unit_rename(unit_id):
     if taken:
         flash(f"Unit {number} is already on this property.", "warn")
         return redirect(f"/properties/{unit.property_id}")
+    before = {"unit_number": unit.unit_number, "building": unit.building}
     unit.unit_number = number
+    if "building" in request.form:
+        from app.services.board import clean_building
+        unit.building = clean_building(request.form.get("building") or "")
+    after = {"unit_number": unit.unit_number, "building": unit.building, "property_id": unit.property_id}
+    if before != {key: after.get(key) for key in before}:
+        audit(current_user.id, "human", "update", "unit", unit.id, before, after)
     db.session.commit()
     flash(f"Unit number is {number}.", "ok")
     return redirect(f"/properties/{unit.property_id}")
@@ -743,17 +754,12 @@ def unit_rename(unit_id):
 @login_required
 def unit_delete(unit_id):
     unit = _editable_unit(unit_id)
-    now = utcnow()
-    unit.deleted_at = now
-    for job in Job.query.filter_by(unit_id=unit.id).filter(Job.deleted_at.is_(None)).all():
-        job.deleted_at = now
-    from app.models import UnitTask
+    property_id = unit.property_id
+    from app.services.pending import commit_apply
 
-    for task in UnitTask.query.filter_by(unit_id=unit.id).filter(UnitTask.deleted_at.is_(None)).all():
-        task.deleted_at = now
-    db.session.commit()
-    flash(f"Removed unit {unit.unit_number}.", "ok")
-    return redirect(f"/properties/{unit.property_id}")
+    result = commit_apply(current_user, "soft_delete", {"entity": "unit", "entity_id": unit.id}, "human", _key() or f"delete-unit-{unit.id}-{_new_key()}")
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect(f"/properties/{property_id}")
 
 
 @bp.get("/units/<int:unit_id>")
@@ -767,7 +773,7 @@ def unit_detail(unit_id):
     if not unit or unit.deleted_at:
         abort(404)
     require_see(current_user, unit.property)
-    from app.models import Equipment
+    from app.models import AuditLog, Equipment, UnitChange
 
     visits = UnitVisit.query.filter_by(unit_id=unit.id).order_by(UnitVisit.id.desc()).all()
     gear = (
@@ -780,11 +786,16 @@ def unit_detail(unit_id):
     events = {}
     for job in jobs:
         events[job.id] = JobEvent.query.filter_by(job_id=job.id).order_by(JobEvent.id.asc()).all()
-    from app.services.board import task_groups
+    from app.services.board import task_groups, unit_history
     from app.services.equipment import kind_choices, kind_label
     from app.services.people import person_label
+    from app.models import UnitTask
 
     last = jobs[0].created_at if jobs else (visits[0].started_at if visits else None)
+    unit_changes = unit_history(unit.id, limit=120)
+    deleted_tasks = UnitTask.query.filter_by(unit_id=unit.id).filter(UnitTask.deleted_at.isnot(None)).order_by(UnitTask.id.desc()).all()
+    deleted_gear = Equipment.query.filter_by(unit_id=unit.id).filter(Equipment.deleted_at.isnot(None)).order_by(Equipment.id.desc()).all()
+    deleted_jobs = Job.query.filter_by(unit_id=unit.id).filter(Job.deleted_at.isnot(None)).order_by(Job.id.desc()).all()
     return render_template(
         "unit.html",
         unit=unit,
@@ -795,6 +806,10 @@ def unit_detail(unit_id):
         gear_kinds=kind_choices(),
         kind_label=kind_label,
         tasks=task_groups(unit.id),
+        unit_changes=unit_changes,
+        deleted_tasks=deleted_tasks,
+        deleted_gear=deleted_gear,
+        deleted_jobs=deleted_jobs,
         who=person_label,
         editable=can_edit_property(current_user, unit.property_id),
         last=last,
@@ -872,6 +887,32 @@ def unit_task_add(unit_id):
     return redirect(f"/units/{unit.id}")
 
 
+@bp.post("/tasks/<int:task_id>/edit")
+@login_required
+def task_edit(task_id):
+    from app.models import UnitTask
+
+    row = db.session.get(UnitTask, task_id)
+    if not row or row.deleted_at:
+        abort(404)
+    unit = _editable_unit(row.unit_id)
+    title = (request.form.get("title") or "").strip()
+    if not title:
+        flash("An item needs a name.", "warn")
+        return redirect(f"/units/{unit.id}")
+    before = {"title": row.title, "kind": row.kind, "status": row.status, "vendor": row.vendor, "notes": row.notes}
+    row.title = title[:200]
+    row.kind = (request.form.get("kind") or row.kind).strip()[:20]
+    status = (request.form.get("status") or row.status).strip().lower()
+    row.status = status if status in {"needed", "done", "vendored", "blocked"} else row.status
+    row.vendor = (request.form.get("vendor") or "").strip()[:160]
+    row.notes = (request.form.get("notes") or "")[:2000]
+    audit(current_user.id, "human", "update", "unit_task", row.id, before, {"title": row.title, "kind": row.kind, "status": row.status, "vendor": row.vendor, "notes": row.notes, "unit_id": row.unit_id, "property_id": row.property_id})
+    db.session.commit()
+    flash("Unit item updated and recorded in history.", "ok")
+    return redirect(f"/units/{unit.id}")
+
+
 @bp.post("/tasks/<int:task_id>/done")
 @login_required
 def task_done(task_id):
@@ -881,9 +922,11 @@ def task_done(task_id):
     if not row or row.deleted_at:
         abort(404)
     _editable_unit(row.unit_id)
+    before = {"status": row.status, "done_by_id": row.done_by_id, "done_at": row.done_at.isoformat() if row.done_at else None}
     row.status = "done"
     row.done_by_id = current_user.id
     row.done_at = utcnow()
+    audit(current_user.id, "human", "update", "unit_task", row.id, before, {"status": row.status, "title": row.title, "unit_id": row.unit_id, "property_id": row.property_id})
     db.session.commit()
     flash(f"Done: {row.title}.", "ok")
     return redirect(f"/units/{row.unit_id}")
@@ -898,10 +941,11 @@ def task_delete(task_id):
     if not row or row.deleted_at:
         abort(404)
     _editable_unit(row.unit_id)
-    row.deleted_at = utcnow()
     unit_id = row.unit_id
-    db.session.commit()
-    flash("Removed that item.", "ok")
+    from app.services.pending import commit_apply
+
+    result = commit_apply(current_user, "soft_delete", {"entity": "unit_task", "entity_id": task_id}, "human", _key() or f"delete-task-{task_id}-{_new_key()}")
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
     return redirect(f"/units/{unit_id}")
 
 
@@ -935,7 +979,10 @@ def equipment_update(gear_id):
         "style": row.style,
         "model": row.model_number,
         "serial": row.serial_number,
+        "size": row.size_label,
+        "color": row.color,
         "notes": row.notes,
+        "unit_id": row.unit_id,
     }
     piece = _equipment_form()
     row.kind = piece["kind"][:80]
@@ -946,10 +993,30 @@ def equipment_update(gear_id):
     row.size_label = piece["size"][:40]
     row.color = piece["color"][:40]
     row.notes = piece["notes"][:2000]
-    audit(current_user.id, "human", "update", "equipment", row.id, before, {"kind": row.kind, "serial": row.serial_number, "notes": row.notes, "unit_id": row.unit_id})
+    audit(current_user.id, "human", "update", "equipment", row.id, before, {"kind": row.kind, "brand": row.brand, "style": row.style, "model": row.model_number, "serial": row.serial_number, "size": row.size_label, "color": row.color, "notes": row.notes, "unit_id": row.unit_id, "property_id": row.property_id})
     db.session.commit()
     flash(f"Updated this {kind_label(row.kind) or 'item'}.", "ok")
     return redirect(f"/units/{row.unit_id}")
+
+
+@bp.post("/records/<entity>/<int:record_id>/restore")
+@login_required
+def record_restore(entity, record_id):
+    from app.models import Equipment, UnitTask
+
+    model = {"unit_task": UnitTask, "equipment": Equipment}.get(entity)
+    row = db.session.get(model, record_id) if model else None
+    if not row or not row.deleted_at or not row.unit_id:
+        abort(404)
+    unit = db.session.get(Unit, row.unit_id)
+    if not unit or unit.deleted_at:
+        abort(404)
+    _editable_unit(unit.id)
+    from app.services.pending import commit_apply
+
+    result = commit_apply(current_user, "restore", {"entity": entity, "entity_id": record_id}, "human", _key() or f"restore-{entity}-{record_id}-{_new_key()}")
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect(f"/units/{unit.id}")
 
 
 @bp.post("/equipment/<int:gear_id>/delete")
@@ -962,10 +1029,11 @@ def equipment_delete(gear_id):
         abort(404)
     _editable_unit(row.unit_id)
     unit_id = row.unit_id
-    row.deleted_at = utcnow()
-    db.session.commit()
-    flash("Removed that piece of equipment.", "ok")
-    return redirect(f"/units/{unit_id}" if unit_id else "/places")
+    from app.services.pending import commit_apply
+
+    result = commit_apply(current_user, "soft_delete", {"entity": "equipment", "entity_id": gear_id}, "human", _key() or f"delete-equipment-{gear_id}-{_new_key()}")
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect(f"/units/{unit_id}")
 
 
 @bp.get("/expenses")
@@ -1499,7 +1567,32 @@ def users():
     people = User.query.order_by(User.id.asc()).all()
     properties = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
     access = {(row.user_id, row.property_id): row for row in PropertyAccess.query.all()}
-    return render_template("users.html", people=people, properties=properties, access=access, msg_key=_new_key())
+    from app.models import UserCapability
+    from app.services.access import CAPABILITY_LABELS, ROLE_CAPABILITIES
+
+    overrides = {(row.user_id, row.capability): row.granted for row in UserCapability.query.all()}
+    role_defaults = ROLE_CAPABILITIES
+    from app.services.access import normalize_role
+
+    default_capabilities = {
+        (person.id, capability): (
+            "*" in role_defaults.get(normalize_role(person.role), set())
+            or capability in role_defaults.get(normalize_role(person.role), set())
+        )
+        for person in people
+        for capability in CAPABILITY_LABELS
+    }
+    return render_template(
+        "users.html",
+        people=people,
+        properties=properties,
+        access=access,
+        capabilities=CAPABILITY_LABELS,
+        role_defaults=role_defaults,
+        overrides=overrides,
+        default_capabilities=default_capabilities,
+        msg_key=_new_key(),
+    )
 
 
 @bp.post("/users/<int:user_id>/access")
@@ -1519,6 +1612,27 @@ def user_access(user_id):
         set_access(current_user, person, prop, see=see, edit=edit and see, notify=notify and see)
     db.session.commit()
     flash("Property access saved.", "ok")
+    return redirect("/users")
+
+
+@bp.post("/users/<int:user_id>/capabilities")
+@owner_required
+def user_capabilities(user_id):
+    from app.services.access import CAPABILITIES, set_user_capability
+
+    person = db.session.get(User, user_id)
+    if not person or person.role == "owner":
+        abort(404)
+    try:
+        for capability in CAPABILITIES:
+            value = request.form.get(f"cap-{capability}", "default")
+            granted = True if value == "allow" else False if value == "deny" else None
+            set_user_capability(current_user, person, capability, granted)
+        db.session.commit()
+        flash(f"Permissions saved for {person.display_name or person.username}.", "ok")
+    except (PermissionError, ValueError) as exc:
+        db.session.rollback()
+        flash(str(exc), "warn")
     return redirect("/users")
 
 
@@ -1567,6 +1681,46 @@ def drive():
     else:
         resp.set_cookie("apt_drive", "", expires=0)
     return resp
+
+
+@bp.post("/jobs/<int:job_id>/edit")
+@login_required
+def job_edit(job_id):
+    job = db.session.get(Job, job_id)
+    if not job or job.deleted_at:
+        abort(404)
+    if job.unit_id:
+        _editable_unit(job.unit_id)
+    else:
+        from app.services.access import require_edit
+
+        require_edit(current_user, db.session.get(Property, job.property_id))
+    before = {"title": job.title, "detail": job.detail, "status": job.status}
+    title = (request.form.get("title") or "").strip()
+    if not title:
+        flash("Work needs a title.", "warn")
+        return redirect(request.form.get("next") or f"/units/{job.unit_id}" if job.unit_id else "/trips")
+    job.title = title[:300]
+    job.detail = (request.form.get("detail") or "")[:4000]
+    status = (request.form.get("status") or job.status).strip().lower()
+    job.status = status if status in {"done", "planned", "blocked", "followup"} else job.status
+    audit(current_user.id, "human", "update", "job", job.id, before, {"title": job.title, "detail": job.detail, "status": job.status, "unit_id": job.unit_id, "property_id": job.property_id})
+    db.session.commit()
+    flash("Work updated and change recorded.", "ok")
+    return redirect(request.form.get("next") or (f"/units/{job.unit_id}" if job.unit_id else "/trips"))
+
+
+@bp.post("/units/<int:unit_id>/restore")
+@login_required
+def unit_restore(unit_id):
+    unit = db.session.get(Unit, unit_id)
+    if not unit or not unit.deleted_at:
+        abort(404)
+    from app.services.pending import commit_apply
+
+    result = commit_apply(current_user, "restore", {"entity": "unit", "entity_id": unit.id}, "human", _key() or f"restore-unit-{unit.id}-{_new_key()}")
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect(f"/units/{unit.id}" if result.get("ok") else f"/properties/{unit.property_id}")
 
 
 @bp.post("/jobs/<int:job_id>/delete")

@@ -71,7 +71,7 @@
     {% if current_user.role != 'viewer' %}
     <a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Home</a>
     <a href="/trips" {% if request.path.startswith('/trips') %}aria-current="page"{% endif %}>Plan</a>
-    <a href="/places" {% if request.path.startswith('/places') or request.path.startswith('/properties') %}aria-current="page"{% endif %}>Places</a>
+    <a href="/places" {% if request.path.startswith('/places') or request.path.startswith('/properties') %}aria-current="page"{% endif %}>Properties</a>
     <a href="/more" {% if request.path == '/more' %}aria-current="page"{% endif %}>More</a>
     {% else %}
     <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>

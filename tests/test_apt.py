@@ -25,6 +25,11 @@ APP = create_app()
 
 TABLES = [
     "notices",
+    "user_capabilities",
+    "unit_changes",
+    "region_access",
+    "region_cities",
+    "regions",
     "chat_messages",
     "idempotency_keys",
     "pending_actions",
@@ -902,6 +907,258 @@ Lubbock — 2 outside compressor installs"""
         kinds = sorted(row.kind for row in Equipment.query.filter_by(unit_id=unit.id).all())
         self.assertEqual(kinds, ["dryer", "washer"])
 
+    def test_she_added_a_fridge_to_unit_804_at_woodview(self):
+        from app.models import Equipment
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={"ok": False, "error": "down"},
+        ):
+            heard = handle_message(
+                user,
+                "I added a fridge to unit 804 at Woodview",
+                idempotency_key="fridge-804",
+            )
+        self.assertIn("804", heard["reply"])
+        self.assertIn("Woodview", heard["reply"])
+        self.assertNotIn("Not saved", heard["reply"])
+        self.assertNotIn("No property named", heard["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        unit = Unit.query.filter_by(unit_number="804").one()
+        gear = Equipment.query.filter_by(unit_id=unit.id).one()
+        self.assertEqual(gear.kind, "refrigerator")
+        job = Job.query.one()
+        self.assertEqual(job.unit_id, unit.id)
+        self.assertIn("fridge", job.title.lower())
+
+    def test_model_visit_files_equipment_without_a_work_title(self):
+        from app.models import Equipment, UnitVisit
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.commit()
+        arrived = handle_message(user, "I'm at Woodview Odessa", idempotency_key="arr-m")
+        self.assertIn("Is this Woodview", arrived["reply"])
+        handle_message(user, "yes, save it", idempotency_key="arr-m-yes")
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        with patch(
+            "app.services.providers.gemini_complete",
+            return_value={
+                "ok": True,
+                "text": "Filed the washer and dryer on 804.",
+                "calls": [
+                    {
+                        "name": "record_unit_visit",
+                        "args": {
+                            "unit_number": "804",
+                            "status": "done",
+                            "equipment": {"kind": "washer", "brand": "Whirlpool"},
+                            "equipment_items": [{"kind": "dryer", "brand": "GE"}],
+                        },
+                    }
+                ],
+            },
+        ):
+            heard = handle_message(user, "804 got a new washer and dryer", idempotency_key="model-fridge")
+        self.assertIn("804", heard["reply"])
+        self.assertIn("Whirlpool", heard["reply"])
+        unit = Unit.query.filter_by(unit_number="804").one()
+        rows = Equipment.query.filter_by(unit_id=unit.id).all()
+        self.assertEqual(sorted(row.kind for row in rows), ["dryer", "washer"])
+        self.assertEqual({row.brand for row in rows}, {"Whirlpool", "GE"})
+        visit = UnitVisit.query.one()
+        self.assertIn("Whirlpool", visit.note or "")
+
+    def test_a_scoped_field_login_files_equipment_and_an_unscoped_one_is_refused(self):
+        from app.models import Equipment, PropertyAccess
+        from app.services.people import find_user
+        from app.services.records import ensure_property
+
+        owner = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        handle_message(owner, "add employee jasmine", idempotency_key="mu-jasmine")
+        handle_message(owner, "add employee mario", idempotency_key="mu-mario")
+        handle_message(owner, "give jasmine edit units at woodview", idempotency_key="mu-grant")
+        jasmine = find_user("jasmine")
+        mario = find_user("mario")
+        wood = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertTrue(PropertyAccess.query.filter_by(user_id=jasmine.id, property_id=wood.id).one().can_edit)
+        self.assertEqual(PropertyAccess.query.filter_by(user_id=mario.id).count(), 0)
+        refused = handle_message(mario, "I added a washer to unit 101 at Woodview", idempotency_key="mu-mario-washer")
+        self.assertFalse(refused.get("ok"))
+        self.assertNotIn("Woodview", refused.get("reply") or "")
+        self.assertEqual(Equipment.query.count(), 0)
+        heard = handle_message(jasmine, "I added a fridge to unit 804 at Woodview", idempotency_key="mu-jasmine-fridge")
+        self.assertIn("804", heard["reply"])
+        self.assertIn("Woodview", heard["reply"])
+        unit = Unit.query.filter_by(unit_number="804").one()
+        gear = Equipment.query.filter_by(unit_id=unit.id).one()
+        self.assertEqual(gear.kind, "refrigerator")
+        self.assertEqual(gear.created_by_id, jasmine.id)
+        self.assertEqual(Job.query.one().created_by_id, jasmine.id)
+
+    def test_make_me_a_property_named_woodview_asks_for_the_city_then_saves(self):
+        user = self.owner()
+        asked = handle_message(user, "create me a property named woodview", idempotency_key="mk-city")
+        self.assertIn("Woodview", asked["reply"])
+        self.assertIn("city", asked["reply"].lower())
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
+        done = handle_message(user, "odessa", idempotency_key="mk-city-answer")
+        self.assertIn("Woodview", done["reply"])
+        prop = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertEqual(prop.name, "Woodview")
+        self.assertEqual(prop.city.name, "Odessa")
+
+    def test_property_sentences_with_a_city_save_right_away(self):
+        user = self.owner()
+        first = handle_message(user, "add a property called brookview in odessa", idempotency_key="p-one")
+        self.assertTrue(first.get("ok"), first)
+        second = handle_message(user, "make me a property named madison sq from lubbock", idempotency_key="p-two")
+        self.assertTrue(second.get("ok"), second)
+        third = handle_message(user, "new property woodview odessa texas", idempotency_key="p-three")
+        self.assertTrue(third.get("ok"), third)
+        names = sorted(p.name.lower() for p in Property.query.filter(Property.deleted_at.is_(None)).all())
+        self.assertEqual(names, ["brookview", "madison sq", "woodview"])
+
+    def test_a_vague_answer_reasks_the_open_city_question(self):
+        user = self.owner()
+        asked = handle_message(user, "make me a property named woodview", idempotency_key="vague-one")
+        self.assertIn("city", asked["reply"].lower())
+        again = handle_message(user, "that is the property name, woodview", idempotency_key="vague-two")
+        self.assertIn("city", again["reply"].lower())
+        self.assertNotIn("receipt", again["reply"])
+        done = handle_message(user, "odessa", idempotency_key="vague-three")
+        self.assertIn("Woodview", done["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+
+    def test_make_me_a_trip_stages_a_plan(self):
+        from app.models import Trip
+
+        user = self.owner()
+        heard = handle_message(user, "make me a trip to woodview odessa thursday", idempotency_key="mk-trip")
+        self.assertIn("trip", heard["reply"].lower())
+        self.assertIn("Woodview", heard["reply"])
+        self.assertEqual(Trip.query.filter(Trip.deleted_at.is_(None)).count(), 1)
+        prop = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertEqual(prop.name, "Woodview")
+        self.assertEqual(prop.city.name, "Odessa")
+
+    def test_address_update_for_existing_property_does_not_include_for_in_name(self):
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Madison Sq Aparatments", "Odessa", "Texas", user.id)
+        db.session.commit()
+        with patch(
+            "app.services.providers.collect_tool_calls",
+            return_value={
+                "calls": [{"name": "upsert_property", "args": {"property_name": "For Madison Sq Aparatments Address Address", "city": "Odessa"}}],
+                "text": "",
+                "note": "",
+            },
+        ) as model:
+            result = handle_message(
+                user,
+                "for madison sq can you update the address Address: 2201 Rocky Lane Rd, Odessa, TX 79762",
+                idempotency_key="madison-address-update",
+            )
+            conversational = handle_message(
+                user,
+                "for the madison sq apartments update the address too Address: 2201 Rocky Lane Rd, Odessa, TX 79762",
+                idempotency_key="madison-address-update-too",
+            )
+            field_first = handle_message(
+                user,
+                "please update the address for madison sq apartments with Address: 2201 Rocky Lane Rd, Odessa, TX 79762",
+                idempotency_key="madison-address-field-first",
+            )
+
+        model.assert_called()
+        self.assertIn("Updated Madison Sq Aparatments", result["reply"])
+        self.assertIn("Updated Madison Sq Aparatments", conversational["reply"])
+        self.assertIn("Updated Madison Sq Aparatments", field_first["reply"])
+        db.session.refresh(prop)
+        self.assertIn("2201 Rocky Lane Rd", prop.address)
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+        self.assertEqual(prop.name, "Madison Sq Aparatments")
+
+    def test_direct_property_address_update_phrase_saves_to_existing_property(self):
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Madison Sq Apartment", "Odessa", "Texas", user.id)
+        db.session.commit()
+        with patch(
+            "app.services.providers.collect_tool_calls",
+            return_value={
+                "calls": [{"name": "upsert_property", "args": {"property_name": "Madison Sq Apartment Address With Address", "city": "Odessa"}}],
+                "text": "",
+                "note": "",
+            },
+        ) as model:
+            result = handle_message(
+                user,
+                "please update madison sq apartment address with Address: 2201 Rocky Lane Rd, Odessa, TX 79762",
+                idempotency_key="madison-direct-address-update",
+            )
+
+        model.assert_called()
+        self.assertIn("Updated Madison Sq Apartment", result["reply"])
+        db.session.refresh(prop)
+        self.assertIn("2201 Rocky Lane Rd", prop.address)
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+
+    def test_bare_address_request_for_saved_property_never_becomes_property_creation(self):
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Madison Sq Apartments", "Odessa", "Texas", user.id)
+        db.session.commit()
+        with patch(
+            "app.services.providers.collect_tool_calls",
+            return_value={
+                "calls": [{"name": "upsert_property", "args": {"property_name": "For Madison Sq Apartments Address Address", "city": "Odessa"}}],
+                "text": "",
+                "note": "",
+            },
+        ) as model:
+            result = handle_message(user, "Address For Madison Sq Apartments Address", idempotency_key="madison-address-request")
+            added = handle_message(user, "add an address for madison sq apartments", idempotency_key="madison-add-address-request")
+
+        model.assert_called()
+        self.assertIn("What full street address", result["reply"])
+        self.assertIn("What full street address", added["reply"])
+        db.session.refresh(prop)
+        self.assertEqual(prop.address, "")
+        self.assertEqual(prop.name, "Madison Sq Apartments")
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 1)
+
     def test_its_at_saves_the_looked_up_address(self):
         user = self.owner()
         hit = {
@@ -1112,7 +1369,7 @@ Lubbock — 2 outside compressor installs"""
         self.assertTrue(any("replace" in title for title in titles))
 
     def test_units_make_ready_and_who_saved_it(self):
-        from app.models import Job, UnitTask
+        from app.models import Job, PropertyAccess, UnitTask
         from app.services.browse import unit_cards
         from app.services.people import find_user
         from app.services.records import ensure_property
@@ -1126,6 +1383,10 @@ Lubbock — 2 outside compressor installs"""
         jasmine = find_user("jasmine")
         self.assertEqual(jasmine.role, "field")
         self.assertEqual(jasmine.display_name, "Jasmine")
+        handle_message(owner, "give jasmine edit units at woodview", idempotency_key="grant-jasmine")
+        wood = Property.query.filter(Property.deleted_at.is_(None)).one()
+        grant = PropertyAccess.query.filter_by(user_id=jasmine.id, property_id=wood.id).one()
+        self.assertTrue(grant.can_edit)
         handle_message(owner, "add units 101, 102, 104-106 at woodview", idempotency_key="bulk")
         numbers = sorted(row.unit_number for row in Unit.query.filter(Unit.deleted_at.is_(None)).all())
         self.assertEqual(numbers, ["101", "102", "104", "105", "106"])
@@ -1749,6 +2010,467 @@ Lubbock — 2 outside compressor installs"""
         self.assertIn(b"120000", page.data)
         self.assertEqual(PlanItem.query.filter_by(unit_number="30").count(), 1)
         self.assertEqual(UnitTask.query.filter_by(kind="work_order").count(), 3)
+
+    def test_local_ambiguous_plan_asks_for_city_and_bare_city_completes_it(self):
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        odessa = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        ensure_property("Woodview", "Lubbock", "Texas", user.id)
+        db.session.commit()
+
+        asked = handle_message(user, "plan woodview thursday for ac evals", idempotency_key="local-ambiguous")
+        self.assertIn("Which Woodview", asked["reply"])
+        self.assertEqual(Trip.query.filter(Trip.deleted_at.is_(None)).count(), 0)
+        self.assertIsNone(Property.query.filter(db.func.lower(Property.name) == "ac").first())
+
+        completed = handle_message(user, "Odessa", idempotency_key="local-city-answer")
+        self.assertIn("Woodview in Odessa", completed["reply"])
+        trip = Trip.query.filter(Trip.deleted_at.is_(None)).one()
+        from app.models import TripProperty
+
+        self.assertEqual(db.session.get(Property, TripProperty.query.filter_by(trip_id=trip.id).one().property_id).id, odessa.id)
+        self.assertIn("ac evals", trip.purpose.lower())
+        self.assertIsNone(Property.query.filter(db.func.lower(Property.name) == "ac").first())
+
+    def test_model_plan_cannot_pick_a_city_for_an_ambiguous_property(self):
+        from app.services.records import ensure_property, loads
+
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        ensure_property("Woodview", "Lubbock", "Texas", user.id)
+        db.session.commit()
+        call = {"name": "plan_trip", "args": {"property_name": "Woodview", "city": "Odessa", "starts_on": "2026-09-24", "purpose": "AC evals"}}
+        with patch("app.services.providers.collect_tool_calls", return_value={"calls": [call], "text": "", "note": ""}):
+            asked = handle_message(user, "plan woodview Thursday for AC evals", idempotency_key="model-ambiguous")
+        self.assertIn("Which Woodview", asked["reply"])
+        self.assertEqual(Trip.query.filter(Trip.deleted_at.is_(None)).count(), 0)
+        pending = PendingAction.query.filter_by(user_id=user.id, status="needs_answer").one()
+        payload = loads(pending.payload_json)
+        self.assertEqual(payload["waiting_for"], "city")
+        self.assertNotIn("city", payload)
+
+        completed = handle_message(user, "Lubbock", idempotency_key="model-city-answer")
+        self.assertIn("Lubbock", completed["reply"])
+        self.assertEqual(Trip.query.filter(Trip.deleted_at.is_(None)).count(), 1)
+
+    def test_model_upsert_without_city_asks_before_saving_new_property(self):
+        from app.services.records import loads
+
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        response = {
+            "ok": True,
+            "text": "",
+            "calls": [{"name": "upsert_property", "args": {"property_name": "Brookview"}}],
+        }
+        with patch("app.services.providers.gemini_complete", return_value=response):
+            asked = handle_message(user, "add Brookview", idempotency_key="model-new-no-city")
+
+        self.assertIn("city", asked["reply"].lower())
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
+        pending = PendingAction.query.filter_by(user_id=user.id, status="needs_answer").one()
+        payload = loads(pending.payload_json)
+        self.assertEqual(payload["property_name"], "Brookview")
+        self.assertEqual(payload["waiting_for"], "city")
+        self.assertNotIn("city", payload)
+
+        saved = handle_message(user, "Odessa", idempotency_key="model-new-no-city-answer")
+        self.assertIn("Brookview", saved["reply"])
+        prop = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertEqual(prop.name, "Brookview")
+        self.assertEqual(prop.city.name, "Odessa")
+
+    def test_model_upsert_with_malformed_city_asks_before_saving_new_property(self):
+        from app.services.records import loads
+
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        response = {
+            "ok": True,
+            "text": "",
+            "calls": [
+                {"name": "upsert_property", "args": {"property_name": "Northbrook", "city": "in Odessa for AC evals"}}
+            ],
+        }
+        with patch("app.services.providers.gemini_complete", return_value=response):
+            asked = handle_message(user, "add Northbrook", idempotency_key="model-new-malformed-city")
+
+        self.assertIn("city", asked["reply"].lower())
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
+        pending = PendingAction.query.filter_by(user_id=user.id, status="needs_answer").one()
+        payload = loads(pending.payload_json)
+        self.assertEqual(payload["property_name"], "Northbrook")
+        self.assertEqual(payload["waiting_for"], "city")
+        self.assertNotIn("city", payload)
+        self.assertTrue(any("city does not look like a name" in note for note in payload["parse_notes"]))
+
+        saved = handle_message(user, "Odessa", idempotency_key="model-new-malformed-city-answer")
+        self.assertIn("Northbrook", saved["reply"])
+        prop = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertEqual(prop.name, "Northbrook")
+        self.assertEqual(prop.city.name, "Odessa")
+
+    def test_model_upsert_with_malformed_property_name_asks_for_name(self):
+        from app.services.records import loads
+
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        response = {
+            "ok": True,
+            "text": "",
+            "calls": [{"name": "upsert_property", "args": {"property_name": "Brookview in Odessa", "city": "Odessa"}}],
+        }
+        with patch("app.services.providers.gemini_complete", return_value=response):
+            asked = handle_message(user, "add Brookview in Odessa", idempotency_key="model-bad-property-name")
+
+        self.assertIn("property's name", asked["reply"].lower())
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
+        pending = PendingAction.query.filter_by(user_id=user.id, status="needs_answer").one()
+        payload = loads(pending.payload_json)
+        self.assertEqual(payload["waiting_for"], "name")
+        self.assertEqual(payload["city"], "Odessa")
+        self.assertTrue(any("property_name does not look like a name" in note for note in payload["parse_notes"]))
+
+        saved = handle_message(user, "Brookview", idempotency_key="model-good-property-name")
+        self.assertIn("Brookview", saved["reply"])
+        prop = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertEqual(prop.name, "Brookview")
+        self.assertEqual(prop.city.name, "Odessa")
+
+    def test_model_upsert_keeps_explicit_city_when_correcting_malformed_property_name(self):
+        from app.services.records import ensure_property, loads
+
+        user = self.owner()
+        ensure_property("Oakwood", "Lubbock", "Texas", user.id)
+        ensure_property("Cedar Court", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        response = {
+            "ok": True,
+            "text": "",
+            "calls": [
+                {
+                    "name": "upsert_property",
+                    "args": {"property_name": "Brookview in Odessa", "city": "Lubbock"},
+                }
+            ],
+        }
+        with patch("app.services.providers.gemini_complete", return_value=response):
+            asked = handle_message(user, "add Brookview in Odessa", idempotency_key="model-bad-name-wrong-city")
+
+        self.assertIn("property's name in odessa", asked["reply"].lower())
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 2)
+        pending = PendingAction.query.filter_by(user_id=user.id, status="needs_answer").one()
+        payload = loads(pending.payload_json)
+        self.assertEqual(payload["waiting_for"], "name")
+        self.assertEqual(payload["city"], "Odessa")
+        self.assertTrue(any("property_name does not look like a name" in note for note in payload["parse_notes"]))
+
+        saved = handle_message(user, "Brookview", idempotency_key="model-corrected-name")
+        self.assertIn("Brookview", saved["reply"])
+        brookview = Property.query.join(City).filter(db.func.lower(Property.name) == "brookview").one()
+        self.assertEqual(brookview.city.name, "Odessa")
+        self.assertIsNone(
+            Property.query.join(City).filter(
+                db.func.lower(Property.name) == "brookview",
+                db.func.lower(City.name) == "lubbock",
+            ).first()
+        )
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 3)
+
+    def test_model_upsert_without_name_or_city_asks_both_before_saving(self):
+        from app.services.records import loads
+
+        user = self.owner()
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        response = {"ok": True, "text": "", "calls": [{"name": "upsert_property", "args": {}}]}
+        with patch("app.services.providers.gemini_complete", return_value=response):
+            name_question = handle_message(user, "add a property", idempotency_key="model-no-name-city")
+
+        self.assertIn("name", name_question["reply"].lower())
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
+        row = PendingAction.query.filter_by(user_id=user.id, status="needs_answer").one()
+        payload = loads(row.payload_json)
+        self.assertEqual(payload["waiting_for"], "name")
+        self.assertNotIn("property_name", payload)
+        self.assertNotIn("city", payload)
+
+        city_question = handle_message(user, "Brookview", idempotency_key="model-no-name-city-name")
+        self.assertIn("city", city_question["reply"].lower())
+        payload = loads(row.payload_json)
+        self.assertEqual(payload["property_name"], "Brookview")
+        self.assertEqual(payload["waiting_for"], "city")
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 0)
+
+        saved = handle_message(user, "Odessa", idempotency_key="model-no-name-city-city")
+        self.assertIn("Brookview", saved["reply"])
+        prop = Property.query.filter(Property.deleted_at.is_(None)).one()
+        self.assertEqual(prop.name, "Brookview")
+        self.assertEqual(prop.city.name, "Odessa")
+
+    def test_model_upsert_asks_which_city_for_an_ambiguous_saved_name(self):
+        from app.services.records import ensure_property, loads
+
+        user = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", user.id)
+        ensure_property("Woodview", "Lubbock", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        response = {
+            "ok": True,
+            "text": "",
+            "calls": [{"name": "upsert_property", "args": {"property_name": "Woodview", "city": "Odessa"}}],
+        }
+        with patch("app.services.providers.gemini_complete", return_value=response):
+            asked = handle_message(user, "add Woodview", idempotency_key="upsert-ambiguous")
+
+        self.assertIn("Which Woodview", asked["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 2)
+        pending = PendingAction.query.filter_by(user_id=user.id, status="needs_answer").one()
+        payload = loads(pending.payload_json)
+        self.assertEqual(payload["waiting_for"], "city")
+        self.assertNotIn("city", payload)
+
+        clarified = handle_message(user, "Odessa", idempotency_key="upsert-ambiguous-city")
+        self.assertIn("Woodview", clarified["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 2)
+
+    def test_model_upsert_uses_user_city_instead_of_model_guessed_city(self):
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        odessa = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        ensure_property("Oakwood", "Lubbock", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        response = {
+            "ok": True,
+            "text": "",
+            "calls": [{"name": "upsert_property", "args": {"property_name": "Woodview", "city": "Lubbock"}}],
+        }
+        with patch("app.services.providers.gemini_complete", return_value=response):
+            saved = handle_message(user, "add Woodview in Odessa", idempotency_key="upsert-wrong-city")
+
+        self.assertIn("Odessa", saved["reply"])
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 2)
+        self.assertEqual(Property.query.filter_by(id=odessa.id).one().city.name, "Odessa")
+        self.assertIsNone(Property.query.join(City).filter(db.func.lower(Property.name) == "woodview", db.func.lower(City.name) == "lubbock").first())
+
+    def test_model_plan_trip_keeps_explicit_city_when_correcting_malformed_property_name(self):
+        from app.services.records import ensure_property, loads
+
+        user = self.owner()
+        ensure_property("Oakwood", "Lubbock", "Texas", user.id)
+        brookview = ensure_property("Brookview", "Odessa", "Texas", user.id)
+        db.session.add(
+            ApiCredential(
+                user_id=user.id,
+                provider="gemini",
+                secret_ciphertext=encrypt_text("AIza-test-key-value"),
+                last4="alue",
+                model_id="gemini-3.8-flash",
+                active=True,
+                use_order=1,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        response = {
+            "ok": True,
+            "text": "",
+            "calls": [
+                {
+                    "name": "plan_trip",
+                    "args": {
+                        "property_name": "Brookview in Odessa",
+                        "city": "Lubbock",
+                        "starts_on": "2026-09-29",
+                        "purpose": "AC evaluation",
+                    },
+                }
+            ],
+        }
+        with patch("app.services.providers.gemini_complete", return_value=response):
+            asked = handle_message(user, "plan a trip to Brookview in Odessa Tuesday for AC evaluation", idempotency_key="plan-bad-name-wrong-city")
+
+        self.assertIn("property's name in odessa", asked["reply"].lower())
+        self.assertEqual(Trip.query.filter(Trip.deleted_at.is_(None)).count(), 0)
+        pending = PendingAction.query.filter_by(user_id=user.id, tool="plan_trip", status="needs_answer").one()
+        payload = loads(pending.payload_json)
+        self.assertEqual(payload["waiting_for"], "name")
+        self.assertEqual(payload["city"], "Odessa")
+        self.assertEqual(payload["purpose"], "AC evaluation")
+        self.assertTrue(any("property_name does not look like a name" in note for note in payload["parse_notes"]))
+
+        planned = handle_message(user, "Brookview", idempotency_key="plan-corrected-name")
+        self.assertIn("Brookview in Odessa", planned["reply"])
+        trip = Trip.query.filter(Trip.deleted_at.is_(None)).one()
+        from app.models import TripProperty
+
+        linked = db.session.get(Property, TripProperty.query.filter_by(trip_id=trip.id).one().property_id)
+        self.assertEqual(linked.id, brookview.id)
+        self.assertEqual(linked.name, "Brookview")
+        self.assertEqual(linked.city.name, "Odessa")
+        self.assertEqual(Property.query.filter(Property.deleted_at.is_(None)).count(), 2)
+        self.assertIsNone(
+            Property.query.join(City).filter(
+                db.func.lower(Property.name) == "brookview",
+                db.func.lower(City.name) == "lubbock",
+            ).first()
+        )
+        self.assertEqual(trip.purpose, "AC evaluation")
+
+    def test_property_resolution_reports_equal_matches_in_one_city(self):
+        from app.services.parse import resolve_property
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        ensure_property("Woodview East", "Odessa", "Texas", user.id)
+        ensure_property("Woodview West", "Odessa", "Texas", user.id)
+        db.session.commit()
+
+        verdict = resolve_property("Woodview", "Odessa", user=user)
+        self.assertEqual(verdict["state"], "ambiguous")
+        self.assertCountEqual(verdict["choices"], ["Woodview East", "Woodview West"])
+
+    def test_bare_unit_answer_completes_open_unit_visit(self):
+        from app.models import Job
+        from app.services.records import dumps, ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(Shift(user_id=user.id, property_id=prop.id, confirmed=True, started_at=utcnow()))
+        db.session.commit()
+        row = PendingAction(
+            user_id=user.id,
+            batch_key="unit-question",
+            idempotency_key="unit-question",
+            tool="record_unit_visit",
+            payload_json=dumps({"title": "Replace the AC", "waiting_for": "unit", "needs_answer": True}),
+            summary="Which unit number?",
+            risk="material",
+            status="needs_answer",
+            created_at=utcnow(),
+        )
+        db.session.add(row)
+        db.session.commit()
+
+        saved = handle_message(user, "804", idempotency_key="unit-answer")
+        self.assertIn("804", saved["reply"])
+        self.assertEqual(Unit.query.filter_by(property_id=prop.id, unit_number="804").count(), 1)
+        self.assertEqual(Job.query.filter_by(property_id=prop.id, title="Replace the AC").count(), 1)
+
+    def test_place_answer_for_unit_card_confirms_property_then_saves_without_name_error(self):
+        from app.models import Job, TripProperty
+        from app.services.records import dumps, ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        ensure_property("Woodview", "Lubbock", "Texas", user.id)
+        db.session.commit()
+        row = PendingAction(
+            user_id=user.id,
+            batch_key="unit-place-question",
+            idempotency_key="unit-place-question",
+            tool="record_unit_visit",
+            payload_json=dumps({"property_name": "Woodview", "unit_number": "804", "title": "Replace the AC", "waiting_for": "place", "needs_answer": True}),
+            summary="Which property?",
+            risk="material",
+            status="needs_answer",
+            created_at=utcnow(),
+        )
+        db.session.add(row)
+        db.session.commit()
+
+        place_answer = handle_message(user, "Odessa", idempotency_key="unit-place-answer")
+        self.assertIn("Is this", place_answer["reply"])
+        self.assertTrue(place_answer.get("needs_property_confirm"))
+        confirmed = handle_message(user, "yes", idempotency_key="unit-place-confirm")
+        self.assertIn("804", confirmed["reply"])
+        self.assertEqual(Unit.query.filter_by(property_id=prop.id, unit_number="804").count(), 1)
+        self.assertEqual(Job.query.filter_by(property_id=prop.id, title="Replace the AC").count(), 1)
 
     def test_the_model_files_each_unit_as_its_own_record(self):
         from app.models import PlanItem, UnitTask

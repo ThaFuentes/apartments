@@ -119,10 +119,8 @@ def build_snapshot(
     def exp_in(row: Expense, range_start, range_end, ids) -> bool:
         if property_id and row.property_id and row.property_id != property_id:
             return False
-        if row.trip_id and row.trip_id in ids:
-            return True
-        if row.trip_id and row.trip_id not in ids:
-            return False
+        # Money counts the week it was actually spent, even when its trip sits
+        # in another week. Timestamps only, so one cost never lands in two packets.
         return _in_range(row.confirmed_at or row.created_at, range_start, range_end)
 
     week_exp = [e for e in expenses if exp_in(e, start, end, trip_ids)]

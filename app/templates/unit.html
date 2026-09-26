@@ -5,8 +5,8 @@
   <p><a href="/properties/{{ unit.property_id }}">{{ unit.property.name }}</a></p>
   <div class="hero">
     <h1>Unit {{ unit.unit_number }}</h1>
-    {% if unit.building %}<p class="kicker">Building {{ unit.building }}</p>{% endif %}
-    <p class="hint">{{ gear|length }} equipment · {{ tasks.get('part', [])|length }} parts · {{ tasks.get('vendor', [])|length }} vendored · {{ jobs|length }} labor</p>
+    {% if unit.building %}<p class="kicker">Building {{ unit.building }}</p>{% else %}<p class="kicker">Building not assigned</p>{% endif %}
+    <p class="hint">{{ gear|length }} equipment · {{ tasks.get('part', [])|length }} parts · {{ tasks.get('vendor', [])|length }} vendored · {{ tasks.get('task', [])|length + tasks.get('work_order', [])|length }} open items · {{ jobs|length }} labor records</p>
     <p class="lead">
       {% if unit.occupancy == 'occupied' %}Occupied — someone lives here.
       {% elif unit.occupancy == 'make_ready' %}Make ready — this one still needs work.
@@ -15,6 +15,14 @@
     </p>
   </div>
   {% if editable %}
+  <details class="unit-profile-edit"><summary>Edit unit profile</summary>
+    <form method="post" action="/units/{{ unit.id }}" class="card unit-profile-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Unit number <input name="unit_number" value="{{ unit.unit_number }}" required></label>
+      <label>Building <input name="building" value="{{ unit.building }}" placeholder="Unassigned"></label>
+      <button type="submit">Save profile</button>
+    </form>
+  </details>
   <form method="post" action="/units/{{ unit.id }}/occupancy" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit" name="occupancy" value="make_ready" class="ready">Make ready</button>
@@ -33,8 +41,10 @@
     <h3>{{ item.title }}</h3>
     <p class="hint">{{ item.status }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}{% if item.status == 'done' and who(item.done_by_id) %} · done by {{ who(item.done_by_id) }}{% endif %}</p>
     {% if item.notes %}<p>{{ item.notes }}</p>{% endif %}
-    {% if editable and item.status == 'needed' %}
-    <form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>
+    {% if editable %}
+    {% if item.status in ['needed', 'vendored'] %}<form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>{% endif %}
+    <details><summary>Edit this item</summary><form method="post" action="/tasks/{{ item.id }}/edit" class="stack"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>What <input name="title" value="{{ item.title }}" required></label><label>Notes <textarea name="notes">{{ item.notes }}</textarea></label><label>Vendor <input name="vendor" value="{{ item.vendor }}"></label><button type="submit">Save item</button></form></details>
+    <form method="post" action="/tasks/{{ item.id }}/delete" onsubmit="return confirm('Move this item to the restore bin?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove item</button></form>
     {% endif %}
   </article>
   {% endfor %}
@@ -42,10 +52,12 @@
   <h2>Parts and supplies</h2>
   {% for item in tasks.get('part', []) %}
   <article class="card">
-    <h3>{{ item.title }}</h3>
-    <p class="hint">{{ item.status }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}</p>
-    {% if editable and item.status == 'needed' %}
-    <form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>
+    <h3>{{ item.title }}</h3>      <p class="hint">{{ item.status }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}</p>
+    {% if editable %}
+    {% if item.status in ['needed', 'vendored'] %}<form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>{% endif %}
+    <details><summary>Edit this item</summary><form method="post" action="/tasks/{{ item.id }}/edit" class="stack"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>What <input name="title" value="{{ item.title }}" required></label><label>Notes <textarea name="notes">{{ item.notes }}</textarea></label><label>Vendor <input name="vendor" value="{{ item.vendor }}"></label><label>Status <select name="status">{% for value in ['needed', 'done', 'vendored', 'blocked'] %}<option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label><button type="submit">Save item</button></form></details>
+
+    <form method="post" action="/tasks/{{ item.id }}/delete" onsubmit="return confirm('Move this item to the restore bin?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove item</button></form>
     {% endif %}
   </article>
   {% else %}
@@ -55,10 +67,12 @@
   <h2>Work orders</h2>
   {% for item in tasks.get('work_order', []) %}
   <article class="card">
-    <h3>{{ item.title }}</h3>
-    <p class="hint">{{ item.status }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}</p>
-    {% if editable and item.status == 'needed' %}
-    <form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>
+    <h3>{{ item.title }}</h3>      <p class="hint">{{ item.status }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}</p>
+    {% if editable %}
+    {% if item.status in ['needed', 'vendored'] %}<form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>{% endif %}
+    <details><summary>Edit this item</summary><form method="post" action="/tasks/{{ item.id }}/edit" class="stack"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>What <input name="title" value="{{ item.title }}" required></label><label>Notes <textarea name="notes">{{ item.notes }}</textarea></label><label>Vendor <input name="vendor" value="{{ item.vendor }}"></label><label>Status <select name="status">{% for value in ['needed', 'done', 'vendored', 'blocked'] %}<option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label><button type="submit">Save item</button></form></details>
+
+    <form method="post" action="/tasks/{{ item.id }}/delete" onsubmit="return confirm('Move this item to the restore bin?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove item</button></form>
     {% endif %}
   </article>
   {% else %}
@@ -70,6 +84,8 @@
   <article class="card">
     <h3>{{ item.title }}</h3>
     <p class="hint">{% if item.vendor %}{{ item.vendor }} · {% endif %}{{ item.status }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}</p>
+    {% if item.notes %}<p>{{ item.notes }}</p>{% endif %}
+    {% if editable %}<details><summary>Edit this vendor record</summary><form method="post" action="/tasks/{{ item.id }}/edit" class="stack"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>What <input name="title" value="{{ item.title }}" required></label><label>Notes <textarea name="notes">{{ item.notes }}</textarea></label><label>Vendor <input name="vendor" value="{{ item.vendor }}"></label><label>Status <select name="status">{% for value in ['needed', 'done', 'vendored', 'blocked'] %}<option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label><button type="submit">Save record</button></form></details><form method="post" action="/tasks/{{ item.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove vendor record</button></form>{% endif %}
   </article>
   {% else %}
   <p class="empty">Nothing is vendored out from this unit.</p>
@@ -137,7 +153,7 @@
           <button type="submit">Save this {{ kind_label(item.kind) or "item" }}</button>
         </form>
       </details>
-      <form method="post" action="/equipment/{{ item.id }}/delete">
+      <form method="post" action="/equipment/{{ item.id }}/delete" onsubmit="return confirm('Move this equipment record to the restore bin?');">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit" class="ghost">Remove this {{ kind_label(item.kind) or "item" }}</button>
       </form>
@@ -171,6 +187,26 @@
   </details>
   {% endif %}
 
+  <h2>Change history</h2>
+  {% if not unit_changes %}<p class="empty">New changes are recorded here with the person, time, and before/after values.</p>{% endif %}
+  <ol class="audit-timeline">
+    {% for row in unit_changes %}
+    <li class="audit-entry">
+      <div class="audit-head"><strong>{{ row.summary or (row.action|title ~ ' · Unit ' ~ unit.unit_number) }}</strong><time>{{ row.when|apt_datetime }}</time></div>
+      <p class="hint">{{ row.who }} · {{ row.source }}{% if row.after %} · {% for key, value in row.after.items() %}{% if row.before.get(key) != value and key not in ['property_id', 'unit_id', 'related_unit_ids', 'deleted_at'] %}{{ key|replace('_', ' ') }}: {{ row.before.get(key, '—') }} → {{ value }}{% if not loop.last %}; {% endif %}{% endif %}{% endfor %}{% endif %}</p>
+    </li>
+    {% endfor %}
+  </ol>
+  {% if editable and (deleted_tasks or deleted_gear or deleted_jobs) %}
+  <details class="restore-bin"><summary>Recently removed records · {{ deleted_tasks|length + deleted_gear|length + deleted_jobs|length }}</summary>
+    <ul class="list">
+      {% for item in deleted_tasks %}<li class="restore-row"><strong>{{ item.title }}</strong><span class="hint">Removed {{ item.deleted_at|apt_datetime }} · {{ item.kind|replace('_', ' ')|title }}</span><form method="post" action="/records/unit_task/{{ item.id }}/restore"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="quiet">Restore item</button></form></li>{% endfor %}
+      {% for item in deleted_gear %}<li class="restore-row"><strong>{{ kind_label(item.kind) or 'Equipment' }}{% if item.brand %} · {{ item.brand }}{% endif %}</strong><span class="hint">Removed {{ item.deleted_at|apt_datetime }}{% if item.serial_number %} · Serial {{ item.serial_number }}{% endif %}</span><form method="post" action="/records/equipment/{{ item.id }}/restore"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="quiet">Restore equipment</button></form></li>{% endfor %}
+      {% for item in deleted_jobs %}<li class="restore-row"><strong>{{ item.title }}</strong><span class="hint">Removed {{ item.deleted_at|apt_datetime }}</span><form method="post" action="/jobs/{{ item.id }}/restore"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="next" value="/units/{{ unit.id }}"><button type="submit" class="quiet">Restore work</button></form></li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
   <h2>What was done</h2>
   {% if not jobs and not visits %}
   <p class="empty">No work is on this unit yet.</p>
@@ -180,7 +216,18 @@
     <p class="kicker">{{ job.created_at|apt_when }} · {{ job.status }}{% if who(job.created_by_id) %} · {{ who(job.created_by_id) }}{% endif %}</p>
     <h3>{{ job.title }}</h3>
     {% if editable %}
-    <form method="post" action="/jobs/{{ job.id }}/delete">
+    <details>
+      <summary>Edit this work</summary>
+      <form method="post" action="/jobs/{{ job.id }}/edit" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/units/{{ unit.id }}">
+        <label>Work <input name="title" value="{{ job.title }}" required></label>
+        <label>Status <select name="status">{% for value in ['done', 'planned', 'blocked', 'followup'] %}<option value="{{ value }}" {% if job.status == value %}selected{% endif %}>{{ value|replace('_', ' ')|title }}</option>{% endfor %}</select></label>
+        <label>Details <textarea name="detail">{{ job.detail }}</textarea></label>
+        <button type="submit">Save work</button>
+      </form>
+    </details>
+    <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Move this work record to the restore bin?');">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next" value="/units/{{ unit.id }}">
       <button type="submit" class="ghost">Remove this work</button>
@@ -197,10 +244,16 @@
   {% for visit in visits %}
   {% if visit.note and visit.note not in jobs|map(attribute='title') %}
   <article class="card">
-    <p class="kicker">{{ visit.started_at|apt_when }} · {{ visit.status }}</p>
+    <p class="kicker">{{ visit.started_at|apt_when }} · {{ visit.status }}{% if who(visit.created_by_id) %} · {{ who(visit.created_by_id) }}{% endif %}</p>
     <h3>{{ visit.note }}</h3>
   </article>
   {% endif %}
   {% endfor %}
+  {% if editable %}
+  <form method="post" action="/units/{{ unit.id }}/delete" onsubmit="return confirm('Remove this unit and its linked records? You can restore it later.');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="ghost danger-button">Remove this unit</button>
+  </form>
+  {% endif %}
 </section>
 {% endblock %}

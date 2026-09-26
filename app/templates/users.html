@@ -45,6 +45,26 @@
     <button type="submit">Update</button>
   </form>
   {% if person.role != 'owner' %}
+  <form method="post" action="/users/{{ person.id }}/capabilities" class="card stack capability-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>What {{ person.display_name or person.username }} can do</h3>
+    <p class="hint">Role defaults are shown. Choose Allow or Deny for a personal override, or Default to follow the role. Property assignments still limit which records they can reach.</p>
+    <div class="capability-grid">
+    {% for capability, label in capabilities.items()|sort(attribute='1') %}
+      {% set override = overrides.get((person.id, capability)) %}
+      {% set state = 'allow' if override == true else 'deny' if override == false else 'default' %}
+      <label class="capability-row">
+        <span>{{ label }} <small>{% if default_capabilities.get((person.id, capability)) %}Role default: on{% else %}Role default: off{% endif %}</small></span>
+        <select name="cap-{{ capability }}" aria-label="{{ label }} for {{ person.username }}">
+          <option value="default" {% if state == 'default' %}selected{% endif %}>Role default</option>
+          <option value="allow" {% if state == 'allow' %}selected{% endif %}>Allow</option>
+          <option value="deny" {% if state == 'deny' %}selected{% endif %}>Deny</option>
+        </select>
+      </label>
+    {% endfor %}
+    </div>
+    <button type="submit">Save personal permissions</button>
+  </form>
   <form method="post" action="/users/{{ person.id }}/access" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <h3>Properties for {{ person.display_name or person.username }}</h3>

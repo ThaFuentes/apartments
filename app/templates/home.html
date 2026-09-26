@@ -14,7 +14,7 @@
   </div>
 
   <div class="stats">
-    <a class="stat" href="/places"><strong>{{ board.place_count }}</strong><span>Places</span></a>
+    <a class="stat" href="/places"><strong>{{ board.place_count }}</strong><span>Properties</span></a>
     <a class="stat" href="/plan"><strong>{{ board.open_count }}</strong><span>Open plan</span></a>
     <a class="stat" href="/miles"><strong>{{ board.miles }}</strong><span>Miles</span></a>
   </div>
@@ -35,7 +35,7 @@
 
   <h2>Where you’ve been</h2>
   {% if not board.places %}
-  <p class="empty">No places yet.</p>
+  <p class="empty">No properties yet.</p>
   {% else %}
   <div class="stack">
     {% for place in board.places %}
@@ -50,7 +50,7 @@
     </a>
     {% endfor %}
   </div>
-  <p><a href="/places">All places</a></p>
+  <p><a href="/places">All properties</a></p>
   {% endif %}
 
   <h2>Latest work</h2>

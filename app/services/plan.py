@@ -620,11 +620,11 @@ def save_plan_day(user, payload: dict, source: str) -> dict:
             detail = " ".join((item.get("title") or "") for item in (stop.get("items") or [])).strip()
             if last_prop:
                 ensure_plan_item(trip, last_prop, "Gas", detail or name, 1, user.id, source)
-                added.append(f"Gas stays on the plan at {last_prop.name}, not as a place")
+                added.append(f"Gas stays on the plan at {last_prop.name}, not as a property")
             else:
                 line = "Gas" + (f" — {detail}" if detail else "")
                 trip.checklist = ((trip.checklist or "").rstrip() + "\n" + line).strip()
-                added.append("Gas stays on the plan, not as a place")
+                added.append("Gas stays on the plan, not as a property")
             continue
         prop = ensure_property(name, city, region, user.id, source=source)
         last_prop = prop

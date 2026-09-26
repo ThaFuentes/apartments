@@ -63,6 +63,7 @@ def init_db(app):
         _evolve_equipment()
         _evolve_units()
         _evolve_trip_mileage()
+        _evolve_roles_and_scope()
         _say("[apt] MariaDB schema ready")
 
 
@@ -166,6 +167,37 @@ def _evolve_units():
     with db.engine.begin() as conn:
         for sql in statements:
             conn.execute(text(sql))
+
+
+def _evolve_roles_and_scope():
+    """Add role/scope fields to existing MariaDB installations without replacing data."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    statements = []
+    if "users" in names:
+        columns = {col["name"]: col for col in inspect(db.engine).get_columns("users")}
+        if "can_manage_users" not in columns:
+            statements.append("ALTER TABLE users ADD COLUMN can_manage_users TINYINT(1) NOT NULL DEFAULT 0")
+        if columns.get("role", {}).get("type") is not None:
+            statements.append("ALTER TABLE users MODIFY COLUMN role VARCHAR(32) NOT NULL DEFAULT 'office'")
+    if "properties" in names:
+        have = {col["name"] for col in inspect(db.engine).get_columns("properties")}
+        if "region_id" not in have:
+            statements.append("ALTER TABLE properties ADD COLUMN region_id INT NULL")
+    if "property_access" in names:
+        have = {col["name"] for col in inspect(db.engine).get_columns("property_access")}
+        if "can_manage_people" not in have:
+            statements.append("ALTER TABLE property_access ADD COLUMN can_manage_people TINYINT(1) NOT NULL DEFAULT 0")
+    if "regions" in names:
+        pass
+    if statements:
+        with db.engine.begin() as conn:
+            for sql in statements:
+                conn.execute(text(sql))
 
 
 def _evolve_trip_mileage():

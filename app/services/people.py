@@ -12,7 +12,19 @@ from app.services.clock import utcnow
 
 USERNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$")
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-ROLES = ("owner", "field", "viewer")
+ROLES = (
+    "owner",
+    "admin",
+    "regional_manager",
+    "property_manager",
+    "assistant_manager",
+    "office",
+    "maintenance_manager",
+    "maintenance_person",
+    # Keep legacy values accepted for existing invitations and stored accounts.
+    "field",
+    "viewer",
+)
 
 
 def clean_email(value) -> str | None:
@@ -58,13 +70,17 @@ def create_user(
     can_see_reports: bool = True,
     can_see_history: bool = True,
     can_see_live_map: bool = False,
+    capability_overrides: dict[str, bool] | None = None,
     active: bool = True,
 ) -> tuple[User, str]:
     role = (role or "viewer").strip().lower()
     if role not in ROLES:
-        raise ValueError("Role is owner, field, or viewer.")
-    if created_by is not None and created_by.role != "owner":
-        raise ValueError("Only the owner adds people.")
+        raise ValueError("Choose a valid Apt role.")
+    if created_by is not None:
+        from app.services.access import can_create_user
+
+        if not can_create_user(created_by, role):
+            raise ValueError("This login cannot add that role or scope.")
     ident = clean_username(username)
     if find_user(ident):
         raise ValueError(f"{ident} already has a login.")
@@ -85,15 +101,30 @@ def create_user(
         password_hash=generate_password_hash(password),
         role=role,
         active=bool(active),
-        can_see_reports=bool(can_see_reports) if role == "viewer" else True,
-        can_see_history=bool(can_see_history) if role == "viewer" else True,
-        can_see_live_map=bool(can_see_live_map) if role == "viewer" else False,
+        can_see_reports=bool(can_see_reports) if role in ("viewer", "office") else True,
+        can_see_history=bool(can_see_history) if role in ("viewer", "office") else True,
+        can_see_live_map=bool(can_see_live_map) if role in ("viewer", "office") else False,
         created_by_id=created_by.id if created_by else None,
         created_at=utcnow(),
         updated_at=utcnow(),
     )
     db.session.add(user)
     db.session.flush()
+    if capability_overrides:
+        from app.models import UserCapability
+        from app.services.access import CAPABILITIES
+
+        unknown = set(capability_overrides) - CAPABILITIES
+        if unknown:
+            raise ValueError("One or more selected permissions are invalid.")
+        for capability, granted in capability_overrides.items():
+            db.session.add(UserCapability(
+                user_id=user.id,
+                capability=capability,
+                granted=bool(granted),
+                changed_by_id=created_by.id if created_by else None,
+                created_at=utcnow(),
+            ))
     if role == "owner" and AssistantProfile.query.filter_by(user_id=user.id).first() is None:
         db.session.add(AssistantProfile(user_id=user.id))
     return user, generated

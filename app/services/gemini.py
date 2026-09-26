@@ -39,6 +39,17 @@ FALLBACK_FREE = (
     "gemini-flash-lite-latest",
 )
 
+GEAR_PROPS = {
+    "kind": {"type": "string", "description": "refrigerator, washer, dryer, dishwasher, range, microwave, air conditioner, furnace, water heater, thermostat"},
+    "brand": {"type": "string"},
+    "model": {"type": "string"},
+    "serial": {"type": "string"},
+    "size": {"type": "string"},
+    "style": {"type": "string"},
+    "color": {"type": "string"},
+    "notes": {"type": "string"},
+}
+
 TOOL_DECLS = [
     {
         "name": "plan_trip",
@@ -125,7 +136,7 @@ TOOL_DECLS = [
     },
     {
         "name": "record_unit_visit",
-        "description": "Log work against a unit number. Creates the unit the first time it is named.",
+        "description": "Log work against a unit number. Creates the unit the first time it is named. When she says she added, installed, or replaced an appliance in a unit, pass the appliance in equipment; title can be a short phrase such as 'Added a fridge', and equipment saves even with no title.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -134,6 +145,16 @@ TOOL_DECLS = [
                 "status": {"type": "string", "description": "done, planned, blocked, followup, skipped"},
                 "note": {"type": "string"},
                 "property_name": {"type": "string"},
+                "equipment": {
+                    "type": "object",
+                    "description": "The one appliance she named on this unit. Fill this even when there is no work title.",
+                    "properties": GEAR_PROPS,
+                },
+                "equipment_items": {
+                    "type": "array",
+                    "description": "More appliances on this same unit, one object each. A washer and a dryer are two items.",
+                    "items": {"type": "object", "properties": GEAR_PROPS},
+                },
             },
             "required": ["unit_number"],
         },
@@ -295,27 +316,46 @@ TOOL_DECLS = [
         },
     },
     {
-        "name": "soft_delete",
-        "description": "Hide a job, unit, or expense by its id so it can be restored.",
+        "name": "unit_board",
+        "description": "Move an existing apartment unit between buildings or rename its unit number. Include the saved property name and existing unit number. Use set_building or set_unit_number; never create a replacement unit for an edit.",
         "parameters": {
             "type": "object",
             "properties": {
-                "entity": {"type": "string"},
-                "entity_id": {"type": "integer"},
+                "action": {"type": "string", "enum": ["set_building", "set_unit_number"]},
+                "property_hint": {"type": "string"},
+                "unit_number": {"type": "string"},
+                "new_number": {"type": "string"},
+                "building": {"type": "string"},
             },
-            "required": ["entity", "entity_id"],
+            "required": ["action", "property_hint", "unit_number"],
+        },
+    },
+    {
+        "name": "soft_delete",
+        "description": "Soft-remove a job, unit, unit task, equipment record, or expense. Use an exact entity ID from saved records. A unit removal also soft-removes its linked jobs, tasks, and equipment so they can be restored together.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "entity": {"type": "string", "enum": ["job", "unit", "unit_task", "equipment", "expense"]},
+                "entity_id": {"type": "integer"},
+                "record_number": {"type": "string"},
+                "record_property": {"type": "string"},
+            },
+            "required": ["entity"],
         },
     },
     {
         "name": "restore",
-        "description": "Bring back a soft-deleted job, unit, or expense.",
+        "description": "Restore a soft-deleted record. Use an exact entity ID from saved records. A removed unit restores only its linked records that were removed at the same time.",
         "parameters": {
             "type": "object",
             "properties": {
-                "entity": {"type": "string"},
+                "entity": {"type": "string", "enum": ["job", "unit", "unit_task", "equipment", "expense"]},
                 "entity_id": {"type": "integer"},
+                "record_number": {"type": "string"},
+                "record_property": {"type": "string"},
             },
-            "required": ["entity", "entity_id"],
+            "required": ["entity"],
         },
     },
     {

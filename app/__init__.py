@@ -84,6 +84,13 @@ def create_app() -> Flask:
         local = _local_moment(value)
         return local.strftime("%b %d, %Y").replace(" 0", " ")
 
+    @app.template_filter("apt_datetime")
+    def apt_datetime(value):
+        if not value:
+            return ""
+        local = _local_moment(value)
+        return local.strftime("%b %d, %Y · %I:%M %p").replace(" 0", " ").replace("· 0", "· ")
+
     try:
         from poweredbytop import init_security
 
