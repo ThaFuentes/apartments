@@ -20,6 +20,7 @@ Read `AI_READ_THIS.md` before touching chat. Short version: a saved AI key answe
 - Chat can do the work. Screens are for review and one-thumb taps. Material writes wait for a yes.
 - Track visited unit numbers only. Do not map floors, buildings, or odd/even layouts.
 - `SITE_MODE=apt`. Session cookie `pbt_apt_session`.
+- **Never modify the PoweredByTop wrapper or shared `poweredbytop/` code from an Apt task.** Treat that integration as read-only, including `poweredbytop/reputation/scorer.py`. If an Apt change appears to require wrapper edits, stop and ask the operator rather than changing it.
 
 ## PAT in chat = push + HostM commands
 
@@ -48,6 +49,25 @@ os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 print(f"[apt] init_security failed: {exc}", flush=True)
 ```
 
+## Keep scripts small by splitting responsibilities
+
+Aim for source files under 500 lines; treat 800 lines as a hard ceiling, not a target. If a file is already over 1,000 lines, reduce it by moving complete responsibilities into additional focused modules, then update imports/registration and tests. Preserve behavior: do not solve file size by deleting code, shortening tests, or replacing working functionality with stubs. Keep each new module focused and avoid circular imports. For test suites, split test classes into discoverable test modules while preserving shared setup and coverage.
+
+## Safe edits and source backups
+
+Before changing an existing source/script file, save a copy of that one file first. Do not make a whole-project, database, or uploads backup for a code edit. New files do not need a pre-edit backup. Keep exactly one rolling previous-version copy per script; overwrite that copy with the current version immediately before each edit.
+
+Run this from the app root, replacing the example with the exact relative path of the file being edited:
+
+```bash
+file="app/services/example.py"
+mkdir -p "backups/code/$(dirname "$file")"
+cp -p -- "$file" "backups/code/$file"
+cmp -s "$file" "backups/code/$file" || exit 1
+```
+
+The ignored `backups/code/` tree mirrors the source path and contains one last-known-good copy per file. To restore one file, copy its saved version back to its original path; never restore or check out the whole tree just to recover one file. Keep backups local and do not commit them.
+
 ## Tests
 
 ```bash
@@ -56,3 +76,4 @@ cd /home/clarkkent/pyprojects/apt.poweredby.top
 ```
 
 Tests talk to MariaDB. They wipe apt product tables. Do not point `MYSQL_*` at a database you need to keep.
+

@@ -495,3 +495,70 @@ body.drive .composer button, body.drive .camera button { min-height: 64px; font-
   .audit-head { flex-direction: column; gap: 0.2rem; }
   .restore-row { align-items: flex-start; }
 }
+
+/* Review cards make the exact proposed write visible before it is saved. */
+.bubble.card {
+  display: block;
+  align-self: stretch;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.95rem;
+  overflow-wrap: anywhere;
+  background: linear-gradient(145deg, #ffffff 0%, #f8fbfa 100%);
+  border: 1px solid #dce8e5;
+  border-radius: 20px;
+  box-shadow: 0 12px 30px rgba(22, 48, 44, 0.09);
+}
+.approval-head { display: flex; align-items: flex-start; gap: 0.65rem; margin-bottom: 0.8rem; }
+.approval-icon, .chat-agent-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 2rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 11px;
+  background: var(--soft);
+  color: var(--accent);
+  font-weight: 850;
+}
+.approval-state { color: var(--accent); font-size: 0.72rem; line-height: 1.2; font-weight: 800; text-transform: uppercase; letter-spacing: 0.065em; }
+.approval-heading { min-width: 0; }
+.bubble.card .card-title { margin: 0.12rem 0 0; color: var(--ink); font-size: 1.05rem; line-height: 1.25; font-weight: 760; }
+.bubble.card .changes { list-style: none; display: grid; gap: 0; margin: 0; padding: 0.15rem 0; border-top: 1px solid #e7efed; border-bottom: 1px solid #e7efed; }
+.bubble.card .changes li { display: grid; grid-template-columns: minmax(5.4rem, 0.72fr) minmax(0, 1.5fr); align-items: start; gap: 0.55rem; padding: 0.55rem 0; border-bottom: 1px solid #edf2f1; font-size: 0.87rem; }
+.bubble.card .changes li:last-child { border-bottom: 0; }
+.bubble.card .changes .field { min-width: 0; color: var(--muted); font-weight: 650; }
+.bubble.card .changes .value { display: flex; flex-wrap: wrap; gap: 0.35rem; min-width: 0; }
+.bubble.card .changes s { color: #86918f; }
+.bubble.card .changes strong { color: #193b35; font-weight: 750; }
+.bubble.card .card-note { margin: 0.7rem 0; color: var(--muted); font-size: 0.85rem; }
+.bubble.card .actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.bubble.card .actions form { display: flex; flex: 1 1 auto; }
+.bubble.card .actions button { width: 100%; min-height: 44px; padding: 0.65rem 0.8rem; border-radius: 13px; font-size: 0.9rem; }
+.bubble.card .actions .approve-form button { background: #0f6e66; color: #fff; box-shadow: 0 5px 14px rgba(15, 110, 102, 0.18); }
+.bubble.card .actions .discard-form { flex: 0 1 auto; }
+.bubble.card .actions .discard-form button { width: auto; }
+.bubble.card.needs_answer { background: linear-gradient(145deg, #f3f7ff 0%, #fff 100%); border-color: #dbe5f5; }
+.bubble.card.needs_answer .approval-icon { background: #e5edff; color: #365db0; }
+.bubble.card.needs_answer .approval-state { color: #365db0; }
+.composer-hint { flex: 1 0 100%; padding: 0 0.3rem; color: var(--muted); font-size: 0.7rem; text-align: center; }
+.chat-agent { display: flex; align-items: center; gap: 0.55rem; }
+.chat-agent > span:last-child { display: flex; flex-direction: column; gap: 0.06rem; }
+.chat-agent small { color: var(--muted); font-size: 0.69rem; }
+.chat-pending-count { display: inline-grid; place-items: center; min-width: 1.35rem; height: 1.35rem; margin-left: 0.3rem; padding: 0 0.25rem; border-radius: 999px; color: var(--accent); background: white; font-size: 0.75rem; }
+.chat-panel .chat-bar { padding: 0.75rem 0.85rem; }
+.chat-panel .thread { gap: 0.55rem; padding: 0.8rem; scroll-behavior: smooth; }
+.chat-panel .bubble { max-width: min(90%, 27rem); }
+.chat-panel .bubble.card { width: 100%; }
+.chat-panel .composer { flex-wrap: wrap; gap: 0.35rem; padding: 0.55rem 0.65rem calc(0.55rem + env(safe-area-inset-bottom)); }
+.chat-panel .composer-hint { margin-top: -0.1rem; }
+#chat-open { display: inline-flex; align-items: center; gap: 0.4rem; }
+button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 3px solid rgba(15, 110, 102, 0.34); outline-offset: 2px; }
+@media (max-width: 620px) {
+  .bubble.card .changes li { grid-template-columns: minmax(4.7rem, 0.65fr) minmax(0, 1.35fr); }
+  .chat-panel { top: env(safe-area-inset-top, 0.45rem); bottom: calc(4.6rem + env(safe-area-inset-bottom)); }
+  .chat-panel .composer .clip { max-width: 4.5rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-panel .thread { scroll-behavior: auto; }
+}

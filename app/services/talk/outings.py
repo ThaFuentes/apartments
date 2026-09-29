@@ -243,9 +243,12 @@ def _file_outing(user, slots: dict, key: str, source: str, row=None) -> dict:
         payload["work_items"] = slots["work_items"]
     from app.services.pending import commit_apply
 
+    if slots.get("gas"):
+        payload["gas"] = slots["gas"]
     result = commit_apply(user, "plan_trip", payload, source, key)
-    if result.get("ok") and slots.get("gas") and result.get("trip_id") and result.get("property_id"):
-        _remember_gas(user, result["trip_id"], result["property_id"], slots["gas"], source)
+    if result.get("ok") and slots.get("gas"):
+        if result.get("trip_id") and result.get("property_id"):
+            _remember_gas(user, result["trip_id"], result["property_id"], slots["gas"], source)
         result["reply"] = (result.get("reply") or "").rstrip() + " Gas is a line on that plan, not a new property."
     if row is not None and result.get("ok"):
         fresh = db.session.get(PendingAction, row.id)

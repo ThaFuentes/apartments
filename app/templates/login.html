@@ -3,8 +3,9 @@
 {% block main %}
 <section class="hero narrow">
   {% if setup %}
-  <h1>Welcome</h1>
-  <p class="lead">Your name, a username, a password, and an email. People you add later can skip email.</p>
+  <p class="kicker">APT · PROPERTY OPERATIONS</p>
+  <h1>Set up your owner account</h1>
+  <p class="lead">Create the primary login. Email is optional; you can add office and field logins later.</p>
   {% else %}
   <h1>Welcome back</h1>
   <p class="lead">Use the name and password you set up.</p>
@@ -12,14 +13,14 @@
   <form method="post" action="/login" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {% if setup %}
-    <label>Your name <input name="display_name" autocomplete="name" required></label>
+    <label>Your name <input name="display_name" autocomplete="name" placeholder="Owner" required></label>
     {% endif %}
     <label>Username <input name="username" autocomplete="username" required autocapitalize="none"></label>
-    <label>Password <input name="password" type="password" autocomplete="{{ 'new-password' if setup else 'current-password' }}" required minlength="8"></label>
+    <label>Password <input name="password" type="password" autocomplete="{{ 'new-password' if setup else 'current-password' }}" required minlength="8" placeholder="At least 8 characters"></label>
     {% if setup %}
-    <label>Email <input name="email" type="email" autocomplete="email" required placeholder="Required for this first login"></label>
+    <label>Email <span class="hint">Optional</span> <input name="email" type="email" autocomplete="email" placeholder="name@company.com"></label>
     {% endif %}
-    <button type="submit">{% if setup %}Get started{% else %}Sign in{% endif %}</button>
+    <button type="submit">{% if setup %}Create owner account{% else %}Sign in{% endif %}</button>
   </form>
 </section>
 {% endblock %}

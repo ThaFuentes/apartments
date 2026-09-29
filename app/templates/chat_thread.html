@@ -1,19 +1,109 @@
-<div class="thread" id="thread" data-assistant="{{ assistant_name or 'Apt' }}">
+<div class="thread" id="thread" data-assistant="{{ assistant_name or 'Apt' }}" data-next="{{ request.path }}" aria-live="polite" aria-relevant="additions text">
   {% if not chat_lines %}
   <p class="bubble assistant"><span class="who">{{ assistant_name or "Apt" }}</span>Hi. I'm {{ assistant_name or "Apt" }}. Tell me a site, what you did, or ask what's on your record.</p>
   {% endif %}
   {% for msg in chat_lines %}
   <p class="bubble {{ msg.role }}">{% if msg.role == 'assistant' %}<span class="who">{{ assistant_name or "Apt" }}</span>{% endif %}{{ msg.body }}{% if msg.created_at %}<time>{{ msg.created_at|chat_clock }}</time>{% endif %}</p>
   {% endfor %}
+  {% for card in chat_cards %}
+  <section class="bubble card {{ card.status }}" data-pending-id="{{ card.id }}" aria-label="{{ 'Approval required' if card.status == 'pending' else 'Answer required' }}">
+    <div class="approval-head">
+      <span class="approval-icon" aria-hidden="true">{{ '✓' if card.status == 'pending' else '?' }}</span>
+      <div class="approval-heading">
+        <span class="approval-state">{{ 'Review before saving' if card.status == 'pending' else 'Needs your answer' }}</span>
+        <h2 class="card-title">{{ card.headline }}</h2>
+      </div>
+    </div>
+    {% if card.changes %}
+    <ul class="changes" aria-label="Proposed changes">
+      {% for row in card.changes %}
+      <li><span class="field">{{ row.field }}</span><span class="value"><s>{{ row.before }}</s><span aria-hidden="true">→</span><strong>{{ row.after }}</strong></span></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="card-note">{{ card.note or 'Details will appear here before anything is saved.' }}</p>
+    {% endif %}
+    {% if card.status == 'pending' %}
+    <p class="card-note">Nothing changes until you save this item.</p>
+    <div class="actions">
+      <form method="post" action="/pending/{{ card.id }}/confirm" class="approve-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button type="submit" aria-label="Save {{ card.headline }}">Save this item</button>
+      </form>
+      <form method="post" action="/pending/{{ card.id }}/discard" class="discard-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button type="submit" class="ghost">Don't save</button>
+      </form>
+    </div>
+    {% else %}
+    <p class="card-note">{{ card.note or 'Waiting on your answer. Say it in the chat.' }}</p>
+    {% if card.status == 'needs_answer' and card.waiting_for == 'default_confirm' %}
+    <div class="actions answer-actions">
+      <button type="button" class="quiet default-yes" data-answer="yes">Yes, make it my default</button>
+      <button type="button" class="ghost default-no" data-answer="no">No, not for now</button>
+      <form method="post" action="/pending/{{ card.id }}/discard" class="discard-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button type="submit" class="ghost">Cancel</button>
+      </form>
+    </div>
+    {% endif %}
+    {% if card.waiting_for in ('property_confirm', 'property', 'city', 'unit') %}
+    <div class="actions answer-actions">
+      {% if card.waiting_for == 'property_confirm' %}
+      <button type="button" class="quiet answer-yes" data-answer="yes">Yes, this site</button>
+      <button type="button" class="ghost answer-no" data-answer="no">No, choose another</button>
+      {% endif %}
+      <form method="post" action="/pending/{{ card.id }}/discard" class="discard-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button type="submit" class="ghost">Cancel this item</button>
+      </form>
+    </div>
+    {% endif %}
+    {% endif %}
+    {% if card.status == 'pending' and card.tool in ('plan_trip', 'plan_day', 'record_unit_visit', 'log_work', 'log_expense') %}
+    <details class="card-edit">
+      <summary>Edit details before saving</summary>
+      <form method="post" action="/pending/{{ card.id }}/edit" class="card-edit-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        {% if card.tool in ('plan_trip', 'plan_day') %}
+        <label>Property <input name="property_name" value="{{ card.payload.get('property_name') or (card.payload.get('stops', [{}])[0].get('property_name', '') if card.payload.get('stops') else '') }}"></label>
+        <label>City <input name="city" value="{{ card.payload.get('city') or (card.payload.get('stops', [{}])[0].get('city', '') if card.payload.get('stops') else '') }}"></label>
+        <label>Work <input name="purpose" value="{{ card.payload.get('purpose', '') }}"></label>
+        <label>Date <input name="starts_on" value="{{ card.payload.get('starts_on', '') }}" placeholder="YYYY-MM-DD"></label>
+        {% elif card.tool in ('record_unit_visit', 'log_work') %}
+        <label>Unit <input name="unit_number" value="{{ card.payload.get('unit_number', '') }}"></label>
+        <label>Work <input name="title" value="{{ card.payload.get('title', '') }}"></label>
+        {% elif card.tool == 'log_expense' %}
+        <label>Kind <input name="kind" value="{{ card.payload.get('kind', '') }}"></label>
+        <label>Amount <input name="amount" inputmode="decimal" value="{{ '%.2f'|format((card.payload.get('amount_cents', 0)|int) / 100) }}"></label>
+        <label>Where <input name="merchant" value="{{ card.payload.get('merchant', '') }}"></label>
+        <label>Odometer <input name="odometer" inputmode="numeric" value="{{ card.payload.get('odometer', '') }}"></label>
+        {% else %}
+        <p class="card-note">To change the details, discard this proposal and tell me the corrected version.</p>
+        {% endif %}
+        {% if card.tool in ('plan_trip', 'plan_day', 'record_unit_visit', 'log_work', 'log_expense') %}
+        <button type="submit" class="quiet">Update review</button>
+        {% endif %}
+      </form>
+    </details>
+    {% endif %}
+  </section>
+  {% endfor %}
 </div>
-<form method="post" action="/chat" enctype="multipart/form-data" class="composer" id="composer">
+<form method="post" action="/chat" enctype="multipart/form-data" class="composer" id="composer" aria-label="Send a chat message">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="idempotency_key" value="{{ chat_key }}">
   <label class="clip">
     <input type="file" name="photo" accept="image/*" capture="environment">
     <span>Photo</span>
   </label>
-  <textarea name="message" rows="1" placeholder="Message"></textarea>
+  <textarea name="message" rows="1" placeholder="Message" aria-label="Message Apt"></textarea>
   <button type="button" id="mic" class="quiet" aria-label="Speak">Mic</button>
   <button type="submit" class="send" aria-label="Send">Send</button>
+  <p class="composer-hint">Proposed changes always need your confirmation before saving.</p>
 </form>

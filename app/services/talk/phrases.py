@@ -68,12 +68,12 @@ STATES = {
 }
 
 ADD_USER = re.compile(
-    r"\b(?:add|invite|give)\s+(?:my\s+)?(?:a\s+|an\s+)?(regional manager|property manager|assistant manager|maintenance manager|maintenance person|office manager|admin|employee|viewer|boss|user|field|owner|office|read-only|readonly)\s+([a-z0-9][a-z0-9._-]{1,40})",
+    r"\b(?:add|invite|give)\s+(?:my\s+)?(?:a\s+|an\s+)?(maintenance regional manager|maintenance regional|maintenance supervisor|regional manager|property manager|assistant manager|maintenance manager|maintenance person|office manager|admin|employee|viewer|boss|user|field|owner|office|read-only|readonly)\s+([a-z0-9][a-z0-9._-]{1,40})",
     re.I,
 )
 
 AS_ROLE = re.compile(
-    r"\b(?:add|invite)\s+(?:login\s+)?([a-z0-9][a-z0-9._-]{1,40})\s+as\s+(?:an?\s+)?(regional manager|property manager|assistant manager|maintenance manager|maintenance person|office manager|admin|employee|boss|owner|viewer|field|office)\b",
+    r"\b(?:add|invite)\s+(?:login\s+)?([a-z0-9][a-z0-9._-]{1,40})\s+as\s+(?:an?\s+)?(maintenance regional manager|maintenance regional|maintenance supervisor|regional manager|property manager|assistant manager|maintenance manager|maintenance person|office manager|admin|employee|boss|owner|viewer|field|office)\b",
     re.I,
 )
 
@@ -123,7 +123,7 @@ _STREET = re.compile(
     re.I,
 )
 
-_ROLE_NAMES = r"regional manager|property manager|assistant manager|maintenance manager|maintenance person|office manager|administrator|admin|maintenance|employee|worker|office|boss|viewer|owner|field"
+_ROLE_NAMES = r"maintenance regional manager|maintenance regional|maintenance supervisor|regional manager|property manager|assistant manager|maintenance manager|maintenance person|office manager|administrator|admin|maintenance|employee|worker|office|boss|viewer|owner|field"
 
 _STAFF_ROLE_FIRST = re.compile(
     rf"\b(?:create|add|make)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?({_ROLE_NAMES})\s+(?:named\s+|called\s+|user\s+)?([a-z][a-z0-9._-]{{1,40}})",

@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from app.builddb.builddb import db
-from app.services.appliers import apply_query_record
+from app.services.appliers_reports import apply_query_record
 from app.services.pending import confirm_id, latest_batch, propose
 from app.services.records import open_shift
 from app.services.access import authorize_tool
@@ -84,18 +84,34 @@ def _from_calls(user, calls, key, source, quota_note, text: str = "") -> dict:
                 replies.append("Which city is that in? A few saved places share that name.")
                 continue
             args = checked
+        if name in {"plan_trip", "plan_day"} and (args.get("work_items") or args.get("stops")):
+            card = commit_apply(user, name, args, source, item_key, batch_key=key)
+            replies.append(card.get("reply") or "")
+            proposals.extend(card.get("proposals") or ([card["proposal"]] if card.get("proposal") else []))
+            continue
         if args.get("needs_answer") or (name == "record_unit_visit" and not _place_ready(user)):
+            from app.services.context import bind_locked_site
+            from app.services.pending import request_apply
+
+            args, lock_error = bind_locked_site(user, name, args)
+            if lock_error:
+                replies.append(lock_error)
+                continue
+            if name == "record_unit_visit" and not args.get("needs_answer"):
+                args["needs_answer"] = True
+                args["waiting_for"] = "property_confirm" if args.get("property_name") else "property"
             summary, risk = _summary(name, args)
             summary = args.get("pending_question") or summary
-            card = propose(user, name, args, summary, risk, item_key, key, source)
-            if name == "record_unit_visit":
+            card = request_apply(user, name, args, source, item_key, batch_key=key)
+            if name == "record_unit_visit" and card.get("proposal"):
                 card = _with_place_prompt(user, card)
             replies.append(card.get("reply") or "")
             if card.get("proposal"):
                 proposals.append(card["proposal"])
             continue
-        result = commit_apply(user, name, args, source, item_key)
+        result = commit_apply(user, name, args, source, item_key, batch_key=key)
         replies.append(result.get("reply") or "")
+        proposals.extend(result.get("proposals") or ([result["proposal"]] if result.get("proposal") else []))
     return {"ok": True, "reply": " ".join(bit for bit in replies if bit), "proposals": proposals}
 
 
@@ -380,16 +396,17 @@ def _is_property_yes(user, text: str) -> bool:
 
 
 def _save_waiting(user, source: str) -> dict:
-    rows = [row for row in latest_batch(user) if row.status == "pending"]
-    if not rows:
+    """A spoken save approves only the newest pending card, never a group."""
+    from app.models import PendingAction
+
+    row = (
+        PendingAction.query.filter_by(user_id=user.id, status="pending")
+        .order_by(PendingAction.id.desc())
+        .first()
+    )
+    if not row:
         return {"ok": False, "reply": "Nothing is waiting to save."}
-    replies = []
-    ok = False
-    for row in rows:
-        result = confirm_id(user, row.id, source)
-        replies.append(result.get("reply") or "")
-        ok = ok or bool(result.get("ok"))
-    return {"ok": ok, "reply": " ".join(bit for bit in replies if bit)}
+    return confirm_id(user, row.id, source)
 
 
 def _calls_she_asked(text: str, calls: list) -> list:

@@ -64,6 +64,7 @@ def init_db(app):
         _evolve_units()
         _evolve_trip_mileage()
         _evolve_roles_and_scope()
+        _evolve_users()
         _say("[apt] MariaDB schema ready")
 
 
@@ -162,6 +163,29 @@ def _evolve_units():
         statements.append("ALTER TABLE units ADD COLUMN occupancy VARCHAR(20) NOT NULL DEFAULT ''")
     if "building" not in have:
         statements.append("ALTER TABLE units ADD COLUMN building VARCHAR(40) NOT NULL DEFAULT ''")
+    if not statements:
+        return
+    with db.engine.begin() as conn:
+        for sql in statements:
+            conn.execute(text(sql))
+
+
+def _evolve_users():
+    """A remembered default property lives on the login, not on the site profile."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    if "users" not in names:
+        return
+    have = {col["name"] for col in inspect(db.engine).get_columns("users")}
+    statements = []
+    if "default_property_id" not in have:
+        statements.append("ALTER TABLE users ADD COLUMN default_property_id INT NULL")
+    if "default_property_confirmed" not in have:
+        statements.append("ALTER TABLE users ADD COLUMN default_property_confirmed TINYINT(1) NOT NULL DEFAULT 0")
     if not statements:
         return
     with db.engine.begin() as conn:

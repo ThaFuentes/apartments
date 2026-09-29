@@ -5,7 +5,7 @@ import re
 
 from app.builddb.builddb import db
 from app.models import PendingAction
-from app.services.appliers import apply_query_record
+from app.services.appliers_reports import apply_query_record
 from app.services.clock import local_today
 from app.services.pending import propose
 from app.services.records import dumps, job_status, loads, open_shift, site_profile
@@ -425,44 +425,128 @@ def _direct(user, tool, payload, key, source, summary_prefix: str) -> dict:
 
 
 def _commit_waiting(user, row, tool, payload, key, source) -> dict:
-    from app.services.pending import commit_apply
+    """Complete the missing fields, then require a separate Save for this item."""
+    from app.services.changes import changes_text, describe_change, headline
+    from app.services.pending import _with_site_details
     from app.services.records import dumps
 
     payload = dict(payload)
     payload.pop("needs_answer", None)
+    payload.pop("waiting_for", None)
+    payload.pop("_changes", None)
     payload["fields_confirmed"] = True
-    result = commit_apply(user, tool, payload, source, key)
+    changes = _with_site_details(user, tool, payload, describe_change(tool, payload, user))
+    payload["_changes"] = changes
+    summary = headline(tool, payload, changes)
+    if changes:
+        summary += "\n" + changes_text(changes)
+    summary += "\nNothing changes until you save this item."
     fresh = db.session.get(PendingAction, row.id)
-    if fresh:
-        if result.get("ok"):
-            fresh.status = "accepted"
-            fresh.result_json = dumps(result)
-        else:
-            fresh.status = "needs_answer"
-            fresh.payload_json = dumps(payload)
-            fresh.summary = result.get("reply") or fresh.summary
-        db.session.commit()
-    return result
+    if not fresh:
+        return {"ok": False, "reply": "That approval card is gone. Please tell me the work again."}
+    fresh.status = "pending"
+    fresh.payload_json = dumps(payload)
+    fresh.summary = summary
+    fresh.risk = "material"
+    db.session.commit()
+    return {"ok": True, "pending": True, "reply": summary, "proposal": {"id": fresh.id, "tool": fresh.tool, "summary": summary, "status": fresh.status, "changes": changes, "payload": payload, "risk": fresh.risk}}
 
 
 def _with_place_prompt(user, card: dict) -> dict:
-    shift = open_shift(user)
-    if shift and not shift.confirmed:
-        from app.services.records import shift_question
+    """Show the locked site or ask for one; never ask for city twice."""
+    from app.services.context import current_property
+    from app.services.records import property_place
 
-        card["reply"] = shift_question(shift) + " " + (card.get("reply") or "")
+    shift = open_shift(user)
+    prop = current_property(user)
+    if shift and shift.confirmed and prop:
+        card["reply"] = f"Locked to {property_place(prop)}. " + (card.get("reply") or "")
+        return card
+    if shift and not shift.confirmed:
+        from app.services.context import remembered_property
+
+        remembered = remembered_property(user)
+        question = (
+            f"You're checked in at {property_place(remembered)}. Is this the right site?"
+            if remembered and remembered.id == shift.property_id
+            else None
+        )
+        if not question:
+            from app.services.records import shift_question
+
+            question = shift_question(shift)
+        proposal = card.get("proposal") or {}
+        row = db.session.get(PendingAction, proposal.get("id")) if proposal.get("id") else None
+        if row and row.tool in {"record_unit_visit", "log_job_event"}:
+            prop = shift.property
+            if prop:
+                payload = loads(row.payload_json)
+                payload.update({"property_id": prop.id, "property_name": prop.name, "city": prop.city.name if prop.city else "", "region": prop.city.region if prop.city else "", "needs_answer": True, "waiting_for": "property_confirm"})
+                from app.services.changes import describe_change
+                from app.services.pending import _with_site_details
+
+                changes = _with_site_details(user, row.tool, payload, describe_change(row.tool, payload, user))
+                payload["_changes"] = changes
+                row.payload_json = dumps(payload)
+                row.status = "needs_answer"
+                row.summary = question
+                db.session.commit()
+                proposal.update({"status": row.status, "summary": row.summary, "payload": payload, "changes": changes})
+                card["proposal"] = proposal
+        card["reply"] = question + " " + (card.get("reply") or "")
         card["needs_property_confirm"] = True
-    elif not shift:
-        card["reply"] = "Which property is this? " + (card.get("reply") or "")
+        return card
+    if not prop:
+        from app.services.context import only_property
+
+        prop = only_property(user)
+    if prop:
+        from app.services.context import begin_site_confirmation
+
+        confirmation = begin_site_confirmation(user, prop, "ai", f"site-confirm-{card.get('proposal', {}).get('id', prop.id)}")
+        if confirmation.get("needs_property_confirm"):
+            proposal = card.get("proposal") or {}
+            row = db.session.get(PendingAction, proposal.get("id")) if proposal.get("id") else None
+            if row and row.tool in {"record_unit_visit", "log_job_event"}:
+                payload = loads(row.payload_json)
+                payload.update({"property_id": prop.id, "property_name": prop.name, "city": prop.city.name if prop.city else "", "region": prop.city.region if prop.city else "", "needs_answer": True, "waiting_for": "property_confirm"})
+                from app.services.changes import describe_change
+                from app.services.pending import _with_site_details
+
+                changes = _with_site_details(user, row.tool, payload, describe_change(row.tool, payload, user))
+                payload["_changes"] = changes
+                row.payload_json = dumps(payload)
+                row.status = "needs_answer"
+                row.summary = confirmation.get("reply") or f"Is this {property_place(prop)}?"
+                db.session.commit()
+                proposal.update({"status": row.status, "summary": row.summary, "payload": payload, "changes": changes})
+                card["proposal"] = proposal
+            card["reply"] = (confirmation.get("reply") or f"Is this {property_place(prop)}?") + " " + (card.get("reply") or "")
+            card["needs_property_confirm"] = True
+            return card
+        if confirmation.get("ok"):
+            card["reply"] = (confirmation.get("reply") or f"You're at {property_place(prop)}.") + " " + (card.get("reply") or "")
+            return card
+        card["reply"] = (confirmation.get("reply") or "Which property is this?") + " " + (card.get("reply") or "")
         card["needs_property_confirm"] = True
+        return card
+    card["reply"] = "Which property is this? Please name the site; I'll use its saved city and state. " + (card.get("reply") or "")
+    card["needs_property_confirm"] = True
     return card
 
 
 def _unit_job(user, number: str, title: str, text: str, key: str, source: str) -> dict:
+    from app.services.context import current_property
     from app.services.equipment import describe, has_identity, parse_equipment
 
     status = "skipped" if SKIP.search(title) else job_status(title)
     payload = {"unit_number": number, "title": title, "status": status, "note": title}
+    remembered = current_property(user)
+    if remembered:
+        payload["property_name"] = remembered.name
+        payload["property_id"] = remembered.id
+        payload["city"] = remembered.city.name if remembered.city else ""
+        payload["region"] = remembered.city.region if remembered.city else ""
     if text.lower().startswith("new unit"):
         payload["force_new"] = True
     equipment = parse_equipment(title)
@@ -474,10 +558,14 @@ def _unit_job(user, number: str, title: str, text: str, key: str, source: str) -
         from app.services.pending import commit_apply
 
         return commit_apply(user, "record_unit_visit", payload, source, key)
-    summary = f"Unit {number}: {label}. Say yes and I'll save it."
+    if not remembered:
+        payload["needs_answer"] = True
+        payload["waiting_for"] = "property"
+    from app.services.pending import request_apply
+
+    card = request_apply(user, "record_unit_visit", payload, source, key)
     if has_identity(equipment) and not equipment.get("serial"):
-        summary += " I didn't catch a serial."
-    card = propose(user, "record_unit_visit", payload, summary, "material", key, key, source)
+        card["reply"] = (card.get("reply") or "") + " I didn't catch a serial."
     return _with_place_prompt(user, card)
 
 
@@ -511,10 +599,11 @@ def _finish_confirmed_unit_visit(user, result: dict, key: str, source: str) -> d
         db.session.commit()
         result["reply"] = " ".join(bit for bit in (result.get("reply"), row.summary) if bit)
         return result
-    finished = _commit_waiting(user, row, "record_unit_visit", payload, f"{key}:{row.id}:visit", source)
-    if finished.get("reply"):
-        result["reply"] = " ".join(bit for bit in (result.get("reply"), finished["reply"]) if bit)
-    result["ok"] = finished.get("ok", result.get("ok", False))
+    ready = _commit_waiting(user, row, "record_unit_visit", payload, f"{key}:{row.id}:visit", source)
+    if ready.get("reply"):
+        result["reply"] = " ".join(bit for bit in (result.get("reply"), "Site confirmed. " + ready["reply"]) if bit)
+    result["ok"] = ready.get("ok", result.get("ok", False))
+    result["proposal"] = ready.get("proposal")
     return result
 
 

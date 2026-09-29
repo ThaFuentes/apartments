@@ -165,6 +165,7 @@ def create_app() -> Flask:
         notices = []
         pending_n = 0
         chat_lines = []
+        chat_cards = []
         if getattr(current_user, "is_authenticated", False):
             from app.models import Notice, PendingAction
             from app.services.records import open_shift
@@ -193,6 +194,7 @@ def create_app() -> Flask:
             pending_n = PendingAction.query.filter_by(user_id=current_user.id, status="pending").count()
             if getattr(current_user, "role", "") != "viewer":
                 from app.models import ChatMessage
+                from app.services.records import loads as _loads
 
                 chat_lines = (
                     ChatMessage.query.filter_by(user_id=current_user.id)
@@ -201,6 +203,29 @@ def create_app() -> Flask:
                     .all()
                 )
                 chat_lines.reverse()
+                cards = (
+                    PendingAction.query.filter_by(user_id=current_user.id)
+                    .filter(PendingAction.status.in_(("pending", "needs_answer")))
+                    .order_by(PendingAction.id.desc())
+                    .limit(30)
+                    .all()
+                )
+                cards.reverse()
+                for row in cards:
+                    payload = _loads(row.payload_json)
+                    parts = [line.strip() for line in (row.summary or "").splitlines() if line.strip()]
+                    chat_cards.append(
+                        {
+                            "id": row.id,
+                            "tool": row.tool,
+                            "status": row.status,
+                            "headline": parts[0] if parts else row.tool,
+                            "note": parts[-1] if len(parts) > 1 else "",
+                            "changes": payload.get("_changes") or [],
+                            "waiting_for": payload.get("waiting_for") or "",
+                            "payload": payload,
+                        }
+                    )
             else:
                 chat_lines = []
         import secrets as _secrets
@@ -226,6 +251,7 @@ def create_app() -> Flask:
             "notices": notices,
             "pending_n": pending_n,
             "chat_lines": chat_lines,
+            "chat_cards": chat_cards,
             "chat_key": chat_key,
             "assistant_name": assistant_name,
             "drive": bool(request.cookies.get("apt_drive") == "1"),

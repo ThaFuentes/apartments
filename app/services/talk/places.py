@@ -299,7 +299,7 @@ def _typed_address(text: str) -> dict | None:
 
 
 def _save_typed_address(user, parsed: dict, key: str, source: str) -> dict:
-    from app.services.appliers import _property_match
+    from app.services.appliers_common import _property_match
     from app.services.pending import commit_apply
 
     prop, missing = _property_match({"property_name": parsed["property_name"]})

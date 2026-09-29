@@ -72,43 +72,59 @@ def _staff_from_sentence(actor, text: str, key: str, source: str):
     office = role_word.lower() == "office manager"
     title = "office manager" if office else "employee" if role == "field" else role.replace("_", " ")
     clauses = _staff_clauses(raw[tail_at:])
-    from app.services.people import create_user
-    from app.services.access import grant_from_words
+    from app.services.pending import request_apply
 
     person = find_user(username)
-    generated = ""
+    named = person.display_name or person.username if person else username.replace(".", " ").replace("_", " ").title()
+    lines = []
     if person:
-        opened = f"{person.display_name or person.username} already has a login."
+        changed = request_apply(
+            actor,
+            "update_viewer",
+            {"username": person.username, "role": role, "_say": f"Change {named} to {title}."},
+            source,
+            f"{key}:role",
+            batch_key=key,
+        )
+        lines.append(changed.get("reply") or "")
     else:
-        try:
-            person, generated = create_user(
-                username=username,
-                password=(PASSWORD.search(raw).group(1) if PASSWORD.search(raw) else ""),
-                display_name=username.replace(".", " ").replace("_", " ").title(),
-                role=role,
-                email=(EMAIL.search(raw).group(0) if EMAIL.search(raw) else None),
-                created_by=actor,
-                can_see_reports=bool(re.search(r"\breports?\b", raw, re.I)),
-                can_see_history=True,
-                can_see_live_map=bool(re.search(r"\b(live map|the map)\b", raw, re.I)),
-            )
-        except ValueError as exc:
-            return {"ok": False, "reply": str(exc)}
-        opened = f"{person.display_name} is {title}."
-    lines = [opened]
+        invited = request_apply(
+            actor,
+            "invite_viewer",
+            {
+                "username": username,
+                "display_name": named,
+                "role": role,
+                "email": (EMAIL.search(raw).group(0) if EMAIL.search(raw) else ""),
+                "password": (PASSWORD.search(raw).group(1) if PASSWORD.search(raw) else ""),
+                "can_see_reports": bool(re.search(r"\breports?\b", raw, re.I)),
+                "can_see_history": True,
+                "can_see_live_map": bool(re.search(r"\b(live map|the map)\b", raw, re.I)),
+                "_say": f"Add {named} as {title}.",
+            },
+            source,
+            f"{key}:invite",
+            batch_key=key,
+        )
+        lines.append(invited.get("reply") or "")
+    count = 0
     for mode, hints in clauses:
         edit = True if mode == "edit" else False if mode == "see" else None
         notify = True if mode == "notify" else None
         for hint in hints:
-            result = grant_from_words(actor, person.username, hint, see=True, edit=edit, notify=notify)
-            if result.get("reply"):
-                lines.append(result["reply"])
-    if generated:
-        lines.append(f"Sign-in is {person.username}. Temporary password: {generated}.")
-    elif not clauses:
+            count += 1
+            granted = request_apply(
+                actor,
+                "grant_access",
+                {"username": person.username if person else username, "property_name": hint, "see": True, "edit": edit, "notify": notify},
+                source,
+                f"{key}:grant:{count}",
+                batch_key=key,
+            )
+            lines.append(granted.get("reply") or "")
+    if not clauses:
         lines.append("Say which properties, like edit units on Woodview.")
-    db.session.commit()
-    return {"ok": True, "reply": " ".join(lines)}
+    return {"ok": True, "reply": " ".join(bit for bit in lines if bit)}
 
 
 def _file_access(user, text: str, key: str, source: str):
@@ -147,26 +163,73 @@ def _file_access(user, text: str, key: str, source: str):
             username, mode, hint = heard.group(1), "notify", heard.group(2)
     else:
         username, mode, hint = grant.group(1), (grant.group(2) or "see"), grant.group(3)
-    from app.services.access import grant_from_words
-
     mode = (mode or "see").lower()
-    result = grant_from_words(
+    from app.services.access import can_manage_property_people
+    from app.services.parse import resolve_property
+
+    verdict = resolve_property(hint, user=user)
+    if verdict.get("state") == "ambiguous":
+        return {"ok": True, "reply": "Which one?\n" + "\n".join(verdict.get("choices") or [])}
+    if verdict.get("state") != "resolved":
+        return {"ok": False, "reply": verdict.get("message") or f"Nothing in your scope matches {hint}."}
+    prop = verdict["property"]
+    if not can_manage_property_people(user, prop.id):
+        return {"ok": False, "reply": "You do not manage people at that property."}
+    from app.services.pending import request_apply
+
+    return request_apply(
         user,
-        username,
-        hint,
-        see=True,
-        edit=True if mode == "edit" else None,
-        notify=True if mode == "notify" else None,
+        "grant_access",
+        {
+            "username": username,
+            "property_name": prop.name,
+            "city": prop.city.name if prop.city else "",
+            "see": True,
+            "edit": True if mode == "edit" else None,
+            "notify": True if mode == "notify" else None,
+        },
+        source,
+        key,
     )
-    if result.get("ok"):
-        db.session.commit()
-    return result
+
+
+def _role_change(user, text: str, key: str, source: str):
+    """'Change her permissions to regional manager' — a role change waits on a card."""
+    raw = (text or "").strip().rstrip(".")
+    from app.services.changes import normalize_role
+
+    hit = re.search(r"\bfor\s+([A-Za-z][A-Za-z.'-]+(?:\s+[A-Za-z][A-Za-z.'-]+){0,3})\b.*?\b(?:to|as)\s+([a-z][a-z ]+)$", raw, re.I)
+    if not hit:
+        hit = re.search(
+            r"\b(?:change|make|set|promote|demote)\b\s+(?:the\s+)?(.+?)\s+(?:to|as|into|the role of|a|an)\s+([a-z][a-z ]+)$",
+            raw,
+            re.I,
+        )
+    if not hit:
+        return None
+    role = normalize_role(hit.group(2))
+    if not role:
+        return None
+    who = re.sub(r"\b(for|change|changes|make|makes|set|promote|demote|her|his|their|permissions?|access|role|login|the|to|as)\b", " ", hit.group(1), flags=re.I)
+    who = re.sub(r"\s+", " ", who).strip(" ,.'")
+    if not who or len(who.split()) > 4:
+        return None
+    from app.services.pending import request_apply
+
+    payload = {"username": who, "role": role, "_say": ""}
+    from app.services.changes import headline as change_headline
+
+    payload["_say"] = change_headline("update_viewer", payload, [])
+    return request_apply(user, "update_viewer", payload, source, key)
 
 
 def _person_to_add(user, text: str, key: str, source: str):
     staff = _staff_from_sentence(user, text, key, source)
     if staff:
         return staff
+    changed = _role_change(user, text, key, source)
+    if changed:
+        return changed
     named = AS_ROLE.search(text or "")
     role_first = ADD_USER.search(text or "")
     if named:

@@ -1,10 +1,13 @@
-<button type="button" class="chat-fab" id="chat-open" aria-expanded="false" aria-controls="chat-panel">Chat</button>
-<section class="chat-panel" id="chat-panel" hidden>
+<button type="button" class="chat-fab" id="chat-open" aria-expanded="false" aria-controls="chat-panel"><span aria-hidden="true">✦</span> Chat{% if pending_n %}<span class="chat-pending-count">{{ pending_n }}</span>{% endif %}</button>
+<section class="chat-panel" id="chat-panel" aria-label="Apt chat" hidden>
   <header class="chat-bar">
-    <strong>{{ assistant_name or "Apt" }}</strong>
+    <div class="chat-agent">
+      <span class="chat-agent-mark" aria-hidden="true">✦</span>
+      <span><strong>{{ assistant_name or "Apt" }}</strong><small>Changes wait for your approval</small></span>
+    </div>
     <div class="chat-actions">
-      <button type="button" class="quiet" id="chat-new">New</button>
-      <button type="button" class="quiet" id="chat-close">Close</button>
+      <button type="button" class="quiet" id="chat-new" aria-label="Start a new chat">New</button>
+      <button type="button" class="quiet" id="chat-close" aria-label="Close chat">Close</button>
     </div>
   </header>
   {% include "chat_thread.html" %}

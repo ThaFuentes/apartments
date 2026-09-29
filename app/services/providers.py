@@ -437,12 +437,20 @@ def collect_tool_calls(user, text: str):
     rows = keys_for(user)
     if not rows:
         return None
+    from app.services.caps import rules as caps_rules
+
+    from app.services.context import context_brief
+
     prompt = (
         voice_brief()
         + "\n\n"
         + record_brief(user)
         + "\n\n"
+        + context_brief(user)
+        + "\n\n"
         + parse_rules()
+        + "\n\n"
+        + caps_rules()
         + "\n\nEach appliance is its own card on one unit. A serial, style, or note belongs to that one item. "
         + "A washer in unit 26 does not share a note with any other washer. "
         + "When she says she added, installed, or replaced an appliance in a unit, call record_unit_visit with equipment filled in: kind, brand, model, serial, size, style, color, notes. Equipment saves even without a work title. "

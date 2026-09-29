@@ -20,6 +20,8 @@ ROLES = (
     "assistant_manager",
     "office",
     "maintenance_manager",
+    "maintenance_regional",
+    "maintenance_supervisor",
     "maintenance_person",
     # Keep legacy values accepted for existing invitations and stored accounts.
     "field",
@@ -59,6 +61,29 @@ def find_user(username: str) -> User | None:
     return User.query.filter(db.func.lower(User.username) == text.lower()).first()
 
 
+def find_person(query: str) -> User | None:
+    """Find a login the way she says a person: 'tiffany', 'Tiffany Doe', the username.
+
+    Exact username first. Then a display-name match on every word. One hit wins.
+    Two or more hits return None so the caller can ask which one.
+    """
+    text = (query or "").strip()
+    if not text:
+        return None
+    exact = find_user(text)
+    if exact:
+        return exact
+    words = [word for word in re.split(r"\s+", text.lower()) if word]
+    if not words:
+        return None
+    hits = []
+    for person in User.query.order_by(User.id.asc()).all():
+        blob = f"{person.display_name or ''} {person.username}".lower()
+        if all(word in blob for word in words):
+            hits.append(person)
+    return hits[0] if len(hits) == 1 else None
+
+
 def create_user(
     *,
     username: str,
@@ -92,8 +117,6 @@ def create_user(
         generated = secrets.token_urlsafe(9)
         password = generated
     mail = clean_email(email)
-    if User.query.count() == 0 and mail is None:
-        raise ValueError("The first login needs an email.")
     user = User(
         username=ident,
         display_name=(display_name or ident).strip()[:150],

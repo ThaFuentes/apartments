@@ -326,6 +326,11 @@ _FIELDS = {
         "company_name": (str, ("name",)),
         "timezone": (str, ("name",)),
     },
+    "set_default_property": {
+        "property_name": (str, ("name",)),
+        "city": (str, ("name",)),
+        "region": (str, ("name",)),
+    },
 }
 STATUSES = {"done", "planned", "blocked", "followup", "skipped"}
 KINDS = {"gas", "food", "other"}

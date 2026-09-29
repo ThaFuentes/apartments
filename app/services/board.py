@@ -142,6 +142,13 @@ def resolve_property(hint: str = "", unit_number: str = "", user=None) -> tuple[
     if len(props) == 1:
         return props[0], ""
     if props:
+        from app.services.context import remembered_property
+
+        remembered = remembered_property(user)
+        if remembered:
+            # She taught the chat which site is home. A unit with no other
+            # hint belongs there instead of asking her the same thing again.
+            return remembered, ""
         lines = "\n".join(property_place(prop) for prop in props[:8])
         return None, f"Which property?\n{lines}"
     return None, "Add the property first, then the units."

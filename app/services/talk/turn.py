@@ -162,32 +162,165 @@ def route(user, text: str, key: str, source: str) -> dict:
     Yes, no, and a bare answer close a card this app already asked.
     Those are not a new job, so they do not spend a key.
     """
+    from app.services.context import default_reminder_answer
     from app.services.parse import answer_bare_reply
 
+    reminder = default_reminder_answer(text)
+    low = text.lower().strip(" .!")
+    if low in {"save", "save it", "yes, save it", "yes save it", "confirm", "accept", "do it"}:
+        active_shift = open_shift(user)
+        waiting_defaults = PendingAction.query.filter_by(user_id=user.id, tool="set_default_property", status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all()
+        default_to_confirm = next((row for row in waiting_defaults if loads(row.payload_json).get("waiting_for") == "default_confirm"), None)
+        waiting_site_to_confirm = next((row for row in PendingAction.query.filter_by(user_id=user.id, status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all() if loads(row.payload_json).get("waiting_for") == "property_confirm"), None)
+        if active_shift and not active_shift.confirmed:
+            return {"ok": True, "needs_property_confirm": True, "reply": "Please confirm the property by answering yes or no first. Nothing is saved yet."}
+        if waiting_site_to_confirm:
+            return {"ok": True, "needs_property_confirm": True, "reply": "Please confirm the site with yes or no first. Nothing is saved yet."}
+        if default_to_confirm:
+            return {"ok": True, "pending": True, "reply": "Please answer yes or no: should I make this your default for now?"}
+        latest_pending = PendingAction.query.filter_by(user_id=user.id, status="pending").order_by(PendingAction.id.desc()).first()
+        if not latest_pending:
+            return {"ok": False, "reply": "Nothing is waiting to save."}
+        from app.services.pending import confirm_id
+
+        return confirm_id(user, latest_pending.id, source)
+    active_shift = open_shift(user)
+    default_card = None
+    for candidate in PendingAction.query.filter_by(user_id=user.id, tool="set_default_property", status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all():
+        candidate_payload = loads(candidate.payload_json)
+        if candidate_payload.get("waiting_for") == "default_confirm":
+            default_card = candidate
+            break
+    waiting_site = None
+    for row in PendingAction.query.filter_by(user_id=user.id, status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all():
+        candidate_payload = loads(row.payload_json)
+        if row.tool in {"record_unit_visit", "log_job_event"} and candidate_payload.get("waiting_for") == "property_confirm":
+            waiting_site = row
+            break
+    if active_shift and not active_shift.confirmed and reminder is not None and not default_card:
+        if reminder:
+            confirmed = confirm_property(user, source, finish_waiting=False)
+            return _after_site_confirm(user, confirmed, key, source)
+        active_shift.ended_at = utcnow()
+        site_card_ids = []
+        for row in PendingAction.query.filter_by(user_id=user.id, status="needs_answer").all():
+            payload = loads(row.payload_json)
+            if row.tool not in {"record_unit_visit", "log_job_event"} or payload.get("waiting_for") != "property_confirm":
+                continue
+            payload.pop("property_id", None)
+            payload.pop("property_name", None)
+            payload.pop("city", None)
+            payload.pop("region", None)
+            payload["waiting_for"] = "property"
+            payload["needs_answer"] = True
+            from app.services.changes import describe_change
+            from app.services.pending import _with_site_details
+
+            payload["_changes"] = _with_site_details(user, row.tool, payload, describe_change(row.tool, payload, user))
+            row.payload_json = dumps(payload)
+            row.summary = "Which property are you at instead?"
+            site_card_ids.append(row.id)
+        db.session.commit()
+        from app.services.records import property_place
+
+        result = {"ok": True, "reply": f"Okay, I won't use {property_place(active_shift.property)}. Which property are you at instead?"}
+        proposals = []
+        for row_id in site_card_ids:
+            fresh = db.session.get(PendingAction, row_id)
+            if fresh:
+                payload = loads(fresh.payload_json)
+                proposals.append({"id": fresh.id, "tool": fresh.tool, "summary": fresh.summary, "status": fresh.status, "payload": payload, "changes": payload.get("_changes") or [], "risk": fresh.risk})
+        if proposals:
+            result["proposals"] = proposals
+            result["proposal"] = proposals[0]
+        return result
+    if default_card and low in {"yes", "yeah", "yep", "right", "correct", "that's right", "thats right"}:
+        from app.services.pending import apply_now
+
+        payload = loads(default_card.payload_json)
+        result = apply_now(user, "set_default_property", payload, source, f"{default_card.idempotency_key}:accept-default")
+        if result.get("ok"):
+            default_card.status = "accepted"
+            default_card.result_json = dumps(result)
+            db.session.commit()
+        return result
+    if default_card and reminder is not None and (not active_shift or active_shift.confirmed):
+        payload = loads(default_card.payload_json)
+        if reminder:
+            from app.services.pending import apply_now
+
+            result = apply_now(user, "set_default_property", payload, source, f"{default_card.idempotency_key}:accept-default")
+            if result.get("ok"):
+                default_card.status = "accepted"
+                default_card.result_json = dumps(result)
+                db.session.commit()
+            return result
+        default_card.status = "discarded"
+        db.session.commit()
+        from app.services.context import remembered_property
+        from app.services.records import property_place
+
+        previous = remembered_property(user)
+        return {"ok": True, "reply": f"No problem. I'll keep using this property for the current visit, but won't make it the default.{f' Your existing default remains {property_place(previous)}.' if previous else ''} Tell me if you want to change sites."}
+    if waiting_site and reminder is not None and (not active_shift or active_shift.confirmed):
+        if reminder:
+            confirmed = confirm_property(user, source, finish_waiting=False)
+            return _after_site_confirm(user, confirmed, key, source)
+        payload = loads(waiting_site.payload_json)
+        for field in ("property_id", "property_name", "city", "region"):
+            payload.pop(field, None)
+        payload["waiting_for"] = "property"
+        payload["needs_answer"] = True
+        payload.pop("property_id", None)
+        payload.pop("property_name", None)
+        payload.pop("city", None)
+        payload.pop("region", None)
+        from app.services.changes import describe_change
+        from app.services.pending import _with_site_details
+
+        payload["_changes"] = _with_site_details(user, waiting_site.tool, payload, describe_change(waiting_site.tool, payload, user))
+        waiting_site.payload_json = dumps(payload)
+        waiting_site.summary = "Which property are you at instead?"
+        db.session.commit()
+        return {"ok": True, "pending": True, "reply": "Okay, I won't use that site. Which property are you at instead?", "proposal": {"id": waiting_site.id, "tool": waiting_site.tool, "summary": waiting_site.summary, "status": waiting_site.status, "payload": payload, "changes": payload["_changes"], "risk": waiting_site.risk}}
     bare = answer_bare_reply(user, text)
     if bare:
         return _finish_bare(user, bare, text, key, source)
-    low = text.lower().strip(" .!")
     if low in DISCARD:
         rows = latest_batch(user)
         if not rows:
             return {"ok": False, "reply": "Nothing is waiting."}
         bits = [discard_id(user, row.id).get("reply") for row in rows]
         return {"ok": True, "reply": " ".join(bits)}
+    if active_shift and active_shift.confirmed and reminder is False and default_card:
+        for candidate in PendingAction.query.filter_by(user_id=user.id, tool="set_default_property", status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all():
+            pending_payload = loads(candidate.payload_json)
+            if pending_payload.get("waiting_for") == "default_confirm" and int(pending_payload.get("property_id") or 0) == active_shift.property_id:
+                candidate.status = "discarded"
+                db.session.commit()
+                from app.services.records import property_place
+
+                return {"ok": True, "reply": f"No problem. I'll use {property_place(active_shift.property)} for this visit, but won't make it the default. Tell me if you want to change sites."}
     if _is_property_yes(user, text):
-        confirmed = confirm_property(user, source)
-        return _finish_confirmed_unit_visit(user, confirmed, key, source)
+        confirmed = confirm_property(user, source, finish_waiting=False)
+        return _after_site_confirm(user, confirmed, key, source)
     if low in CONFIRM_SAVE:
-        placed = confirm_property(user, source) if _unconfirmed(user) else None
-        if placed:
-            placed = _finish_confirmed_unit_visit(user, placed, key, source)
+        if _unconfirmed(user):
+            return {"ok": True, "needs_property_confirm": True, "reply": "Please confirm the property by answering yes or no first. Nothing is saved yet."}
+        waiting_defaults = PendingAction.query.filter_by(user_id=user.id, tool="set_default_property", status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all()
+        if any(loads(candidate.payload_json).get("waiting_for") == "default_confirm" for candidate in waiting_defaults):
+            return {"ok": True, "pending": True, "reply": "Please answer yes or no: should I make this your default for now?"}
         saved = _save_waiting(user, source)
-        reply = " ".join(bit for bit in ((placed or {}).get("reply"), saved.get("reply")) if bit)
-        return {"ok": saved.get("ok", (placed or {}).get("ok", False)), "reply": reply or "Nothing is waiting to save."}
+        return saved if saved.get("reply") else {"ok": False, "reply": "Nothing is waiting to save."}
     if low in CONFIRM_YES:
         if _unconfirmed(user):
-            confirmed = confirm_property(user, source)
-            return _finish_confirmed_unit_visit(user, confirmed, key, source)
+            confirmed = confirm_property(user, source, finish_waiting=False)
+            return _after_site_confirm(user, confirmed, key, source)
+        if waiting_site:
+            return {"ok": True, "pending": True, "reply": "Please confirm the site with yes or no, or cancel this item."}
+        waiting_default = PendingAction.query.filter_by(user_id=user.id, tool="set_default_property", status="needs_answer").order_by(PendingAction.id.desc()).first()
+        if waiting_default and loads(waiting_default.payload_json).get("waiting_for") == "default_confirm":
+            return {"ok": True, "pending": True, "reply": "Please say yes or no to whether I should make this your default for now."}
         waiting = (
             PendingAction.query.filter_by(user_id=user.id, status="needs_answer")
             .order_by(PendingAction.id.desc())
@@ -206,6 +339,26 @@ def route(user, text: str, key: str, source: str) -> dict:
     return result
 
 
+def _after_site_confirm(user, result: dict, key: str, source: str) -> dict:
+    """Confirm the onsite lock, retain the work approval, then offer default memory."""
+    from app.services.context import prompt_default_for_onsite
+
+    finished = _finish_confirmed_unit_visit(user, result, key, source)
+    if finished.get("ok"):
+        reminder = prompt_default_for_onsite(user, source, f"{key}:remember-site")
+        if reminder and reminder.get("proposal"):
+            proposal = reminder["proposal"]
+            details = "; ".join(
+                f"{row['field']}: {row['after']}"
+                for row in proposal.get("changes") or []
+                if row.get("after") not in (None, "", "—")
+            )
+            question = f"Should I make {proposal['payload'].get('property_name')} in {proposal['payload'].get('city')} the default for now? Tell me when to change it."
+            finished["reply"] = " ".join(bit for bit in (finished.get("reply"), details, question) if bit)
+            finished["default_proposal"] = proposal
+    return finished
+
+
 def _one_turn(user, text: str, key: str, source: str) -> dict:
     model = _from_model(user, text, key, source)
     if model is not None and not model.get("failed"):
@@ -218,6 +371,53 @@ def _local_fallback(user, text: str, key: str, source: str, note: str, *, split:
         ranked = _key_rank_sentence(text)
         if ranked:
             return _set_key_rank(user, ranked[0], ranked[1])
+        from app.services.context import default_property_candidates, taught_clear, taught_place, taught_show
+
+        place = taught_place(text)
+        if place:
+            from app.services.parse import resolve_or_lines
+            from app.services.pending import request_apply
+
+            candidates = default_property_candidates(user, place)
+            if len(candidates) == 1:
+                prop = candidates[0]
+                return request_apply(
+                    user,
+                    "set_default_property",
+                    {
+                        "property_name": prop.name,
+                        "city": prop.city.name if prop.city else "",
+                        "region": prop.city.region if prop.city else "",
+                        "_say": f"Remember {prop.name} as your default property.",
+                    },
+                    source,
+                    key,
+                )
+            if candidates:
+                return {"ok": True, "reply": "Which one?\n" + "\n".join(prop.name for prop in candidates[:8])}
+            prop, ask = resolve_or_lines(place, user=user)
+            if not prop:
+                return {"ok": False, "reply": ask}
+            return request_apply(
+                user,
+                "set_default_property",
+                {
+                    "property_name": prop.name,
+                    "city": prop.city.name if prop.city else "",
+                    "region": prop.city.region if prop.city else "",
+                    "_say": f"Remember {prop.name} as your default property.",
+                },
+                source,
+                key,
+            )
+        if taught_clear(text):
+            from app.services.context import clear_default
+
+            return clear_default(user, source)
+        if taught_show(text):
+            from app.services.context import remember_reply
+
+            return {"ok": True, "reply": remember_reply(user)}
         parts = _split_asks(text)
         if len(parts) > 1:
             replies = []
@@ -230,6 +430,13 @@ def _local_fallback(user, text: str, key: str, source: str, note: str, *, split:
                 if note:
                     reply = note + " " + reply
                 return {"ok": True, "reply": reply}
+        from app.services.caps import help_reply
+
+        helping = help_reply(text)
+        if helping:
+            if note:
+                helping["reply"] = note + " " + (helping.get("reply") or "")
+            return helping
     if NEXT_UNIT.search(text):
         return {
             "ok": True,
@@ -426,6 +633,7 @@ def _finish_bare(user, bare: dict, text: str, key: str, source: str) -> dict:
             number = clamp_text(payload.get("unit_number") or "", 12)
             if not number:
                 return {"ok": True, "reply": "Which unit number?"}
+            from app.services.context import current_property
             from app.services.parse import resolve_property
 
             verdict = resolve_property(
@@ -434,6 +642,15 @@ def _finish_bare(user, bare: dict, text: str, key: str, source: str) -> dict:
                 payload.get("region") or "",
                 user=user,
             )
+            if verdict["state"] != "resolved" and not (payload.get("property_name") or "").strip():
+                # Only an active confirmed lock/default may fill a missing site.
+                current = current_property(user)
+                if current:
+                    payload["property_name"] = current.name
+                    payload["property_id"] = current.id
+                    payload["city"] = current.city.name if current.city else ""
+                    payload["region"] = current.city.region if current.city else ""
+                    verdict = {"state": "resolved", "property": current}
             if verdict["state"] != "resolved":
                 row.status = "needs_answer"
                 row.summary = verdict.get("message") or "Which property is this?"
@@ -452,13 +669,17 @@ def _finish_bare(user, bare: dict, text: str, key: str, source: str) -> dict:
             db.session.commit()
             from app.services.pending import commit_apply
 
-            return commit_apply(
+            arrived = commit_apply(
                 user,
                 "update_trip",
                 {"arrive": True, "property_name": prop.name, "city": payload["city"]},
                 source,
                 f"{key}:{row.id}:arrive",
             )
+            if arrived.get("ok"):
+                question = f"Is this {prop.name} in {prop.city.name if prop.city else ''}, {prop.city.region if prop.city else ''}?"
+                arrived["reply"] = question
+            return arrived
         if row.tool == "upsert_property":
             from app.services.pending import commit_apply
             from app.services.records import bare_property_name
@@ -487,7 +708,8 @@ def _finish_bare(user, bare: dict, text: str, key: str, source: str) -> dict:
             payload.pop("needs_answer", None)
             row.payload_json = dumps(payload)
             db.session.commit()
-            return commit_apply(user, "upsert_property", payload, source, f"{key}:{row.id}:prop")
+            # Her bare answer was the missing piece; applying is the save click.
+            return _commit_waiting(user, row, "upsert_property", payload, f"{key}:{row.id}:prop", source)
     return {"ok": True, "reply": "Got it."}
 
 

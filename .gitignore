@@ -217,9 +217,20 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Apt runtime
+# Apt runtime data and local-only snapshots (never commit user data or backups)
 uploads/
 tmp/
 logs/
 mariadb_data/
 backups/
+
+# Local secrets; keep the safe template tracked
+.env.*
+!.env.example
+
+# Editor and patch leftovers
+*.swp
+*.swo
+*~
+*.orig
+*.rej

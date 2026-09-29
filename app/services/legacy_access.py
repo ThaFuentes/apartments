@@ -12,14 +12,21 @@ ROLE_CAPABILITIES = {
         "read_region", "read_assigned_properties", "create_properties_region", "edit_properties",
         "write_maintenance", "manage_region_people", "manage_team", "log_personal_expenses", "view_map", "delete_records",
     },
+    "maintenance_regional": {
+        "read_region", "read_assigned_properties", "manage_region_people", "manage_team",
+        "write_maintenance", "log_personal_expenses", "view_map", "delete_records",
+    },
     "property_manager": {
         "read_assigned_properties", "manage_properties", "edit_properties", "write_maintenance",
         "manage_property_people", "manage_team", "log_personal_expenses", "view_map", "delete_records",
     },
     "assistant_manager": {"read_assigned_properties", "write_maintenance", "log_personal_expenses", "view_map", "delete_records"},
-    "office": {"read_company", "read_reports", "view_map"},
-    "maintenance_manager": {"read_assigned_properties", "write_maintenance", "manage_team", "log_personal_expenses", "view_map", "delete_records"},
+    "maintenance_supervisor": {"read_assigned_properties", "manage_team", "write_maintenance", "log_personal_expenses", "view_map", "delete_records"},
+    "maintenance_manager": {
+        "read_assigned_properties", "write_maintenance", "manage_team", "log_personal_expenses", "view_map", "delete_records",
+    },
     "maintenance_person": {"read_assigned_properties", "write_maintenance", "log_personal_expenses", "delete_records"},
+    "office": {"read_company", "read_reports", "view_map"},
 }
 LEGACY_ROLE_MAP = {"field": "maintenance_person", "viewer": "office", "employee": "maintenance_person", "boss": "office"}
 PERSONAL_TOOLS = {"estimate_miles", "log_expense", "log_miles", "log_odometer"}
