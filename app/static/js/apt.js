@@ -480,6 +480,12 @@
           return resp.json();
         })
         .then(function (data) {
+          if (data && data.ok === false && !data.duplicate) {
+            // The click did not save. Keep the card on the screen so what she
+            // sees matches the record, and show what the app is asking.
+            addBubble("assistant", (data && data.reply) || "That did not save yet.");
+            return;
+          }
           const closed = (data && data.closed_ids) || (card && card.dataset.pendingId ? [card.dataset.pendingId] : []);
           dropCards(closed);
           if (card && card.parentNode) card.remove();

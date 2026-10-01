@@ -200,6 +200,73 @@ class AptTest06(AptTestBase):
         db.session.refresh(shift)
         self.assertFalse(shift.confirmed)
         self.assertEqual(Job.query.count(), 0)
+    def test_save_click_on_card_with_property_files_without_a_site_question(self):
+        """A card that names its property saves on the click even with no open
+        visit. Asking 'which property' here loops forever: with no shift there
+        is no banner and no site card to answer."""
+        from app.models import Job, UnitVisit
+        from app.services.pending import confirm_id, request_apply
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.commit()
+
+        staged = request_apply(
+            user,
+            "record_unit_visit",
+            {
+                "property_id": prop.id,
+                "property_name": prop.name,
+                "city": "Odessa",
+                "region": "Texas",
+                "unit_number": "26",
+                "title": "Wash and driver",
+                "status": "planned",
+            },
+            "ai",
+            "no-shift-card-save",
+        )
+        pending_id = staged["proposal"]["id"]
+        saved = confirm_id(user, pending_id, "human")
+        self.assertTrue(saved.get("ok"), saved)
+        self.assertEqual(Job.query.filter_by(property_id=prop.id, title="Wash and driver").count(), 1)
+        visit = UnitVisit.query.order_by(UnitVisit.id.desc()).first()
+        self.assertIsNotNone(visit)
+        self.assertEqual(visit.property_id, prop.id)
+        self.assertIsNone(visit.shift_id)
+    def test_unconfirmed_shift_still_asks_before_a_card_saves(self):
+        """The cross-site guard keeps its teeth: an open but unconfirmed visit
+        still blocks the save and asks the site question."""
+        from app.models import Shift
+        from app.services.pending import confirm_id, request_apply
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(Shift(user_id=user.id, property_id=prop.id, confirmed=False, started_at=utcnow()))
+        db.session.commit()
+
+        staged = request_apply(
+            user,
+            "record_unit_visit",
+            {
+                "property_id": prop.id,
+                "property_name": prop.name,
+                "city": "Odessa",
+                "region": "Texas",
+                "unit_number": "26",
+                "title": "Wash and driver",
+                "status": "planned",
+            },
+            "ai",
+            "unconfirmed-shift-card-save",
+        )
+        pending_id = staged["proposal"]["id"]
+        blocked = confirm_id(user, pending_id, "human")
+        self.assertFalse(blocked.get("ok"))
+        self.assertTrue(blocked.get("needs_property_confirm"))
+        self.assertIn("Is this Woodview", blocked.get("reply") or "")
     def test_end_visit_requires_review_before_closing_shift(self):
         from app.models import Shift
         from app.services.records import ensure_property, loads

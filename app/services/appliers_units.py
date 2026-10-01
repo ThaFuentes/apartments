@@ -141,16 +141,46 @@ def apply_record_unit_visit(user, payload, source) -> dict:
     if payload.get("offline_queue"):
         return {"ok": False, "reply": "That note is still a draft. It files when you are online and you confirm it."}
     shift = open_shift(user)
-    if not shift or not shift.confirmed:
+    prop = None
+    if not shift:
+        # No open visit. The card already names its property and shows it in
+        # the details; the save click is the check. File against that property
+        # with no shift attached instead of asking a question the screen
+        # cannot answer (no banner and no site card exist without a shift).
+        if payload.get("property_id"):
+            try:
+                candidate = db.session.get(Property, int(payload["property_id"]))
+            except (TypeError, ValueError):
+                candidate = None
+            from app.services.access import can_see_property
+
+            if candidate and candidate.deleted_at is None and can_see_property(user, candidate.id):
+                prop = candidate
+        if prop is None and (payload.get("property_name") or "").strip():
+            from app.services.parse import resolve_property
+
+            verdict = resolve_property(
+                payload.get("property_name") or "",
+                payload.get("city") or "",
+                payload.get("region") or "",
+                user=user,
+            )
+            if verdict.get("state") == "resolved":
+                prop = verdict["property"]
+        if prop is None:
+            return {"ok": False, "needs_property_confirm": True, "reply": "Which property is this?"}
+    elif not shift.confirmed:
         from app.services.records import shift_question
 
-        reply = shift_question(shift) if shift else "Which property is this?"
-        return {"ok": False, "needs_property_confirm": True, "reply": reply}
+        return {"ok": False, "needs_property_confirm": True, "reply": shift_question(shift)}
     raw_number = payload.get("unit_number") or ""
     number = normalize_unit(raw_number)
     if not number:
         return {"ok": False, "reply": "Which unit number?"}
-    exact, near = match_unit(shift.property_id, number)
+    site_property_id = shift.property_id if shift else prop.id
+    trip_id = shift.trip_id if shift else None
+    shift_id = shift.id if shift else None
+    exact, near = match_unit(site_property_id, number)
     if near and not exact and not payload.get("force_new"):
         return {
             "ok": False,
@@ -162,7 +192,7 @@ def apply_record_unit_visit(user, payload, source) -> dict:
         unit = exact
     else:
         unit = Unit(
-            property_id=shift.property_id,
+            property_id=site_property_id,
             unit_number=number,
             created_by_id=user.id,
             created_at=utcnow(),
@@ -170,7 +200,7 @@ def apply_record_unit_visit(user, payload, source) -> dict:
         db.session.add(unit)
         db.session.flush()
         created = True
-        audit(user.id, source, "create", "unit", unit.id, {}, {"unit_number": number, "property_id": shift.property_id})
+        audit(user.id, source, "create", "unit", unit.id, {}, {"unit_number": number, "property_id": site_property_id})
     status = (payload.get("status") or job_status(payload.get("title") or "")).lower()
     note = (payload.get("note") or "").strip()
     title = (payload.get("title") or "").strip()
@@ -180,9 +210,9 @@ def apply_record_unit_visit(user, payload, source) -> dict:
         note = describe(payload.get("equipment") or {})
     visit = UnitVisit(
         unit_id=unit.id,
-        property_id=shift.property_id,
-        trip_id=shift.trip_id,
-        shift_id=shift.id,
+        property_id=site_property_id,
+        trip_id=trip_id,
+        shift_id=shift_id,
         status="skipped" if status == "skipped" else "done" if status == "done" else "started",
         note=note or title,
         started_at=utcnow(),
@@ -195,9 +225,9 @@ def apply_record_unit_visit(user, payload, source) -> dict:
     job = None
     if title and status != "skipped":
         job = Job(
-            property_id=shift.property_id,
+            property_id=site_property_id,
             unit_id=unit.id,
-            trip_id=shift.trip_id,
+            trip_id=trip_id,
             visit_id=visit.id,
             title=title[:300],
             detail=note,
@@ -215,17 +245,17 @@ def apply_record_unit_visit(user, payload, source) -> dict:
         if job.status == "done":
             from app.services.plan import note_work_against_plan
 
-            plan_note = note_work_against_plan(user, shift.property_id, title, source)
+            plan_note = note_work_against_plan(user, site_property_id, title, source)
         if payload.get("media_id"):
             media = db.session.get(Media, int(payload["media_id"]))
             if media and media.user_id == user.id:
                 media.job_id = job.id
                 media.unit_id = unit.id
-                media.property_id = shift.property_id
+                media.property_id = site_property_id
     elif status == "skipped":
         audit(user.id, source, "skip", "unit_visit", visit.id, {}, {"unit": number})
     if status != "skipped":
-        _save_equipment(user, payload, unit, job, shift.property_id, source)
+        _save_equipment(user, payload, unit, job, site_property_id, source)
 
     word = "Added" if created else "Updated"
     gear_bits = [payload.get("equipment") or {}] + [

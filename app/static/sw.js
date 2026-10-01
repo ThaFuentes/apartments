@@ -1,4 +1,4 @@
-const ASSET_V = "27";
+const ASSET_V = "28";
 const CACHE = "apt-shell-" + ASSET_V;
 const SHELL = [
   "/static/offline.html",
