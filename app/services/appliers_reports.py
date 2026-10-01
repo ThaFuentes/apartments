@@ -436,7 +436,18 @@ def apply_update_viewer(user, payload, source) -> dict:
         return {"ok": False, "reply": "I can't find that login."}
     from app.services.access import can_create_user, can_manage_user, role_of
 
-    if not can_manage_user(user, target) and not (role_of(user) == "owner" and target.id == user.id):
+    self_reset_only = (
+        target.id == user.id
+        and "reset_email" in payload
+        and not any(
+            key in payload
+            for key in (
+                "role", "email", "clear_email", "security_email", "phone", "display_name",
+                "active", "is_bot", "can_see_reports", "can_see_history", "can_see_live_map",
+            )
+        )
+    )
+    if not self_reset_only and not can_manage_user(user, target) and not (role_of(user) == "owner" and target.id == user.id):
         return {"ok": False, "reply": "This login cannot manage that person."}
     wanted_role = normalize_role(payload.get("role") or "") if payload.get("role") else ""
     if payload.get("role") and not wanted_role:
@@ -455,6 +466,8 @@ def apply_update_viewer(user, payload, source) -> dict:
         "can_see_live_map": target.can_see_live_map,
         "active": target.active,
     }
+    if "reset_email" in payload:
+        before["reset_email"] = target.reset_email
     if wanted_role:
         target.role = wanted_role
     if "is_bot" in payload and payload["is_bot"] is not None:
@@ -506,7 +519,17 @@ def apply_update_viewer(user, payload, source) -> dict:
             target.phone = clean_phone(payload.get("phone"))
         except ValueError as exc:
             return {"ok": False, "reply": str(exc)}
-    audit(user.id, source, "update", "user", target.id, before, {"role": target.role, "email": target.email, "phone": target.phone, "display_name": target.display_name, "active": target.active})
+    after = {"role": target.role, "email": target.email, "phone": target.phone, "display_name": target.display_name, "active": target.active}
+    if "reset_email" in payload:
+        after["reset_email"] = target.reset_email
+    audit(user.id, source, "update", "user", target.id, before, after)
+    if self_reset_only:
+        inbox = target.reset_email or target.email
+        return {
+            "ok": True,
+            "reply": f"Password-reset email saved{f' to {inbox}' if inbox else ''}.",
+            "user_id": target.id,
+        }
     reach = ", ".join(bit for bit in (target.phone, target.email or "") if bit) or "no phone or email"
     return {
         "ok": True,

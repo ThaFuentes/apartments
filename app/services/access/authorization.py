@@ -75,7 +75,18 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
         target = find_user(payload.get("username") or "")
         if not target:
             return {"ok": False, "reply": "I can't find that login."}
-        allowed = can_manage_user(user, target)
+        self_reset_only = (
+            target.id == user.id
+            and "reset_email" in payload
+            and not any(
+                key in payload
+                for key in (
+                    "role", "email", "clear_email", "security_email", "phone", "display_name",
+                    "active", "is_bot", "can_see_reports", "can_see_history", "can_see_live_map",
+                )
+            )
+        )
+        allowed = self_reset_only or can_manage_user(user, target)
         return {"ok": allowed, "reply": "" if allowed else "This login cannot manage that person."}
     if tool in {"upsert_property", "update_property", "delete_property"}:
         if tool == "delete_property" and role != "owner":

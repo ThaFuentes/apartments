@@ -49,7 +49,7 @@
   </div>
   <div class="dash-grid">
     {% if board.site_bound %}
-    <section class="card stack">
+    <section class="card stack dashboard-building">
       <h2>Your building today</h2>
       {% if board.ready_units %}
       <div class="stack">
@@ -68,7 +68,7 @@
       {% if board.home_id %}<p><a href="/properties/{{ board.home_id }}">Open {{ board.home_name }}</a></p>{% endif %}
     </section>
     {% else %}
-    <section class="card stack">
+    <section class="card stack dashboard-properties">
       <h2>Properties</h2>
       {% if board.places %}
       <table class="dash-table">
@@ -89,7 +89,7 @@
       {% endif %}
     </section>
     {% endif %}
-    <section class="card stack">
+    <section class="card stack dashboard-open">
       <h2>Still open</h2>
       {% if not board.plan %}
       <p class="empty">Nothing is open on the plan.</p>
@@ -105,7 +105,7 @@
       {% endif %}
     </section>
     {% if board.people %}
-    <section class="card stack people-card">
+    <section class="card stack people-card dashboard-people">
       <h2>People at this office</h2>
       <ul class="people-list">
         {% for person in board.people %}
@@ -145,26 +145,29 @@
   {% endif %}
   {% endif %}
 
-  <h2>Latest work</h2>
-  {% if not board.jobs %}
-  <p class="empty">Nothing logged yet.</p>
-  {% else %}
-  <div class="stack">
-    {% for job in board.jobs %}
-    <a class="unit-card" href="{% if job.unit_id %}/units/{{ job.unit_id }}{% else %}/properties/{{ job.property_id }}{% endif %}">
-      <strong>{{ job.title }}</strong>
-      <span class="unit-meta">
-        {{ job.created_at|apt_when }}
-        {% if job.unit %} · unit {{ job.unit.unit_number }}{% endif %}
-        {% if job.property %} · {{ job.property.name }}{% endif %}
-      </span>
-    </a>
-    {% endfor %}
-  </div>
-  {% endif %}
+  <section class="dashboard-recent">
+    <div>
+      <h2>Latest work</h2>
+      {% if not board.jobs %}
+      <p class="empty">Nothing logged yet.</p>
+      {% else %}
+      <div class="stack">
+        {% for job in board.jobs %}
+        <a class="unit-card" href="{% if job.unit_id %}/units/{{ job.unit_id }}{% else %}/properties/{{ job.property_id }}{% endif %}">
+          <strong>{{ job.title }}</strong>
+          <span class="unit-meta">
+            {{ job.created_at|apt_when }}
+            {% if job.unit %} · unit {{ job.unit.unit_number }}{% endif %}
+            {% if job.property %} · {{ job.property.name }}{% endif %}
+          </span>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
 
   {% if not board.site_bound %}
-  <details>
+    <details>
     <summary>Add a site</summary>
     <form method="post" action="/sites" class="card stack">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -174,10 +177,10 @@
       <label>State <input name="region" autocomplete="off" maxlength="32"></label>
       <button type="submit">Save site</button>
     </form>
-  </details>
+    </details>
   {% endif %}
 
-  <details>
+    <details>
     <summary>Log work</summary>
     <form method="post" action="/log" class="card stack" data-place-search data-mode="one">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -197,6 +200,7 @@
       <label>What you did <input name="title" required placeholder="What happened"></label>
       <button type="submit">Save this work</button>
     </form>
-  </details>
+    </details>
+  </section>
 </section>
 {% endblock %}

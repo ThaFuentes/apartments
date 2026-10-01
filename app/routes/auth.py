@@ -71,6 +71,33 @@ def logout():
     return redirect("/login")
 
 
+@bp.post("/account/reset-email")
+@login_required
+def account_reset_email():
+    from app.services.people import clean_email
+    from app.services.records import audit
+
+    try:
+        reset_email = clean_email(request.form.get("reset_email"))
+    except ValueError as exc:
+        flash(str(exc), "warn")
+        return redirect("/more")
+    previous = current_user.reset_email
+    current_user.reset_email = reset_email
+    audit(
+        current_user.id,
+        "human",
+        "update",
+        "user",
+        current_user.id,
+        {"reset_email": previous},
+        {"reset_email": reset_email},
+    )
+    db.session.commit()
+    flash("Password-reset email saved." if reset_email else "Password resets will use your login email.", "ok")
+    return redirect("/more")
+
+
 @bp.route("/join/<token>", methods=["GET", "POST"])
 def join(token):
     user = User.query.filter_by(invite_token=token, invite_used=False).first()

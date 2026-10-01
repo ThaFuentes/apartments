@@ -48,7 +48,7 @@ def create_app() -> Flask:
     app.config["PREFERRED_URL_SCHEME"] = os.getenv("PREFERRED_URL_SCHEME") or "https"
     app.config["SESSION_COOKIE_NAME"] = "pbt_apt_session"
     app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 14
-    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SECURE"] = os.getenv(
         "SESSION_COOKIE_SECURE",
@@ -123,6 +123,12 @@ def create_app() -> Flask:
         init_security(app)
     except Exception as exc:
         print(f"[apt] init_security failed (app still starts): {exc}", flush=True)
+
+    # The wrapper's apply_secure_session_config stamps SESSION_COOKIE_SAMESITE
+    # back to "Lax" after create_app() set it. Re-assert Strict here so the
+    # Apt session cookie never travels on cross-site requests. Keep this AFTER
+    # init_security — moving it above lets the wrapper overwrite it again.
+    app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
 
     login_manager.init_app(app)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)

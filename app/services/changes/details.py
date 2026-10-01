@@ -35,6 +35,8 @@ def _update_viewer(payload: dict, user=None) -> list[dict]:
         rows.append(change("Email", person.email or "no email", "no email"))
     elif payload.get("email") is not None:
         rows.append(change("Email", person.email or "no email", payload.get("email") or "no email"))
+    if "reset_email" in payload:
+        rows.append(change("Password-reset email", person.reset_email or "use login email", payload.get("reset_email") or "use login email"))
     for flag in ("can_see_reports", "can_see_history", "can_see_live_map", "active"):
         if payload.get(flag) is not None:
             rows.append(change(LABELS[flag], getattr(person, flag, None), payload.get(flag)))

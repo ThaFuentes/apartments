@@ -26,6 +26,10 @@
       <strong>Apt</strong>
       {% if current_user.is_authenticated %}
       <span>{{ current_user.label() }}{% if current_user.is_bot %} · BOT{% endif %} · {{ current_user.role_line() }}</span>
+      <form method="post" action="/logout" class="header-signout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="ghost">Sign out</button>
+      </form>
       {% endif %}
     </div>
     {% if current_user.is_authenticated %}
@@ -46,6 +50,10 @@
       <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>
       <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
       {% endif %}
+      <form method="post" action="/logout" class="desk-signout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="ghost">Sign out</button>
+      </form>
     </nav>
     {% endif %}
     {% if current_user.is_authenticated and header_property != 'Property' %}
@@ -119,6 +127,10 @@
     <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
     <a href="/help" {% if request.path == '/help' %}aria-current="page"{% endif %}>Help</a>
     {% endif %}
+    <form method="post" action="/logout" class="mobile-signout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="ghost">Sign out</button>
+    </form>
   </nav>
   {% endif %}
   <script src="{{ url_for('static', filename='js/apt.js') }}?v={{ asset_v }}"></script>

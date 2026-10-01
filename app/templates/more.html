@@ -25,6 +25,15 @@
     <a href="/security">Security console <span>→</span></a>
     {% endif %}
   </div>
+  <details class="card stack">
+    <summary>My password-reset email</summary>
+    <p class="lead">Set where password-reset links should go. Leave blank to use your login email.</p>
+    <form method="post" action="/account/reset-email" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Password-reset email <input type="email" name="reset_email" value="{{ current_user.reset_email or '' }}" autocomplete="email" placeholder="Use login email"></label>
+      <button type="submit">Save reset email</button>
+    </form>
+  </details>
   <form method="post" action="/drive" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="next" value="/">

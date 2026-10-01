@@ -44,12 +44,25 @@
     background: var(--soft);
     color: var(--accent);
   }
+  .desk-nav .desk-signout { margin: 0 0 0 auto; }
+  .desk-nav .desk-signout button {
+    min-height: 40px;
+    padding: 0.45rem 0.75rem;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+  .desk-nav .desk-signout button:hover { background: var(--soft); color: var(--accent); }
+  .header-signout { display: none; }
   .nav { display: none; }
   main {
-    max-width: 92rem;
+    width: 100%;
+    max-width: none;
     margin: 0 auto;
     padding: 1.1rem 1.4rem 2rem;
   }
+  body.property-office main { max-width: none; }
   .sheet { gap: 1.1rem; }
   .hero {
     display: grid;
@@ -140,6 +153,7 @@
     padding: 1.1rem 1.3rem 2rem;
     grid-column: 1;
     grid-row: 2;
+    container: apt-main / inline-size;
   }
   body.ops .nav { display: none; }
   body.ops .chat-fab {
@@ -162,6 +176,45 @@
     grid-column: 2;
     grid-row: 2;
   }
+}
+
+@container apt-main (min-width: 1380px) {
+  .desk-home .stats {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 0.8rem;
+  }
+  .desk-home .dash-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    align-items: start;
+    gap: 1.2rem;
+  }
+  .desk-home .dash-grid > * { min-width: 0; }
+  .desk-home .dashboard-properties { grid-column: span 8; }
+  .desk-home .dashboard-building { grid-column: span 7; }
+  .desk-home .dashboard-open { grid-column: span 4; }
+  .desk-home .dashboard-people { grid-column: span 4; }
+  .desk-home .dash-table {
+    width: 100%;
+    table-layout: fixed;
+  }
+  .desk-home .dash-table th,
+  .desk-home .dash-table td {
+    padding: 0.85rem 1rem;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
+  .desk-home .dash-table th:nth-child(1) { width: 34%; }
+  .desk-home .dash-table th:nth-child(2) { width: 24%; }
+  .desk-home .dash-table th:nth-child(3) { width: 12%; }
+  .desk-home .dash-table th:nth-child(4) { width: 30%; }
+  .desk-home .dash-table tbody tr:hover { background: #f8f5ef; }
+  .desk-home .dash-table td:nth-child(3) { font-variant-numeric: tabular-nums; }
+  .desk-home .dashboard-recent {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  .desk-home .dashboard-recent > * { min-width: 0; }
 }
 
 /* Security console */

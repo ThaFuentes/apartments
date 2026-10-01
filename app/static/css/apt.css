@@ -550,6 +550,9 @@ body.intro-on { overflow: hidden; }
   font-weight: 700;
 }
 .nav a[aria-current="page"] { background: var(--soft); color: var(--accent); }
+.nav .mobile-signout { flex: 0 0 auto; margin: 0; }
+.nav .mobile-signout button { min-height: 44px; padding: 0.55rem 0.7rem; font-size: 0.82rem; }
+.header-signout { display: none; }
 .flash { margin: 0; padding: 0.8rem 0.9rem; background: var(--soft); border-radius: 14px; }
 .flash.warn { background: var(--warn-bg); color: var(--warn); }
 .notices { display: flex; flex-direction: column; gap: 0.4rem; }
