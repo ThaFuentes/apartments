@@ -29,7 +29,7 @@ from app.services.talk.places import (
 )
 from app.services.talk.plans import _file_trip_plan, _file_trip_readings, _is_trip_plan
 from app.services.talk.records import answer_record
-from app.services.talk.staff import _file_access, _key_rank_sentence, _person_to_add, _set_key_rank
+from app.services.talk.staff import _answer_person_details, _file_access, _key_rank_sentence, _person_to_add, _set_key_rank
 from app.services.talk.textutil import _place_ready, _split_asks
 from app.services.talk.units import _file_item_note, _file_move_equipment, _file_named_unit, _file_unit_board, _file_unit_gear, _vendor_sentence
 
@@ -173,17 +173,28 @@ def route(user, text: str, key: str, source: str) -> dict:
         default_to_confirm = next((row for row in waiting_defaults if loads(row.payload_json).get("waiting_for") == "default_confirm"), None)
         waiting_site_to_confirm = next((row for row in PendingAction.query.filter_by(user_id=user.id, status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all() if loads(row.payload_json).get("waiting_for") == "property_confirm"), None)
         if active_shift and not active_shift.confirmed:
-            return {"ok": True, "needs_property_confirm": True, "reply": "Please confirm the property by answering yes or no first. Nothing is saved yet."}
-        if waiting_site_to_confirm:
-            return {"ok": True, "needs_property_confirm": True, "reply": "Please confirm the site with yes or no first. Nothing is saved yet."}
+            if waiting_site_to_confirm:
+                # "yes, save it" on the open site question is a yes: confirm the
+                # site and finish whatever visit card was waiting on it.
+                confirmed = confirm_property(user, source, finish_waiting=False)
+                return _after_site_confirm(user, confirmed, key, source, auto_save=True)
+            latest_pending = PendingAction.query.filter_by(user_id=user.id, status="pending").order_by(PendingAction.id.desc()).first()
+            if latest_pending:
+                # A staged card must not ride in on a site answer; the site
+                # question has not been asked yet, so refuse the save.
+                return {"ok": True, "needs_property_confirm": True, "reply": "Please confirm the property by answering yes or no first. Nothing is saved yet."}
+            confirmed = confirm_property(user, source, finish_waiting=False)
+            return _after_site_confirm(user, confirmed, key, source)
+        latest_pending = PendingAction.query.filter_by(user_id=user.id, status="pending").order_by(PendingAction.id.desc()).first()
+        if latest_pending:
+            from app.services.pending import confirm_id
+
+            return _with_default_reminder(user, confirm_id(user, latest_pending.id, source), key, source)
+        # A save command never answers the default-property question; a plain
+        # yes/no does. Only ask again when there is nothing else to save.
         if default_to_confirm:
             return {"ok": True, "pending": True, "reply": "Please answer yes or no: should I make this your default for now?"}
-        latest_pending = PendingAction.query.filter_by(user_id=user.id, status="pending").order_by(PendingAction.id.desc()).first()
-        if not latest_pending:
-            return {"ok": False, "reply": "Nothing is waiting to save."}
-        from app.services.pending import confirm_id
-
-        return confirm_id(user, latest_pending.id, source)
+        return {"ok": False, "reply": "Nothing is waiting to save."}
     active_shift = open_shift(user)
     default_card = None
     for candidate in PendingAction.query.filter_by(user_id=user.id, tool="set_default_property", status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all():
@@ -283,6 +294,9 @@ def route(user, text: str, key: str, source: str) -> dict:
         waiting_site.summary = "Which property are you at instead?"
         db.session.commit()
         return {"ok": True, "pending": True, "reply": "Okay, I won't use that site. Which property are you at instead?", "proposal": {"id": waiting_site.id, "tool": waiting_site.tool, "summary": waiting_site.summary, "status": waiting_site.status, "payload": payload, "changes": payload["_changes"], "risk": waiting_site.risk}}
+    details = _answer_person_details(user, text, key, source)
+    if details:
+        return details
     bare = answer_bare_reply(user, text)
     if bare:
         return _finish_bare(user, bare, text, key, source)
@@ -306,11 +320,48 @@ def route(user, text: str, key: str, source: str) -> dict:
         return _after_site_confirm(user, confirmed, key, source)
     if low in CONFIRM_SAVE:
         if _unconfirmed(user):
-            return {"ok": True, "needs_property_confirm": True, "reply": "Please confirm the property by answering yes or no first. Nothing is saved yet."}
-        waiting_defaults = PendingAction.query.filter_by(user_id=user.id, tool="set_default_property", status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all()
-        if any(loads(candidate.payload_json).get("waiting_for") == "default_confirm" for candidate in waiting_defaults):
-            return {"ok": True, "pending": True, "reply": "Please answer yes or no: should I make this your default for now?"}
+            # "yes, save it" on the site question is a yes: confirm the site and
+            # finish whatever visit card was waiting on it.
+            confirmed = confirm_property(user, source, finish_waiting=False)
+            return _after_site_confirm(user, confirmed, key, source)
+        waiting_visit = PendingAction.query.filter_by(user_id=user.id, tool="record_unit_visit", status="needs_answer").order_by(PendingAction.id.desc()).first()
+        if waiting_visit:
+            visit_payload = loads(waiting_visit.payload_json)
+            # A save click on a card that already names its site confirms the
+            # site first; the card stays waiting so nothing files silently.
+            if (visit_payload.get("waiting_for") == "property_confirm" and (visit_payload.get("property_name") or "").strip()) or (
+                visit_payload.get("waiting_for") in {"unit", "place"} and (visit_payload.get("unit_number") or "").strip() and (visit_payload.get("property_name") or "").strip()
+            ):
+                from app.services.records import property_place
+
+                shift = open_shift(user)
+                if shift and shift.confirmed and shift.property and shift.property.name.strip().lower() == visit_payload["property_name"].strip().lower():
+                    visit_payload["property_id"] = shift.property_id
+                    visit_payload["city"] = shift.property.city.name if shift.property.city else ""
+                    visit_payload["region"] = shift.property.city.region if shift.property.city else ""
+                    visit_payload["waiting_for"] = "property_confirm"
+                    visit_payload["needs_answer"] = True
+                    waiting_visit.payload_json = dumps(visit_payload)
+                    db.session.commit()
+                    return _after_site_confirm(user, {"ok": True, "reply": f"This is {property_place(shift.property)}.", "confirmed": True}, key, source)
+            if visit_payload.get("waiting_for") == "unit" and (visit_payload.get("unit_number") or "").strip():
+                from app.services.context import default_property_candidates
+                candidates = default_property_candidates(user, "")
+                prop = candidates[0] if len(candidates) == 1 else None
+                if prop:
+                    visit_payload.update({"property_id": prop.id, "property_name": prop.name, "city": prop.city.name if prop.city else "", "region": prop.city.region if prop.city else "", "waiting_for": "property_confirm", "needs_answer": True})
+                    waiting_visit.payload_json = dumps(visit_payload)
+                    waiting_visit.summary = f"Is this {prop.name}? Confirm the site before I file unit {visit_payload['unit_number']}."
+                    db.session.commit()
+                    return {"ok": True, "needs_property_confirm": True, "pending": True, "reply": waiting_visit.summary}
+            if visit_payload.get("waiting_for") in {"unit", "place"}:
+                return {"ok": True, "pending": True, "reply": waiting_visit.summary or "Tell me the unit and property before saving."}
         saved = _save_waiting(user, source)
+        if not saved.get("reply"):
+            # Nothing was staged to save; a default-reminder question may be open.
+            waiting_defaults = PendingAction.query.filter_by(user_id=user.id, tool="set_default_property", status="needs_answer").order_by(PendingAction.id.desc()).limit(8).all()
+            if any(loads(candidate.payload_json).get("waiting_for") == "default_confirm" for candidate in waiting_defaults):
+                return {"ok": True, "pending": True, "reply": "Please answer yes or no: should I make this your default for now?"}
         return saved if saved.get("reply") else {"ok": False, "reply": "Nothing is waiting to save."}
     if low in CONFIRM_YES:
         if _unconfirmed(user):
@@ -318,6 +369,21 @@ def route(user, text: str, key: str, source: str) -> dict:
             return _after_site_confirm(user, confirmed, key, source)
         if waiting_site:
             return {"ok": True, "pending": True, "reply": "Please confirm the site with yes or no, or cancel this item."}
+        waiting_visit = PendingAction.query.filter_by(user_id=user.id, tool="record_unit_visit", status="needs_answer").order_by(PendingAction.id.desc()).first()
+        if waiting_visit:
+            visit_payload = loads(waiting_visit.payload_json)
+            if visit_payload.get("waiting_for") in {"unit", "place"} and (visit_payload.get("unit_number") or "").strip():
+                from app.services.context import default_property_candidates
+                candidates = default_property_candidates(user, "")
+                prop = candidates[0] if len(candidates) == 1 else None
+                if prop:
+                    visit_payload.update({"property_id": prop.id, "property_name": prop.name, "city": prop.city.name if prop.city else "", "region": prop.city.region if prop.city else "", "waiting_for": "property_confirm", "needs_answer": True})
+                    waiting_visit.payload_json = dumps(visit_payload)
+                    waiting_visit.summary = f"Is this {prop.name}? Confirm the site before I file unit {visit_payload['unit_number']}."
+                    db.session.commit()
+                    return {"ok": True, "needs_property_confirm": True, "pending": True, "reply": waiting_visit.summary}
+            if visit_payload.get("waiting_for") in {"unit", "place"}:
+                return {"ok": True, "pending": True, "reply": waiting_visit.summary or "Tell me the unit and property before saving."}
         waiting_default = PendingAction.query.filter_by(user_id=user.id, tool="set_default_property", status="needs_answer").order_by(PendingAction.id.desc()).first()
         if waiting_default and loads(waiting_default.payload_json).get("waiting_for") == "default_confirm":
             return {"ok": True, "pending": True, "reply": "Please say yes or no to whether I should make this your default for now."}
@@ -336,14 +402,38 @@ def route(user, text: str, key: str, source: str) -> dict:
     result = _local_fallback(user, text, key, source, "")
     if note and result.get("reply") and note not in result["reply"]:
         result["reply"] = note + " " + result["reply"]
+    if result.get("pending") or result.get("proposal") or result.get("needs_property_confirm"):
+        result["ok"] = True
+    if result.get("reply"):
+        return result
+    return {"ok": True, "reply": "Got it."}
+
+
+def _with_default_reminder(user, result: dict, key: str, source: str) -> dict:
+    """After a successful save, offer to remember the confirmed onsite site."""
+    if not result.get("ok"):
+        return result
+    from app.services.context import prompt_default_for_onsite
+
+    reminder = prompt_default_for_onsite(user, source, f"{key}:remember-site")
+    if reminder and reminder.get("proposal"):
+        proposal = reminder["proposal"]
+        details = "; ".join(
+            f"{row['field']}: {row['after']}"
+            for row in proposal.get("changes") or []
+            if row.get("after") not in (None, "", "—")
+        )
+        question = f"Should I make {proposal['payload'].get('property_name')} in {proposal['payload'].get('city')} the default for now? Tell me when to change it."
+        result["reply"] = " ".join(bit for bit in (result.get("reply"), details, question) if bit)
+        result["default_proposal"] = proposal
     return result
 
 
-def _after_site_confirm(user, result: dict, key: str, source: str) -> dict:
+def _after_site_confirm(user, result: dict, key: str, source: str, *, auto_save: bool = False) -> dict:
     """Confirm the onsite lock, retain the work approval, then offer default memory."""
     from app.services.context import prompt_default_for_onsite
 
-    finished = _finish_confirmed_unit_visit(user, result, key, source)
+    finished = _finish_confirmed_unit_visit(user, result, key, source, auto_save=auto_save)
     if finished.get("ok"):
         reminder = prompt_default_for_onsite(user, source, f"{key}:remember-site")
         if reminder and reminder.get("proposal"):
@@ -360,6 +450,14 @@ def _after_site_confirm(user, result: dict, key: str, source: str) -> dict:
 
 
 def _one_turn(user, text: str, key: str, source: str) -> dict:
+    # Deterministic upkeep/equipment commands take precedence over model output,
+    # while the model remains available for ambiguous natural-language requests.
+    from app.services.talk.units import _file_item_note, _file_move_equipment, _file_named_unit, _file_unit_gear
+
+    for handler in (_file_move_equipment, _file_item_note, _file_named_unit, _file_unit_gear):
+        result = handler(user, text, key, source)
+        if result is not None:
+            return result
     model = _from_model(user, text, key, source)
     if model is not None and not model.get("failed"):
         return model
@@ -432,10 +530,12 @@ def _local_fallback(user, text: str, key: str, source: str, note: str, *, split:
                 return {"ok": True, "reply": reply}
         from app.services.caps import help_reply
 
-        helping = help_reply(text)
+        role = getattr(user, "role", "") or None
+        helping = help_reply(text, role=role, user=user)
         if helping:
             if note:
                 helping["reply"] = note + " " + (helping.get("reply") or "")
+            helping["help_page_url"] = "/help"
             return helping
     if NEXT_UNIT.search(text):
         return {

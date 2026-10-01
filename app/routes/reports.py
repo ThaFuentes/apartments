@@ -19,7 +19,7 @@ from app.routes.common import bp, login_required, _reports_ok, _key, _new_key
 @bp.get("/expenses")
 @login_required
 def expenses():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     rows = Expense.query.filter(Expense.deleted_at.is_(None)).order_by(Expense.id.desc()).limit(80).all()
     return render_template("expenses.html", expenses=rows, money=money, msg_key=_new_key())
@@ -27,7 +27,7 @@ def expenses():
 @bp.post("/expenses")
 @login_required
 def expense_save():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     if request.headers.get("X-Apt-Offline-Queue") == "1":
         return jsonify({"ok": False, "error": "Confirm the expense when you are online."}), 409
@@ -58,7 +58,7 @@ def reports():
     if not _reports_ok():
         abort(403)
     saved = Report.query.filter(Report.deleted_at.is_(None), Report.status.in_(("ready", "sent"))).order_by(Report.id.desc()).all()
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         preview = None
     else:
         preview = build_snapshot(kind="weekly", author=current_user.label())
@@ -67,7 +67,7 @@ def reports():
 @bp.post("/reports/build")
 @login_required
 def reports_build():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 
@@ -105,7 +105,7 @@ def report_detail(report_id):
 @bp.post("/reports/<int:report_id>")
 @login_required
 def report_edit(report_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     report = db.session.get(Report, report_id)
     if not report or report.status == "sent":

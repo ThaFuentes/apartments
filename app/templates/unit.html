@@ -131,6 +131,12 @@
         · Added {{ item.created_at|apt_when }}{% if who(item.created_by_id) %} · {{ who(item.created_by_id) }}{% endif %}
       </p>
       {% if item.notes %}<p class="gear-note">{{ item.notes }}</p>{% else %}<p class="hint">No note on this one.</p>{% endif %}
+      {% if item.vendor %}<p>Vendor: {{ item.vendor }}</p>{% endif %}
+      {% if item.phone %}<p>Service phone: {{ item.phone }}</p>{% endif %}
+      {% if item.purchase_date %}<p>Purchased {{ item.purchase_date|apt_when }}{% if item.purchase_price is not none %} · ${{ '%.2f'|format(item.purchase_price) }}{% endif %}</p>{% endif %}
+      {% if item.warranty_expires %}<p>Warranty through {{ item.warranty_expires|apt_when }}</p>{% endif %}
+      {% if item.repair_notes %}<p>Repair history: {{ item.repair_notes }}</p>{% endif %}
+      {% if item.parts_link %}<p><a href="{{ item.parts_link }}" target="_blank" rel="noopener noreferrer">Parts information</a></p>{% endif %}
       {% if editable %}
       <details>
         <summary>Update this {{ kind_label(item.kind) or "item" }}</summary>
@@ -150,6 +156,13 @@
           <label>Size <input name="size" value="{{ item.size_label }}" autocomplete="off"></label>
           <label>Color <input name="color" value="{{ item.color }}" autocomplete="off"></label>
           <label>Note for this one <textarea name="notes" placeholder="knob broken">{{ item.notes }}</textarea></label>
+          <label>Vendor <input name="vendor" value="{{ item.vendor }}"></label>
+          <label>Service phone <input name="phone" value="{{ item.phone }}" inputmode="tel"></label>
+          <label>Purchase date <input name="purchase_date" value="{{ item.purchase_date.isoformat() if item.purchase_date else '' }}" type="date"></label>
+          <label>Purchase price <input name="purchase_price" value="{{ item.purchase_price if item.purchase_price is not none else '' }}" inputmode="decimal"></label>
+          <label>Warranty expires <input name="warranty_expires" value="{{ item.warranty_expires.isoformat() if item.warranty_expires else '' }}" type="date"></label>
+          <label>Repair notes <textarea name="repair_notes">{{ item.repair_notes }}</textarea></label>
+          <label>Parts link <input name="parts_link" value="{{ item.parts_link }}" type="url" placeholder="https://…"></label>
           <button type="submit">Save this {{ kind_label(item.kind) or "item" }}</button>
         </form>
       </details>
@@ -182,6 +195,13 @@
       <label>Size <input name="size" autocomplete="off"></label>
       <label>Color <input name="color" autocomplete="off"></label>
       <label>Note for this one <textarea name="notes" placeholder="knob broken"></textarea></label>
+      <label>Vendor <input name="vendor"></label>
+      <label>Service phone <input name="phone" inputmode="tel"></label>
+      <label>Purchase date <input name="purchase_date" type="date"></label>
+      <label>Purchase price <input name="purchase_price" inputmode="decimal"></label>
+      <label>Warranty expires <input name="warranty_expires" type="date"></label>
+      <label>Repair notes <textarea name="repair_notes"></textarea></label>
+      <label>Parts link <input name="parts_link" type="url" placeholder="https://…"></label>
       <button type="submit">Save this equipment</button>
     </form>
   </details>

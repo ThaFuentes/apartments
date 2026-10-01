@@ -145,6 +145,7 @@ class Equipment(db.Model):
     unit_id = db.Column(db.Integer, db.ForeignKey("units.id", ondelete="SET NULL"), nullable=True)
     job_id = db.Column(db.Integer, db.ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True)
     media_id = db.Column(db.Integer, db.ForeignKey("media.id", ondelete="SET NULL"), nullable=True)
+    template_id = db.Column(db.Integer, db.ForeignKey("equipment_templates.id", ondelete="SET NULL"), nullable=True)
     kind = db.Column(db.String(80), nullable=False, default="")
     brand = db.Column(db.String(80), nullable=False, default="")
     model_number = db.Column(db.String(80), nullable=False, default="")
@@ -153,13 +154,86 @@ class Equipment(db.Model):
     style = db.Column(db.String(80), nullable=False, default="")
     color = db.Column(db.String(40), nullable=False, default="")
     notes = db.Column(db.Text, nullable=False, default="")
+    # Contact and sourcing info
+    phone = db.Column(db.String(40), nullable=False, default="")
+    vendor = db.Column(db.String(120), nullable=False, default="")
+    purchase_date = db.Column(db.Date, nullable=True)
+    purchase_price = db.Column(db.Float, nullable=True)
+    warranty_expires = db.Column(db.Date, nullable=True)
+    repair_notes = db.Column(db.String(4000), nullable=False, default="")
+    parts_link = db.Column(db.String(500), nullable=False, default="")
     confidence = db.Column(db.Float, nullable=True)
     source = db.Column(db.String(16), nullable=False, default="human")
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     deleted_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
     unit = db.relationship("Unit")
+    template = db.relationship("EquipmentTemplate", foreign_keys=[template_id])
+
+
+class EquipmentTemplate(db.Model):
+    """Reusable equipment templates: same kind/brand/model but different serial per unit.
+
+    When maintenance buys the same washer model for multiple units, they create one
+    template with the shared info, then apply it to each unit with just the serial.
+    """
+
+    __tablename__ = "equipment_templates"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    kind = db.Column(db.String(80), nullable=False, default="")
+    brand = db.Column(db.String(80), nullable=False, default="")
+    model_number = db.Column(db.String(80), nullable=False, default="")
+    size_label = db.Column(db.String(40), nullable=False, default="")
+    style = db.Column(db.String(80), nullable=False, default="")
+    color = db.Column(db.String(40), nullable=False, default="")
+    notes = db.Column(db.Text, nullable=False, default="")
+    phone = db.Column(db.String(40), nullable=False, default="")
+    vendor = db.Column(db.String(120), nullable=False, default="")
+    parts_link = db.Column(db.String(500), nullable=False, default="")
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+    property = db.relationship("Property")
+
+
+class EquipmentMove(db.Model):
+    """Detailed audit trail for equipment moves between units.
+
+    Records every move: what was moved, from where, to where, when, and why.
+    """
+
+    __tablename__ = "equipment_moves"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    equipment_id = db.Column(db.Integer, db.ForeignKey("equipment.id", ondelete="CASCADE"), nullable=False)
+    from_unit_id = db.Column(db.Integer, db.ForeignKey("units.id", ondelete="SET NULL"), nullable=True)
+    to_unit_id = db.Column(db.Integer, db.ForeignKey("units.id", ondelete="SET NULL"), nullable=True)
+    from_unit_number = db.Column(db.String(40), nullable=False, default="")
+    to_unit_number = db.Column(db.String(40), nullable=False, default="")
+    event_type = db.Column(db.String(20), nullable=False, default="move")
+    source_inventory_missing = db.Column(db.Boolean, nullable=False, default=False)
+    equipment_snapshot = db.Column(db.String(4000), nullable=False, default="{}")
+    from_property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    to_property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    moved_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reason = db.Column(db.String(300), nullable=False, default="")
+    note = db.Column(db.Text, nullable=False, default="")
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    equipment = db.relationship("Equipment")
+    from_unit = db.relationship("Unit", foreign_keys=[from_unit_id])
+    to_unit = db.relationship("Unit", foreign_keys=[to_unit_id])
+    from_property = db.relationship("Property", foreign_keys=[from_property_id])
+    to_property = db.relationship("Property", foreign_keys=[to_property_id])
+    moved_by = db.relationship("User")
+
 class OdometerReading(db.Model):
     __tablename__ = "odometer_readings"
     __table_args__ = _OPTS

@@ -407,13 +407,27 @@ def _record_change(tool: str, payload: dict, user=None) -> list[dict]:
         rows.extend([change("Unit", None, payload["unit_number"]), change("Unit ID", None, unit.id if unit else "Assigned when saved")])
     if payload.get("entity_id") and entity not in {"unit", "job", "unit_task", "equipment", "plan_item"}:
         rows.append(change("Record ID", None, payload.get("entity_id")))
-    for key in ("title", "work", "body", "status", "note"):
+    for key in ("title", "work", "body", "status", "note", "reading", "miles"):
         if payload.get(key):
             rows.append(change(LABELS.get(key, key.title()), None, payload[key]))
     if payload.get("unit_id") and not payload.get("unit_number"):
         unit = db_get(Unit, payload["unit_id"])
         if unit:
             rows.extend([change("Unit", None, unit.unit_number), change("Unit ID", None, unit.id)])
+    if tool == "move_equipment":
+        unit_names = {str(unit.unit_number): unit.id for unit in Unit.query.filter_by(property_id=prop.id).all()} if prop else {}
+        source_no = str(payload.get("source_unit_number") or payload.get("target_unit_number") or "")
+        target_no = str(payload.get("target_unit_number") or "")
+        rows.extend([
+            change("Action", None, payload.get("action") or "move"),
+            change("Origin unit", None, source_no),
+            change("Origin unit ID", None, unit_names.get(source_no) or "Assigned when saved"),
+            change("Destination unit", None, "Removed from service" if payload.get("action") == "remove" else target_no or "—"),
+            change("Destination unit ID", None, "—" if payload.get("action") == "remove" else unit_names.get(target_no) or ("Assigned when saved" if target_no else "—")),
+            change("Appliance", None, payload.get("item_hint") or payload.get("kind") or "Appliance"),
+            change("Serial", None, payload.get("serial_number") or "Not provided"),
+            change("History", None, "Origin, destination, actor, and equipment snapshot recorded"),
+        ])
     return rows
 _DETAILS = {
     "invite_viewer": _invite, "update_viewer": _update_viewer, "grant_access": _grant_access,

@@ -71,10 +71,16 @@ def audit(actor_id, source, action, entity, entity_id, before, after) -> None:
         related = list(data.get("related_unit_ids") or [])
         related.append(before["unit_id"])
         data = {**data, "related_unit_ids": related}
-    if entity in {"unit", "job", "unit_visit", "equipment", "unit_task"} and unit_id and property_id:
+    if entity == "equipment" and action in {"remove", "install"}:
+        related = list(data.get("related_unit_ids") or [])
+        related.extend(value for value in (before.get("unit_id"), data.get("unit_id")) if value)
+        data = {**data, "related_unit_ids": related}
+    if entity in {"unit", "job", "unit_visit", "equipment", "unit_task"} and property_id:
         label = data.get("title") or data.get("unit_number") or data.get("kind") or data.get("note") or action.replace("_", " ")
         details = dumps({"entity": entity, "entity_id": entity_id, "before": before or {}, "after": after or {}})
-        related_ids = {int(unit_id)}
+        related_ids = set()
+        if unit_id:
+            related_ids.add(int(unit_id))
         for raw_id in data.get("related_unit_ids") or []:
             try:
                 related_ids.add(int(raw_id))

@@ -50,11 +50,19 @@ def _name_words(name: str) -> list[str]:
     return [word for word in re.findall(r"[a-z0-9]+", (name or "").lower()) if word not in skip and len(word) > 2]
 
 
+def _empty_catalog_message(user=None) -> str:
+    if user is None:
+        return "No properties are saved yet."
+    if Property.query.filter(Property.deleted_at.is_(None)).first():
+        return "None of the saved properties are on this login."
+    return "No properties are saved yet."
+
+
 def catalog_lines(props: list[Property] | None = None, *, user=None) -> str:
     """The address book, grouped by city so a bare city name is visible to a reader."""
     props = props if props is not None else property_catalog(user)
     if not props:
-        return "No properties are saved yet."
+        return _empty_catalog_message(user)
     by_city: dict[str, list[Property]] = {}
     for prop in props:
         town = prop.city.name if prop.city else "no city"
@@ -150,7 +158,7 @@ def resolve_property(hint: str, city: str = "", region: str = "", *, user=None) 
     region = (region or "").strip()
     props = property_catalog(user)
     if not props:
-        return {"state": "unknown", "choices": [], "message": "No properties are saved yet."}
+        return {"state": "unknown", "choices": [], "message": _empty_catalog_message(user)}
 
     if city:
         in_city = [prop for prop in props if _town_match(prop, city)]
@@ -347,8 +355,6 @@ def _check(kind: str, value: str) -> bool:
         if re.search(r"\s+(?:in|at|from|to|and|the|for|on)\s+", value, re.I):
             return False
         return len(value.split()) <= 4
-    if kind == "text":
-        return len(value) <= 4000 and "\x00" not in value
     if kind == "text":
         return len(value) <= 4000 and "\x00" not in value
     if kind == "date":

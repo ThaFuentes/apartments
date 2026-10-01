@@ -41,11 +41,15 @@
   <p class="empty">No units logged here yet.</p>
   {% endif %}
   <div class="stack" id="unit-list">
-    {% for card in cards %}
-    {% if card.show_head %}
-    <h2>{{ card.building_label }}</h2>
-    <p class="hint">{{ card.rollup }}</p>
-    {% endif %}
+    {% for group in groups %}
+    <details class="building-block" data-building-block {% if building or groups|length == 1 or not group.key %}open{% endif %}>
+      <summary class="building-head">
+        <span class="building-name">{{ group.label }}</span>
+        {% if group.range %}<span class="building-range">{{ group.range }}</span>{% endif %}
+        <span class="building-rollup">{{ group.rollup }}</span>
+      </summary>
+      <div class="building-cards">
+    {% for card in group.cards %}
     <article class="unit-card{% if card.unit.occupancy == 'occupied' %} occupied{% elif card.unit.occupancy == 'make_ready' %} make-ready{% endif %}" data-unit-card data-number="{{ card.unit.unit_number }}" data-building="{{ card.unit.building }}">
       <a href="/units/{{ card.unit.id }}"><strong>{{ card.unit.unit_number }}</strong></a>
       <span class="unit-meta">
@@ -76,6 +80,9 @@
       </form>
       {% endif %}
     </article>
+    {% endfor %}
+      </div>
+    </details>
     {% endfor %}
   </div>
   <p class="empty" data-unit-empty hidden>No unit matches.</p>

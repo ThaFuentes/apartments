@@ -9,24 +9,12 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app.builddb.builddb import db
 from app.models import AssistantProfile, User
 from app.services.clock import utcnow
+from app.services.roles import BUILTIN_ROLES, known_role, normalize_role as normalize_job
 
 USERNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$")
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-ROLES = (
-    "owner",
-    "admin",
-    "regional_manager",
-    "property_manager",
-    "assistant_manager",
-    "office",
-    "maintenance_manager",
-    "maintenance_regional",
-    "maintenance_supervisor",
-    "maintenance_person",
-    # Keep legacy values accepted for existing invitations and stored accounts.
-    "field",
-    "viewer",
-)
+PHONE = re.compile(r"^\+?[0-9][0-9 ().-]{6,24}$")
+ROLES = BUILTIN_ROLES + ("field", "employee", "boss")
 
 
 def clean_email(value) -> str | None:
@@ -36,6 +24,15 @@ def clean_email(value) -> str | None:
     if not EMAIL.match(text):
         raise ValueError("That email does not look usable. Leave it blank if they have none.")
     return text.lower()
+
+
+def clean_phone(value) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    if not PHONE.match(text):
+        raise ValueError("That phone number does not look usable. Leave it blank if there is none.")
+    return text[:40]
 
 
 def clean_username(value) -> str:
@@ -91,15 +88,19 @@ def create_user(
     display_name: str = "",
     role: str = "viewer",
     email=None,
+    phone: str = "",
     created_by: User | None = None,
     can_see_reports: bool = True,
     can_see_history: bool = True,
     can_see_live_map: bool = False,
     capability_overrides: dict[str, bool] | None = None,
     active: bool = True,
+    is_bot: bool = False,
+    security_email=None,
+    reset_email=None,
 ) -> tuple[User, str]:
-    role = (role or "viewer").strip().lower()
-    if role not in ROLES:
+    role = normalize_job(role or "viewer")
+    if not known_role(role) and role not in ROLES:
         raise ValueError("Choose a valid Apt role.")
     if created_by is not None:
         from app.services.access import can_create_user
@@ -117,10 +118,23 @@ def create_user(
         generated = secrets.token_urlsafe(9)
         password = generated
     mail = clean_email(email)
+    security = clean_email(security_email)
+    reset = clean_email(reset_email)
+    # The account owner is reachable for recovery and billing; every other role
+    # may legitimately have no email ("no email" in the chat).
+    if role == "owner" and not mail:
+        raise ValueError("An owner login needs an email address.")
+    if is_bot and role == "owner":
+        raise ValueError("The owner login cannot be a bot.")
+    digits = clean_phone(phone)
     user = User(
         username=ident,
         display_name=(display_name or ident).strip()[:150],
         email=mail,
+        security_email=security,
+        reset_email=reset,
+        is_bot=bool(is_bot),
+        phone=digits,
         password_hash=generate_password_hash(password),
         role=role,
         active=bool(active),

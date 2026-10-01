@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Bot setup{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <h1>This bot needs 2FA</h1>
+    <p class="lead">The record stays closed until two-factor sign-in is on and the password-reset inbox is a different email from login and from 2FA codes.</p>
+  </div>
+
+  {% if 'reset_email' in gaps or not inbox %}
+  <form method="post" action="/bot-setup" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="do" value="emails">
+    <h2>Inboxes</h2>
+    <p class="hint">Login email{% if login_email %}: <strong>{{ login_email }}</strong>{% else %} is blank{% endif %}. Keep 2FA codes and password resets on two other addresses when you can.</p>
+    <label>2FA codes go to <span class="hint">blank uses the login email</span> <input type="email" name="security_email" value="{{ security_email }}" placeholder="codes@…"></label>
+    <label>Password resets go to <input type="email" name="reset_email" value="{{ reset_email }}" placeholder="resets@…" required></label>
+    <button type="submit">Save inboxes</button>
+  </form>
+  {% endif %}
+
+  {% if 'twofa' in gaps %}
+  <div class="card stack">
+    <h2>Turn on 2FA</h2>
+    {% if pending_secret %}
+    <p class="hint">Add this key to an authenticator app, then confirm one code.</p>
+    <p><code>{{ pending_secret }}</code></p>
+    {% if otpauth %}<p class="hint">{{ otpauth }}</p>{% endif %}
+    <form method="post" action="/bot-setup" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="do" value="totp-confirm">
+      <label>Code from the app <input name="code" inputmode="numeric" maxlength="7" placeholder="123456" required autofocus></label>
+      <button type="submit">Turn on authenticator</button>
+    </form>
+    <form method="post" action="/bot-setup">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="do" value="totp-start">
+      <button class="quiet" type="submit">New key</button>
+    </form>
+    {% else %}
+    <p class="hint">Use an authenticator app{% if inbox %}, or a code emailed to <strong>{{ inbox }}</strong>{% endif %}.</p>
+    <form method="post" action="/bot-setup">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="do" value="totp-start">
+      <button type="submit">Set up authenticator app</button>
+    </form>
+    {% if inbox %}
+    <form method="post" action="/bot-setup">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="do" value="email-method">
+      <button class="quiet" type="submit">Use emailed codes instead</button>
+    </form>
+    {% else %}
+    <p class="hint">Emailed codes need an address above. Until then, use the authenticator app.</p>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <form method="post" action="/logout">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="ghost" type="submit">Sign out</button>
+  </form>
+</section>
+{% endblock %}

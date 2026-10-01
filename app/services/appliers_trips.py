@@ -417,6 +417,15 @@ def apply_upsert_property(user, payload, source) -> dict:
         return {"ok": False, "reply": "Tell me the property and the city."}
     profile = site_profile()
     region = (payload.get("region") or (profile.default_region if profile else "") or "").strip()
+    existing = _property_match({"match_name": name, "city": city})[0] if (name and city) else None
+    if existing and (payload.get("address") or "").strip() and not payload.get("force_new"):
+        # The name and city match a saved property and the sentence carries the
+        # street: this is an address update, not a duplicate property.
+        return apply_update_property(
+            user,
+            {"property_id": existing.id, "address": payload["address"]},
+            source,
+        )
     prop = ensure_property(
         name,
         city,

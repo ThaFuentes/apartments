@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Reset password{% endblock %}
+{% block main %}
+<section class="hero narrow">
+  <h1>Reset password</h1>
+  <p class="lead">Enter your username or the reset inbox on the login. The link goes to the password-reset email, which can be different from the login email and from the 2FA inbox.</p>
+  <form method="post" action="/forgot" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Username or email <input name="ident" required autocapitalize="none"></label>
+    <button type="submit">Send reset link</button>
+  </form>
+  <p><a href="/login">Back to sign in</a></p>
+</section>
+{% endblock %}

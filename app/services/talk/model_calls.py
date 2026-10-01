@@ -42,7 +42,7 @@ def _from_model(user, text: str, key: str, source: str):
 def _gemini_calls(user, text: str):
     from app.services.access import role_of
 
-    if role_of(user) == "office":
+    if role_of(user) == "viewer":
         return None
     from app.services.providers import collect_tool_calls
 
@@ -52,7 +52,7 @@ def _gemini_calls(user, text: str):
 def _from_calls(user, calls, key, source, quota_note, text: str = "") -> dict:
     """A tool call is the action. The reply in the thread is what happened."""
     from app.services.talk.interpret import _with_place_prompt
-    from app.services.pending import commit_apply
+    from app.services.pending import apply_now, commit_apply
 
     replies = []
     proposals = []
@@ -101,13 +101,36 @@ def _from_calls(user, calls, key, source, quota_note, text: str = "") -> dict:
                 args["needs_answer"] = True
                 args["waiting_for"] = "property_confirm" if args.get("property_name") else "property"
             summary, risk = _summary(name, args)
-            summary = args.get("pending_question") or summary
-            card = request_apply(user, name, args, source, item_key, batch_key=key)
+            # The question the card asks is the reply; the headline is only a fallback.
+            card = request_apply(
+                user,
+                name,
+                args,
+                source,
+                item_key,
+                batch_key=key,
+                summary=args.get("pending_question") or summary,
+            )
             if name == "record_unit_visit" and card.get("proposal"):
                 card = _with_place_prompt(user, card)
             replies.append(card.get("reply") or "")
             if card.get("proposal"):
                 proposals.append(card["proposal"])
+            continue
+        if name in ("plan_trip", "plan_day"):
+            # A model plan without explicit per-unit cards executes now so the reply
+            # can name each unit's record (e.g. "Separate records: ...").
+            result = apply_now(user, name, args, source, item_key)
+            replies.append(result.get("reply") or "")
+            proposals.extend(result.get("proposals") or ([result["proposal"]] if result.get("proposal") else []))
+            continue
+        if name in ("upsert_property", "update_property"):
+            # A property sentence with a resolved target is the action itself,
+            # like saving the property page. Unresolved or ambiguous places were
+            # already turned into questions above.
+            result = apply_now(user, name, args, source, item_key)
+            replies.append(result.get("reply") or "")
+            proposals.extend(result.get("proposals") or ([result["proposal"]] if result.get("proposal") else []))
             continue
         result = commit_apply(user, name, args, source, item_key, batch_key=key)
         replies.append(result.get("reply") or "")

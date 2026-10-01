@@ -7,6 +7,7 @@ import requests
 
 from app.builddb.builddb import db
 from app.models import ApiCredential, User
+from app.services import budget
 from app.services.clock import utcnow
 from app.services.crypto import decrypt_text, encrypt_text, last4
 from app.services.gemini import CHAT_RULES, TOOL_DECLS, backoff_until, complete as gemini_complete, read_nameplate, resolve_model
@@ -91,13 +92,16 @@ ROLE_LABELS = {
     "owner": "owner",
     "admin": "admin",
     "regional_manager": "regional manager",
+    "regional_property_manager": "regional property manager",
+    "maintenance_regional": "regional maintenance manager",
     "property_manager": "property manager",
     "assistant_manager": "assistant manager",
     "office": "office",
+    "maintenance_supervisor": "maintenance supervisor",
     "maintenance_manager": "maintenance manager",
     "maintenance_person": "maintenance person",
     "field": "maintenance person",
-    "viewer": "office",
+    "viewer": "read-only",
 }
 
 
@@ -128,12 +132,14 @@ def _retry_after(resp) -> int:
         return 60
 
 
-def _openai_call(base: str, api_key: str, model: str, messages: list, tools: bool, timeout: int) -> dict:
+def _openai_call(base: str, api_key: str, model: str, messages: list, tools: bool, timeout: int, max_tokens: int = 0) -> dict:
     url = base.rstrip("/") + "/chat/completions"
     body = {"model": model, "messages": messages, "temperature": 0.2}
     if tools:
         body["tools"] = openai_tools()
         body["tool_choice"] = "auto"
+    if max_tokens:
+        body["max_tokens"] = max_tokens
     resp = requests.post(
         url,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -156,10 +162,12 @@ def _openai_call(base: str, api_key: str, model: str, messages: list, tools: boo
             args = {}
         if fn.get("name"):
             calls.append({"name": fn["name"], "args": args if isinstance(args, dict) else {}})
-    return {"ok": True, "text": message.get("content") or "", "calls": calls}
+    usage = data.get("usage") or {}
+    tokens = int(usage.get("total_tokens") or ((usage.get("prompt_tokens") or 0) + (usage.get("completion_tokens") or 0)))
+    return {"ok": True, "text": message.get("content") or "", "calls": calls, "tokens": tokens}
 
 
-def _anthropic_call(api_key: str, model: str, text: str, image: bytes | None, mime: str, timeout: int) -> dict:
+def _anthropic_call(api_key: str, model: str, text: str, image: bytes | None, mime: str, timeout: int, max_tokens: int = 0) -> dict:
     content = []
     if image:
         import base64
@@ -190,7 +198,7 @@ def _anthropic_call(api_key: str, model: str, text: str, image: bytes | None, mi
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         },
-        json={"model": model, "max_tokens": 800, "tools": tools, "messages": [{"role": "user", "content": content}]},
+        json={"model": model, "max_tokens": max_tokens or 800, "tools": tools, "messages": [{"role": "user", "content": content}]},
         timeout=timeout,
     )
     if resp.status_code == 429:
@@ -206,7 +214,9 @@ def _anthropic_call(api_key: str, model: str, text: str, image: bytes | None, mi
         if block.get("type") == "tool_use" and block.get("name"):
             args = block.get("input") or {}
             calls.append({"name": block["name"], "args": args if isinstance(args, dict) else {}})
-    return {"ok": True, "text": "\n".join(texts), "calls": calls}
+    usage = data.get("usage") or {}
+    tokens = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+    return {"ok": True, "text": "\n".join(texts), "calls": calls, "tokens": tokens}
 
 
 def _base(row) -> str:
@@ -224,13 +234,19 @@ def _model(row) -> str:
 
 
 def chat_history(user, current: str) -> list[dict]:
-    """The whole saved thread, not counting the line she just sent. Clear is the only reset."""
+    """Recent turns only. The full thread stays on screen; the model does not need all of it."""
     from app.models import ChatMessage
 
-    rows = ChatMessage.query.filter_by(user_id=user.id).order_by(ChatMessage.id.asc()).all()
+    rows = (
+        ChatMessage.query.filter_by(user_id=user.id)
+        .order_by(ChatMessage.id.desc())
+        .limit(12)
+        .all()
+    )
+    rows.reverse()
     if rows and rows[-1].role == "user" and (rows[-1].body or "").strip() == (current or "").strip():
         rows = rows[:-1]
-    return [{"role": row.role, "body": (row.body or "")[:1500]} for row in rows]
+    return [{"role": row.role, "body": (row.body or "")[:400]} for row in rows]
 
 
 def _with_history(messages: list, history: list | None, text: str) -> list:
@@ -255,6 +271,7 @@ def chat_with_tools(row, text: str, timeout: int = 25, history: list | None = No
     except Exception:
         return {"ok": False, "error": "Could not read that key."}
     model = _model(row)
+    cap = budget.reply_cap(row)
     if spec.get("kind") == "gemini":
         resolved = {}
         if not model:
@@ -268,14 +285,14 @@ def chat_with_tools(row, text: str, timeout: int = 25, history: list | None = No
                 db.session.commit()
         if not model:
             return {"ok": False, "error": resolved.get("error") or "No Gemini model."}
-        return gemini_complete(api_key, model, text, timeout=timeout, history=history)
+        return gemini_complete(api_key, model, text, timeout=timeout, history=history, max_output_tokens=cap)
     if not model:
         return {"ok": False, "error": "Pick a model for this key."}
     messages = _with_history([{"role": "system", "content": CHAT_RULES}], history, text)
     try:
         if spec.get("kind") == "anthropic":
-            return _anthropic_call(api_key, model, text, None, "", timeout)
-        return _openai_call(_base(row), api_key, model, messages, True, timeout)
+            return _anthropic_call(api_key, model, text, None, "", timeout, max_tokens=cap)
+        return _openai_call(_base(row), api_key, model, messages, True, timeout, max_tokens=cap)
     except requests.RequestException as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -304,9 +321,10 @@ def read_image(row, image: bytes, mime: str, timeout: int = 25) -> dict:
         "kind can be refrigerator, washer, dryer, dishwasher, range, microwave, "
         "air conditioner, furnace, water heater, or another short name. Do not invent a serial."
     )
+    cap = budget.reply_cap(row)
     try:
         if spec.get("kind") == "anthropic":
-            result = _anthropic_call(api_key, model, prompt, image, mime, timeout)
+            result = _anthropic_call(api_key, model, prompt, image, mime, timeout, max_tokens=cap)
         else:
             import base64
 
@@ -321,6 +339,7 @@ def read_image(row, image: bytes, mime: str, timeout: int = 25) -> dict:
                 ]}],
                 False,
                 timeout,
+                max_tokens=cap,
             )
     except requests.RequestException as exc:
         return {"ok": False, "error": str(exc)}
@@ -330,6 +349,7 @@ def read_image(row, image: bytes, mime: str, timeout: int = 25) -> dict:
 
     parsed = plate_from_json(result.get("text") or "")
     parsed["ok"] = True
+    parsed["tokens"] = int(result.get("tokens") or 0)
     return parsed
 
 
@@ -392,7 +412,7 @@ def voice_brief() -> str:
 
 def record_brief(user=None) -> str:
     """Only put the caller's visible records in the model context."""
-    from app.models import Equipment, Job, Property
+    from app.models import Property
     from app.services.access import sees_all, visible_property_ids
 
     prop_query = Property.query.filter(Property.deleted_at.is_(None))
@@ -400,36 +420,20 @@ def record_brief(user=None) -> str:
     if user is not None and not sees_all(user):
         allowed = visible_property_ids(user)
         prop_query = prop_query.filter(Property.id.in_(allowed or {-1}))
-    props = prop_query.order_by(Property.name.asc()).limit(40).all()
-    prop_ids = [prop.id for prop in props]
-    lines = ["Her record:", catalog_lines(props)]
+    props = prop_query.order_by(Property.name.asc()).limit(24).all()
+    lines = ["Visible properties (name and city only):", catalog_lines(props, user=user)]
     if not props:
         lines.append("No properties yet.")
-    names = {}
-    for prop in props:
-        city = prop.city.name if prop.city else ""
-        region = prop.city.region if prop.city else ""
-        where = ", ".join(bit for bit in (city, region) if bit)
-        lines.append(f"property {prop.id}: {prop.name} | {where or 'no city'} | {prop.address or 'no address'}")
-        names[prop.name.lower()] = names.get(prop.name.lower(), 0) + 1
-    dupes = [name for name, count in names.items() if count > 1]
-    if dupes:
-        lines.append("Same name more than once: " + ", ".join(dupes))
-    jobs_query = Job.query.filter(Job.deleted_at.is_(None))
-    gear_query = Equipment.query.filter(Equipment.deleted_at.is_(None))
-    if allowed is not None:
-        jobs_query = jobs_query.filter(Job.property_id.in_(prop_ids or {-1}))
-        gear_query = gear_query.filter(Equipment.property_id.in_(prop_ids or {-1}))
-    jobs = jobs_query.order_by(Job.id.desc()).limit(8).all()
-    for job in jobs:
-        lines.append(f"job {job.id}: {job.title} at property {job.property_id}")
-    gear = gear_query.order_by(Equipment.id.desc()).limit(6).all()
-    for item in gear:
-        bits = " ".join(bit for bit in (item.brand, item.style, item.kind, item.serial_number) if bit)
-        unit = item.unit.unit_number if item.unit else "-"
-        note = f" note: {item.notes[:80]}" if item.notes else ""
-        lines.append(f"appliance {item.id}: {bits} unit {unit} property {item.property_id}{note}")
-    return "\n".join(lines)[:3500]
+    from app.services.context import current_property, remembered_property
+    from app.services.records import property_place
+
+    here = current_property(user) if user is not None else None
+    remembered = remembered_property(user) if user is not None else None
+    if here:
+        lines.append(f"Locked/working property: {property_place(here)} (id {here.id}).")
+    elif remembered:
+        lines.append(f"Default property waiting confirm: {property_place(remembered)} (id {remembered.id}).")
+    return "\n".join(lines)[:1800]
 
 
 def collect_tool_calls(user, text: str):
@@ -467,6 +471,11 @@ def collect_tool_calls(user, text: str):
         if getattr(row, "backoff_until", None) and row.backoff_until > utcnow():
             notes.append(f"{label} is cooling down.")
             continue
+        if budget.would_exceed(row, prompt):
+            # Resting the key here beats letting the provider 429 us into a
+            # multi-minute lockout with no answer.
+            notes.append(_rest_note(label, row))
+            continue
         try:
             result = chat_with_tools(row, prompt, history=history)
         except Exception:
@@ -483,6 +492,18 @@ def collect_tool_calls(user, text: str):
         calls = result.get("calls") or []
         prose = (result.get("text") or "").strip()
         if calls or prose:
+            tokens = int(result.get("tokens") or 0)
+            if tokens <= 0:
+                # A provider that omits usage still has to count against the key.
+                tokens = budget.estimate_tokens(prompt) + budget.estimate_tokens(prose or json.dumps(calls))
+            budget.record(row, tokens)
             return {"calls": calls, "text": prose, "note": ""}
         notes.append(f"{label} did not answer.")
     return {"calls": [], "text": "", "note": " ".join(notes)}
+
+
+def _rest_note(label: str, row) -> str:
+    seconds = budget.resting_seconds(row)
+    if seconds >= 60:
+        return f"{label} is resting {max(1, seconds // 60)} min to stay under its token limit."
+    return f"{label} is resting to stay under its token limit."

@@ -12,6 +12,7 @@ from app.services.access.core import (
     can_edit_property,
     can_see_property,
     has_capability,
+    normalize_role,
     role_of,
     visible_property_ids,
 )
@@ -22,9 +23,11 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
     role = role_of(user)
     if not user or not getattr(user, "is_authenticated", True):
         return {"ok": False, "reply": "Sign in before changing the record."}
-    if not getattr(user, "active", True) or role not in ROLE_CAPABILITIES:
+    from app.services.roles import known_role
+
+    if not getattr(user, "active", True) or not known_role(role):
         return {"ok": False, "reply": "This login is inactive or has no configured role."}
-    known = PROPERTY_WRITE_TOOLS | set(TOOL_CAPABILITY) | set(PERSONAL_TOOLS) | {"query_record", "soft_delete", "restore"} | OWNER_PROTECTED_TOOLS
+    known = PROPERTY_WRITE_TOOLS | set(TOOL_CAPABILITY) | set(PERSONAL_TOOLS) | {"query_record", "soft_delete", "restore", "grant_access", "set_default_property"} | OWNER_PROTECTED_TOOLS
     if tool not in known:
         return {"ok": False, "reply": "This action is not available to this role."}
     if tool in OWNER_PROTECTED_TOOLS and role != "owner":
@@ -32,6 +35,11 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
     if tool == "query_record":
         allowed = any(has_capability(user, c) for c in ("read_company", "read_assigned_properties", "read_region"))
         return {"ok": allowed, "reply": "" if allowed else "Record search is not available to this role."}
+    if tool == "set_default_property":
+        from app.services.access.management import can_choose_own_default_property
+
+        allowed = can_choose_own_default_property(user)
+        return {"ok": allowed, "reply": "Your property manager has set your default property. Ask them or a regional manager to open up your default-property choice." if not allowed else ""}
     if tool in PERSONAL_TOOLS:
         if not has_capability(user, "log_personal_expenses"):
             return {"ok": False, "reply": "This action is not available to this role."}
@@ -44,12 +52,39 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
         return {"ok": has_capability(user, "read_reports"), "reply": "Reports are not available to this role."}
     if tool == "update_settings":
         return {"ok": has_capability(user, "manage_settings"), "reply": "This login cannot manage that company setting."}
+    if tool == "grant_access":
+        # The apply step resolves the property and checks that this person really
+        # manages people there; this only keeps the tool reachable at all.
+        allowed = any(
+            has_capability(user, cap)
+            for cap in ("manage_users", "manage_region_people", "manage_property_people", "manage_team")
+        )
+        return {"ok": allowed, "reply": "" if allowed else "This login cannot change who works at that property."}
     if tool in {"invite_viewer", "update_viewer"}:
-        return {"ok": has_capability(user, "manage_users"), "reply": "This login cannot manage users."}
+        # The chat has to agree with the page: a regional or property manager who
+        # holds the granular people capability can add and change their own people.
+        from app.services.access.management import can_create_user, can_manage_user
+        from app.services.people import find_user
+
+        if tool == "invite_viewer":
+            role = normalize_role(payload.get("role") or "")
+            if not role:
+                return {"ok": False, "reply": "Which role should that login have?"}
+            allowed = can_create_user(user, role)
+            return {"ok": allowed, "reply": "" if allowed else "This login cannot add that role or scope."}
+        target = find_user(payload.get("username") or "")
+        if not target:
+            return {"ok": False, "reply": "I can't find that login."}
+        allowed = can_manage_user(user, target)
+        return {"ok": allowed, "reply": "" if allowed else "This login cannot manage that person."}
     if tool in {"upsert_property", "update_property", "delete_property"}:
         if tool == "delete_property" and role != "owner":
             return {"ok": False, "reply": "Only an owner can remove a property."}
-        if tool != "upsert_property" and not has_capability(user, "manage_properties"):
+        if tool == "delete_property" and not has_capability(user, "manage_properties"):
+            return {"ok": False, "reply": "Property administration is not available to this role."}
+        if tool == "update_property" and not (has_capability(user, "manage_properties") or has_capability(user, "edit_properties")):
+            # A regional manager carries edit_properties for the properties in
+            # their region; that is enough to correct a property record.
             return {"ok": False, "reply": "Property administration is not available to this role."}
         if tool == "upsert_property" and not (has_capability(user, "create_properties") or (has_capability(user, "create_properties_region") and _new_property_allowed(user, tool, payload))):
             return {"ok": False, "reply": "This login cannot add properties."}
@@ -177,14 +212,26 @@ def _resource_property_ids(user, tool: str, payload: dict) -> tuple[set[int], st
         if prop_id is None:
             return set(), "Which assigned property is this for?"
         from app.services.records import normalize_unit
-        units = []
-        for key in ("source_unit_number", "target_unit_number"):
-            number = normalize_unit(payload.get(key) or "")
-            unit = Unit.query.filter_by(property_id=prop_id, unit_number=number).filter(Unit.deleted_at.is_(None)).first() if number else None
-            if not unit:
-                return set(), "I need both existing units at the same assigned property."
-            units.append(unit)
-        payload["unit_id"], payload["target_unit_id"] = units[0].id, units[1].id
+        source_no = normalize_unit(payload.get("source_unit_number") or "")
+        target_no = normalize_unit(payload.get("target_unit_number") or "")
+        if payload.get("action") == "install":
+            target_no = target_no or source_no
+            if not target_no:
+                return set(), "Tell me which unit received the installation."
+            target_unit = Unit.query.filter_by(property_id=prop_id, unit_number=target_no).filter(Unit.deleted_at.is_(None)).first()
+            if target_unit:
+                payload["target_unit_id"] = target_unit.id
+            return ids, ""
+        source_unit = Unit.query.filter_by(property_id=prop_id, unit_number=source_no).filter(Unit.deleted_at.is_(None)).first() if source_no else None
+        if not source_unit:
+            return set(), "I need an existing source unit at that property."
+        payload["unit_id"] = source_unit.id
+        if target_no:
+            target_unit = Unit.query.filter_by(property_id=prop_id, unit_number=target_no).filter(Unit.deleted_at.is_(None)).first()
+            if target_unit:
+                payload["target_unit_id"] = target_unit.id
+        if payload.get("action") != "remove" and not target_no:
+            return set(), "Tell me the destination unit."
     raw_visit = payload.get("visit_id")
     if raw_visit not in (None, ""):
         from app.models import UnitVisit
@@ -267,8 +314,14 @@ def _new_property_allowed(user, tool: str, payload: dict) -> bool:
 def _can_edit_for_tool(user, prop_id: int, tool: str) -> bool:
     if role_of(user) == "owner":
         return True
-    capability = "manage_properties" if tool in {"upsert_property", "update_property", "delete_property"} else "write_maintenance"
-    return has_capability(user, capability, prop_id) and can_see_property(user, prop_id) and can_edit_property(user, prop_id)
+    if tool in {"upsert_property", "delete_property"}:
+        capabilities = ("manage_properties",)
+    elif tool == "update_property":
+        capabilities = ("edit_properties", "manage_properties")
+    else:
+        capabilities = ("write_maintenance",)
+    allowed = any(has_capability(user, cap, prop_id) for cap in capabilities)
+    return allowed and can_see_property(user, prop_id) and can_edit_property(user, prop_id)
 
 
 def _expense_belongs_to_user(user, payload: dict) -> bool:
@@ -282,7 +335,7 @@ def _expense_belongs_to_user(user, payload: dict) -> bool:
 
 
 def sees_all(user) -> bool:
-    return role_of(user) == "owner" or (role_of(user) in {"admin", "office"} and has_capability(user, "read_company"))
+    return role_of(user) == "owner" or (role_of(user) in {"admin", "office", "viewer"} and has_capability(user, "read_company"))
 
 
 def _resolve_payload_place(user, name: str, city: str = "", region: str = ""):

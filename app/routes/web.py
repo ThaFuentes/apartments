@@ -6,6 +6,9 @@ from app.routes import property_units as property_units
 from app.routes import admin as admin
 from app.routes import reports as reports
 from app.routes import location as location
+from app.routes import audit as audit
+from app.routes import regions as regions
+from app.routes import security as security
 
 # Preserve imports some local tools may use while routes live in focused modules.
 from app.routes.fieldwork import home, add_site, plan_day, chat, trips

@@ -14,7 +14,7 @@ from app.routes.common import bp, login_required, _history_ok, _key, _new_key
 @bp.route("/")
 @login_required
 def home():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         return redirect("/reports")
     from app.services.browse import home_board
 
@@ -23,7 +23,7 @@ def home():
 @bp.post("/sites")
 @login_required
 def add_site():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 
@@ -45,14 +45,17 @@ def add_site():
 @bp.get("/api/places")
 @login_required
 def place_search():
-    if current_user.role == "viewer" and not current_user.can_see_history:
+    if current_user.is_viewer and not current_user.can_see_history:
         abort(403)
-    q = (request.args.get("q") or "").strip()
+    q = (request.args.get("q") or "").strip()[:80]
     if len(q) < 2:
         return jsonify([])
-    like = f"%{q}%"
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    from app.services.access import scoped_property_query
+
     rows = (
-        Property.query.filter(Property.deleted_at.is_(None), Property.name.ilike(like))
+        scoped_property_query(current_user, Property.query.filter(Property.deleted_at.is_(None)))
+        .filter(Property.name.ilike(f"%{escaped}%", escape="\\"))
         .order_by(Property.name.asc())
         .limit(8)
         .all()
@@ -64,7 +67,7 @@ def place_search():
 @bp.route("/plan", methods=["GET", "POST"])
 @login_required
 def plan_day():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.clock import local_today
     from app.services.pending import commit_apply
@@ -139,7 +142,7 @@ def plan_day():
 @bp.post("/log")
 @login_required
 def log_work():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 
@@ -158,7 +161,7 @@ def log_work():
 @bp.post("/chat")
 @login_required
 def chat():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     if request.headers.get("X-Apt-Offline-Queue") == "1":
         return jsonify({"ok": False, "error": "Send this when you are online so it is not filed twice."}), 409
@@ -182,6 +185,12 @@ def chat():
         )
     else:
         result = handle_message(current_user, text, idempotency_key=key, source="ai")
+    # If the help system wants to open the help page, redirect there
+    if result.get("help_page_url"):
+        if request.is_json or request.headers.get("Accept") == "application/json":
+            return jsonify(result)
+        flash(result.get("reply") or "", "ok")
+        return redirect(result["help_page_url"])
     if request.is_json or request.headers.get("Accept") == "application/json":
         return jsonify(result)
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
@@ -190,7 +199,7 @@ def chat():
 @bp.post("/chat/new")
 @login_required
 def chat_new():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     result = clear_chat(current_user)
     if request.headers.get("Accept") == "application/json":
@@ -200,7 +209,7 @@ def chat_new():
 @bp.post("/review")
 @login_required
 def review():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     ids = request.form.getlist("id")
     accept_all = request.form.get("accept_all") == "1"
@@ -211,7 +220,7 @@ def review():
 @bp.post("/pending/<int:pending_id>/confirm")
 @login_required
 def confirm(pending_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     result = confirm_id(current_user, pending_id, "human")
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
@@ -220,7 +229,7 @@ def confirm(pending_id):
 @bp.post("/pending/<int:pending_id>/discard")
 @login_required
 def discard(pending_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     result = discard_id(current_user, pending_id)
     flash(result.get("reply") or "", "ok")
@@ -229,7 +238,7 @@ def discard(pending_id):
 @bp.post("/pending/<int:pending_id>/edit")
 @login_required
 def edit_pending(pending_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     changes = {
         "property_name": request.form.get("property_name") or None,
@@ -256,10 +265,26 @@ def edit_pending(pending_id):
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
     return redirect(request.form.get("next") or request.referrer or "/")
 
+@bp.post("/property/default")
+@login_required
+def property_default():
+    if current_user.is_viewer:
+        abort(403)
+    from app.services.context import apply_set_default
+
+    result = apply_set_default(
+        current_user,
+        {"property_id": request.form.get("property_id")},
+        "human",
+    )
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect(request.form.get("next") or "/")
+
+
 @bp.post("/property/confirm")
 @login_required
 def property_confirm():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     result = confirm_property(current_user, "human")
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
@@ -268,7 +293,7 @@ def property_confirm():
 @bp.get("/miles")
 @login_required
 def miles_page():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.models import MilesEntry, OdometerReading
     from app.services.miles import traveled_rows, traveled_total
@@ -298,7 +323,7 @@ def miles_page():
 @bp.post("/miles")
 @login_required
 def miles_save():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 
@@ -325,6 +350,27 @@ def miles_save():
 @login_required
 def more():
     return render_template("more.html")
+
+
+@bp.get("/help")
+@login_required
+def help_page():
+    """Role-tiered help page: each role sees their own help plus everything below them."""
+    from app.services.caps.help_content import role_help_topics, role_intro, role_summary, role_help_text
+    from app.services.access import role_of
+
+    role = role_of(current_user)
+    topics = role_help_topics(role, user=current_user)
+    return render_template(
+        "help.html",
+        role=role,
+        role_display=role.replace("_", " ").title() if role else "Unknown",
+        intro=role_intro(role),
+        summary=role_summary(role, user=current_user),
+        topics=topics,
+        help_text=role_help_text(role),
+        msg_key=_new_key(),
+    )
 
 @bp.get("/trips")
 @login_required
@@ -365,7 +411,7 @@ def trip_detail(trip_id):
 @bp.post("/plan-items/<int:item_id>")
 @login_required
 def plan_mark(item_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.models import PlanItem
     from app.services.pending import commit_apply
@@ -396,7 +442,7 @@ def plan_mark(item_id):
 @bp.post("/trips/<int:trip_id>/miles")
 @login_required
 def trip_miles(trip_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 
@@ -416,7 +462,7 @@ def trip_miles(trip_id):
 @bp.post("/trips/<int:trip_id>/cards")
 @login_required
 def trip_card(trip_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 

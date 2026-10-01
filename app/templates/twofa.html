@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Two-factor{% endblock %}
+{% block main %}
+<section class="hero narrow">
+  <h1>Second step</h1>
+  {% if method == 'email' %}
+  <p class="lead">Enter the code sent to {% if inbox %}<strong>{{ inbox }}</strong>{% else %}the 2FA inbox{% endif %}.</p>
+  {% else %}
+  <p class="lead">Enter the code from the authenticator app.</p>
+  {% endif %}
+  <form method="post" action="/2fa" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Code <input name="code" inputmode="numeric" maxlength="7" autocomplete="one-time-code" placeholder="123456" required autofocus></label>
+    <button type="submit">Continue</button>
+  </form>
+  {% if method == 'email' %}
+  <form method="post" action="/2fa" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="do" value="resend">
+    <button class="quiet" type="submit">Send a new code</button>
+  </form>
+  {% endif %}
+  <form method="post" action="/2fa">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="do" value="cancel">
+    <button class="ghost" type="submit">Back to sign in</button>
+  </form>
+</section>
+{% endblock %}

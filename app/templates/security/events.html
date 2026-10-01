@@ -1,0 +1,21 @@
+{% extends "security/base.html" %}
+{% block security_content %}
+<p class="sec-lead">Every wrapper hit stored for this site. Product changes live on Full audit and can be reversed.</p>
+<table class="sec-table">
+  <thead><tr><th>When</th><th>Type</th><th>IP</th><th>Device</th><th>Path</th><th>Grade</th><th>Notes</th></tr></thead>
+  <tbody>
+  {% for row in events %}
+    <tr>
+      <td>{{ row.when }}</td>
+      <td>{{ row.type }}</td>
+      <td class="mono">{{ row.ip }}</td>
+      <td class="mono">{{ row.device }}</td>
+      <td>{{ row.path }}</td>
+      <td>{{ row.grade }} {{ row.score or "" }}</td>
+      <td>{{ row.notes }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if not events %}<p class="sec-muted">No events stored yet.</p>{% endif %}
+{% endblock %}

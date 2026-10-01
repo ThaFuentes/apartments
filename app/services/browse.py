@@ -10,6 +10,60 @@ from app.models import Equipment, Job, Property, Unit, UnitVisit
 _EMPTY = datetime.min
 
 
+def _first_name(user) -> str:
+    label = (getattr(user, "display_name", None) or getattr(user, "username", None) or "there").strip()
+    return label.split()[0] if label else "there"
+
+
+def _initials(user) -> str:
+    label = (getattr(user, "display_name", None) or getattr(user, "username", None) or "?").strip()
+    parts = [bit for bit in re.split(r"\s+", label) if bit]
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[1][0]).upper()
+    return (parts[0][:2] if parts else "?").upper()
+
+
+def _greeting(tz_name: str | None = None) -> str:
+    from app.services.clock import local_now
+
+    hour = local_now(tz_name).hour
+    if hour < 12:
+        return "Good morning"
+    if hour < 17:
+        return "Good afternoon"
+    return "Good evening"
+
+
+def _people_here(property_id: int, user_id: int) -> list[dict]:
+    from app.models import PropertyAccess, User
+    from app.services.roles import role_label
+
+    rows = (
+        PropertyAccess.query.filter_by(property_id=property_id)
+        .join(User, User.id == PropertyAccess.user_id)
+        .filter(User.active.is_(True), User.is_bot.is_(False))
+        .order_by(User.display_name.asc(), User.username.asc())
+        .limit(12)
+        .all()
+    )
+    people = []
+    for row in rows:
+        person = row.user
+        if not person:
+            continue
+        people.append(
+            {
+                "id": person.id,
+                "name": person.label(),
+                "first": _first_name(person),
+                "initials": _initials(person),
+                "title": role_label(person.role),
+                "is_you": person.id == user_id,
+            }
+        )
+    return people
+
+
 def visible_jobs():
     """Work that is still on a property and, when it names a unit, that unit is still there."""
     return (
@@ -92,26 +146,90 @@ def home_board(user_id: int, user=None) -> dict:
         job_query = job_query.filter(Job.property_id.in_(allowed or {0}))
     jobs = job_query.order_by(Job.created_at.desc(), Job.id.desc()).limit(6).all()
     miles = traveled_total(user_id)
+    units = Unit.query.filter(Unit.deleted_at.is_(None))
+    if allowed is not None:
+        units = units.filter(Unit.property_id.in_(allowed or {0}))
+    ready_count = units.filter(Unit.occupancy == "make_ready").count()
+    occupied_count = units.filter(Unit.occupancy == "occupied").count()
+    working = ""
+    first_name = "there"
+    initials = "A"
+    role_name = ""
+    site_bound = False
+    home_id = None
+    home_name = ""
+    home_city = ""
+    people = []
+    ready_units = []
+    greeting = "Hello"
+    if user is not None:
+        from app.services.access.core import role_of
+        from app.services.context import SITE_BOUND_ROLES, current_property
+        from app.services.records import property_place, site_profile
+        from app.services.roles import role_label
+
+        profile = site_profile()
+        tz_name = profile.timezone if profile else None
+        greeting = _greeting(tz_name)
+        first_name = _first_name(user)
+        initials = _initials(user)
+        role_name = role_label(user.role)
+        site_bound = role_of(user) in SITE_BOUND_ROLES
+        here = current_property(user)
+        working = property_place(here) if here else ""
+        if here:
+            home_id = here.id
+            home_name = here.name
+            home_city = here.city.name if here.city else ""
+            people = _people_here(here.id, user.id)
+            ready_rows = (
+                Unit.query.filter_by(property_id=here.id, occupancy="make_ready")
+                .filter(Unit.deleted_at.is_(None))
+                .order_by(Unit.unit_number.asc())
+                .limit(6)
+                .all()
+            )
+            ready_units = [
+                {"id": unit.id, "number": unit.unit_number, "building": unit.building or ""}
+                for unit in ready_rows
+            ]
     return {
         "today": today,
         "place_count": len(places) + len(pinned),
         "open_count": len(open_items) if allowed is not None else PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial"))).count(),
         "miles": int(miles) if float(miles).is_integer() else miles,
-        "places": been or places[:5],
+        "places": been or places[:8],
         "plan": plan,
         "jobs": jobs,
+        "ready_count": ready_count,
+        "occupied_count": occupied_count,
+        "job_count": len(jobs),
+        "working": working,
+        "greeting": greeting,
+        "first_name": first_name,
+        "initials": initials,
+        "role_label": role_name,
+        "site_bound": site_bound,
+        "home_id": home_id,
+        "home_name": home_name,
+        "home_city": home_city,
+        "people": people,
+        "ready_units": ready_units,
     }
 
 
 def place_groups(city_id: int | None = None, user=None) -> list[dict]:
     from app.models import City
-    from app.services.access import access_map, sees_all
+    from app.services.access import access_map, sees_all, visible_property_ids
     from app.services.geo import city_parts
 
     props = Property.query.filter(Property.deleted_at.is_(None)).all()
     mine = access_map(user) if user is not None else {}
     if user is not None and not sees_all(user):
-        props = [prop for prop in props if prop.id in mine]
+        # Region-assigned managers see their whole region here too, not only the
+        # properties directly granted on their login.
+        allowed = visible_property_ids(user)
+        props = [prop for prop in props if prop.id in allowed]
     if city_id:
         anchor = db.session.get(City, city_id)
         if anchor:
@@ -314,11 +432,45 @@ def unit_cards(property_id: int, sort: str = "recent", query: str = "", show: st
         card["show_head"] = has_buildings and key != previous
         card["rollup"] = " · ".join(bits)
         previous = key
+    groups = _building_groups(cards)
     loose = sorted(jobs_by.get(None) or [], key=lambda row: row.created_at or _EMPTY, reverse=True)
     return {
         "cards": cards,
+        "groups": groups,
         "loose_jobs": loose,
         "total": len(units),
         "building_names": building_names,
         "building": wanted,
     }
+
+
+def _building_groups(cards: list) -> list[dict]:
+    """One closed block per building, with the unit-number span it covers."""
+    groups: list[dict] = []
+    by_key: dict[str, dict] = {}
+    for card in cards:
+        key = card["unit"].building or ""
+        group = by_key.get(key)
+        if group is None:
+            group = {
+                "key": key,
+                "label": card.get("building_label") or "No building",
+                "rollup": card.get("rollup") or "",
+                "cards": [],
+                "range": "",
+            }
+            by_key[key] = group
+            groups.append(group)
+        group["cards"].append(card)
+    for group in groups:
+        numbers = sorted(
+            (card["unit"].unit_number or "" for card in group["cards"] if card["unit"].unit_number),
+            key=unit_sort_key,
+        )
+        if not numbers:
+            group["range"] = ""
+        elif len(numbers) == 1:
+            group["range"] = numbers[0]
+        else:
+            group["range"] = f"{numbers[0]}-{numbers[-1]}"
+    return groups

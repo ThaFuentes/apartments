@@ -38,7 +38,10 @@ CAPABILITY_LABELS = {
     "write_maintenance": "Write maintenance and unit records",
     "manage_property_people": "Manage people at assigned properties",
     "manage_region_people": "Manage people in assigned regions",
+    "open_team_default_property": "Let a property manager’s team choose its own default property",
     "manage_team": "Coordinate maintenance team",
+    "manage_roles": "Create extra job titles",
+    "manage_security": "Change security settings, 2FA, and API keys",
     "log_personal_expenses": "Log own mileage and expenses",
     "view_map": "View map and live location tools",
     "delete_records": "Remove or restore maintenance records",
@@ -49,7 +52,7 @@ CAPABILITY_LABELS = {
 CAPABILITIES = set(CAPABILITY_LABELS)
 
 
-LEGACY_ROLE_MAP = {"field": "maintenance_person", "viewer": "office", "employee": "maintenance_person", "boss": "office"}
+LEGACY_ROLE_MAP = {"field": "maintenance_person", "employee": "maintenance_person", "viewer": "viewer", "boss": "viewer"}
 
 
 OWNER_PROTECTED_TOOLS = {"transfer_ownership", "delete_owner", "promote_owner"}
@@ -64,7 +67,7 @@ PROPERTY_WRITE_TOOLS = {"add_plan_card", "attach_media", "clear_plan", "log_job_
 TOOL_CAPABILITY = {"read_reports": "read_reports", "draft_report": "manage_reports", "send_report": "manage_reports", "update_settings": "manage_settings", "invite_viewer": "manage_users", "update_viewer": "manage_users", "upsert_property": "create_properties", "update_property": "manage_properties", "delete_property": "manage_properties", "lookup_address": "read_assigned_properties"}
 
 
-ROLE_DEFAULT_LOCKED_CAPABILITIES = {"read_company", "manage_settings", "manage_users", "manage_regions", "create_properties"}
+ROLE_DEFAULT_LOCKED_CAPABILITIES = {"read_company", "manage_settings", "manage_users", "manage_regions", "create_properties", "manage_security"}
 
 
 def normalize_role(role: str | None) -> str:
@@ -95,7 +98,9 @@ def role_default_keys(user, property_id: int | None = None) -> list[str]:
 
 
 def _default_capability(user, capability: str, property_id: int | None = None) -> bool:
-    defaults = ROLE_CAPABILITIES.get(role_of(user), set())
+    from app.services.roles import capabilities_for_role
+
+    defaults = capabilities_for_role(role_of(user)) or ROLE_CAPABILITIES.get(role_of(user), set())
     granted = "*" in defaults or capability in defaults
     try:
         from app.models import RoleCapabilityDefault
@@ -134,12 +139,24 @@ def has_capability(user, capability: str, property_id: int | None = None) -> boo
 
 
 def _set_user_capability(actor, target: User, capability: str, granted: bool | None, scope_key: str) -> str:
-    if role_of(actor) not in {"owner", "admin"}:
-        raise PermissionError("Only an owner or admin can change a personal permission override.")
+    actor_role = role_of(actor)
+    scope_key = (scope_key or "global").strip() or "global"
     if target.id == actor.id or role_of(target) == "owner":
         raise PermissionError("Owner permissions cannot be changed here.")
     if capability not in CAPABILITIES:
         raise ValueError("Choose a known permission.")
+    if capability == "manage_security" and actor_role != "owner":
+        raise PermissionError("Only an owner can change security permissions.")
+    if actor_role in {"owner", "admin"}:
+        if scope_key != "global":
+            raise PermissionError("Company permission overrides must use the company-wide scope.")
+    elif capability == "open_team_default_property" and actor_role == "regional_manager":
+        from app.services.access.management import can_manage_pm_default_policy
+
+        if not scope_key.startswith("region:") or not scope_key[7:].isdigit() or not can_manage_pm_default_policy(actor, target, int(scope_key[7:])):
+            raise PermissionError("You can only change a property manager’s default-property policy in your assigned region.")
+    else:
+        raise PermissionError("Only an owner or admin can change this personal permission override.")
     from app.models import UserCapability
     row = UserCapability.query.filter_by(user_id=target.id, capability=capability, scope_key=scope_key).first()
     if granted is None:
@@ -161,7 +178,7 @@ def set_user_capability(actor, target: User, capability: str, granted: bool | No
 
 
 def _company_scope(user) -> bool:
-    return role_of(user) == "owner" or (role_of(user) in {"admin", "office"} and has_capability(user, "read_company"))
+    return role_of(user) == "owner" or (role_of(user) in {"admin", "office", "viewer"} and has_capability(user, "read_company"))
 
 
 def can_read_history(user) -> bool:
@@ -203,7 +220,7 @@ def visible_property_ids(user) -> set[int]:
     if _company_scope(user):
         return {row.id for row in Property.query.filter(Property.deleted_at.is_(None)).all()}
     direct = set(access_map(user)) if has_capability(user, "read_assigned_properties") else set()
-    if role_of(user) in {"regional_manager", "maintenance_regional"} and has_capability(user, "read_region"):
+    if role_of(user) in {"regional_manager", "regional_property_manager", "maintenance_regional"} and has_capability(user, "read_region"):
         return direct | _region_property_ids(user)
     return direct
 
@@ -233,7 +250,10 @@ def can_edit_property(user, property_id: int) -> bool:
         return True
     if role == "admin" and _company_scope(user) and any(has_capability(user, cap, prop_id) for cap in ("write_maintenance", "edit_properties", "manage_properties")):
         return prop_id in visible_property_ids(user)
-    if role in {"regional_manager", "maintenance_regional"} and prop_id in _region_property_ids(user):
+    if role == "office" and _company_scope(user) and has_capability(user, "write_maintenance", prop_id):
+        # Office works every unit in the company from the desk, no per-property grant.
+        return prop_id in visible_property_ids(user)
+    if role in {"regional_manager", "regional_property_manager", "maintenance_regional"} and prop_id in _region_property_ids(user):
         return any(has_capability(user, cap, prop_id) for cap in ("edit_properties", "write_maintenance", "manage_properties"))
     access = access_map(user).get(prop_id)
     if not access:

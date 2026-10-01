@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title or "Security" }} · Apt</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=21">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt-desk.css') }}?v=1">
+  {% block head %}{% endblock %}
+</head>
+<body class="sec-body">
+  <div class="sec-shell">
+    <aside class="sec-rail">
+      <a class="sec-brand" href="/security">Apt Security</a>
+      <nav class="sec-nav">
+        <a href="/security" {% if request.path == '/security' %}class="is-on"{% endif %}>Overview</a>
+        <a href="/security/threat-map" {% if request.path.startswith('/security/threat-map') %}class="is-on"{% endif %}>Threat map</a>
+        <a href="/security/events" {% if request.path.startswith('/security/events') %}class="is-on"{% endif %}>Events</a>
+        <a href="/security/audit" {% if request.path.startswith('/security/audit') %}class="is-on"{% endif %}>Full audit</a>
+      </nav>
+      <a class="sec-back" href="/">← Back to operations</a>
+    </aside>
+    <div class="sec-main">
+      <header class="sec-top">
+        <h1>{{ page_title or "Security" }}</h1>
+        <span>{{ current_user.label() }} · owner</span>
+      </header>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <p class="flash {{ category }}">{{ message }}</p>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      {% block security_content %}{% endblock %}
+    </div>
+  </div>
+</body>
+</html>

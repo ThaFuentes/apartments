@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Regions{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>Regions</h1>
+  <p class="lead">A region is your own operating area: the cities inside it, and the managers who cover it. A regional manager only sees the properties in their region's cities.</p>
+  <form method="post" action="/regions" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    <label>New region <input name="name" required placeholder="Permian"></label>
+    <button type="submit">Add region</button>
+  </form>
+  {% if not regions %}
+  <p class="empty">No regions yet. Add one above, then tick the cities that belong to it.</p>
+  {% endif %}
+  {% for region in regions %}
+  {% set cities_in = region_cities.get(region.id, []) %}
+  {% set people_in = region_people.get(region.id, []) %}
+  <article class="card stack region-card">
+    <form method="post" action="/regions/{{ region.id }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="region-head">
+        <label>Name <input name="name" value="{{ region.name }}"></label>
+        <label class="check"><input type="checkbox" name="active" value="1" {% if region.active %}checked{% endif %}> Active</label>
+        <button type="submit">Save region</button>
+      </div>
+    </form>
+    <form method="post" action="/regions/{{ region.id }}/cities" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h3>Cities in {{ region.name }}</h3>
+      <p class="hint">{{ cities_in|length }} of {{ cities|length }} cities. Everything at a property in a ticked city lands in this region.</p>
+      {% if cities %}
+      <div class="check-grid">
+        {% for city in cities %}
+        <label>
+          <input type="checkbox" name="city" value="{{ city.id }}" {% if city.id in cities_in %}checked{% endif %}>
+          {{ city.name }}{% if city.region %}, {{ city.region }}{% endif %}
+        </label>
+        {% endfor %}
+      </div>
+      <button type="submit">Save cities</button>
+      {% else %}
+      <p class="empty">No cities yet. Add a property first — its city shows up here.</p>
+      {% endif %}
+    </form>
+    <form method="post" action="/regions/{{ region.id }}/people" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h3>Who covers {{ region.name }}</h3>
+      <p class="hint">Regional managers and regional maintenance managers assigned here read the properties in the cities above.</p>
+      {% if people %}
+      <div class="check-grid">
+        {% for person in people %}
+        <label>
+          <input type="checkbox" name="person" value="{{ person.id }}" {% if person.id in people_in %}checked{% endif %}>
+          {{ person.display_name or person.username }} <span>{{ person.role|replace('_', ' ') }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <button type="submit">Save people</button>
+      {% else %}
+      <p class="empty">No logins yet. Add one on the People page.</p>
+      {% endif %}
+    </form>
+    <form method="post" action="/regions/{{ region.id }}/default-policies" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h3>Property-manager default policy</h3>
+      <p class="hint">Choose which PM teams may set their own default property in {{ region.name }}. This regional setting takes precedence over the PM's company-wide team policy.</p>
+      {% for manager in managed_property_managers %}
+      <label>{{ manager.display_name or manager.username }}
+        <select name="policy-{{ manager.id }}">
+          <option value="default" {% if (manager.id, region.id) not in regional_policies %}selected{% endif %}>Use company/manager policy</option>
+          <option value="allow" {% if regional_policies.get((manager.id, region.id)) == true %}selected{% endif %}>Allow team choice</option>
+          <option value="deny" {% if regional_policies.get((manager.id, region.id)) == false %}selected{% endif %}>Keep team locked</option>
+        </select>
+      </label>
+      {% else %}
+      <p class="empty">No property managers yet.</p>
+      {% endfor %}
+      <button type="submit">Save regional policies</button>
+    </form>
+    <form method="post" action="/regions/{{ region.id }}/delete" class="region-remove">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="quiet">Remove {{ region.name }}</button>
+    </form>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -6,11 +6,11 @@ from app.services.clock import utcnow
 from app.services.gemini.tools import BASE, CHAT_RULES, TOOL_DECLS
 from app.services.gemini.common import QuotaError, retry_after
 
-def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False, contents: list | None = None) -> dict:
+def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False, contents: list | None = None, max_output_tokens: int = 0) -> dict:
     url = f"{BASE}/models/{model}:generateContent"
     body: dict = {
         "contents": contents or [{"role": "user", "parts": parts}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1600},
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_output_tokens or 1600},
     }
     if tools:
         body["systemInstruction"] = {
@@ -42,6 +42,11 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False, 
     if resp.status_code >= 400:
         return {"ok": False, "status": resp.status_code, "error": (resp.text or "")[:400]}
     data = resp.json() if resp.content else {}
+    usage = data.get("usageMetadata") or {}
+    tokens = int(
+        usage.get("totalTokenCount")
+        or ((usage.get("promptTokenCount") or 0) + (usage.get("candidatesTokenCount") or 0))
+    )
     calls = []
     texts = []
     for cand in data.get("candidates") or []:
@@ -52,7 +57,7 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False, 
             fc = part.get("functionCall") or part.get("function_call")
             if isinstance(fc, dict) and fc.get("name"):
                 calls.append({"name": fc.get("name"), "args": fc.get("args") or {}})
-    return {"ok": True, "status": 200, "text": "\n".join(texts).strip(), "calls": calls}
+    return {"ok": True, "status": 200, "text": "\n".join(texts).strip(), "calls": calls, "tokens": tokens}
 
 
 def _contents(history: list | None, text: str) -> list:
@@ -73,9 +78,17 @@ def _contents(history: list | None, text: str) -> list:
     return contents
 
 
-def complete(api_key: str, model: str, text: str, timeout: int = 25, history: list | None = None) -> dict:
+def complete(api_key: str, model: str, text: str, timeout: int = 25, history: list | None = None, max_output_tokens: int = 0) -> dict:
     try:
-        return _generate(api_key, model, [{"text": text}], timeout, tools=True, contents=_contents(history, text))
+        return _generate(
+            api_key,
+            model,
+            [{"text": text}],
+            timeout,
+            tools=True,
+            contents=_contents(history, text),
+            max_output_tokens=max_output_tokens,
+        )
     except QuotaError as exc:
         return {"ok": False, "quota": True, "seconds": exc.seconds, "calls": [], "text": ""}
     except requests.RequestException as exc:

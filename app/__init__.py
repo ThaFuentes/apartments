@@ -20,7 +20,13 @@ def create_app() -> Flask:
 
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.config["SITE_MODE"] = "apt"
-    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY") or "apt-dev-key"
+    secret_key = os.getenv("SECRET_KEY")
+    if not secret_key:
+        if os.getenv("DEBUG_MODE", "false").lower() in {"1", "true", "yes"}:
+            secret_key = "apt-local-development-only-change-me"
+        else:
+            raise RuntimeError("SECRET_KEY must be configured before starting Apt outside DEBUG_MODE.")
+    app.config["SECRET_KEY"] = secret_key
     app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
@@ -44,6 +50,13 @@ def create_app() -> Flask:
     app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 14
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SECURE"] = os.getenv(
+        "SESSION_COOKIE_SECURE",
+        "false" if os.getenv("DEBUG_MODE", "false").lower() in {"1", "true", "yes"} else "true",
+    ).lower() in {"1", "true", "yes"}
+    app.config["SESSION_COOKIE_PATH"] = "/"
+    app.config["SESSION_COOKIE_DOMAIN"] = None
+    app.config["SESSION_REFRESH_EACH_REQUEST"] = False
 
     db.init_app(app)
     init_db(app)
@@ -106,6 +119,21 @@ def create_app() -> Flask:
     app.register_blueprint(bp)
 
     @app.before_request
+    def _bot_setup_wall():
+        if not getattr(current_user, "is_authenticated", False):
+            return None
+        if not bool(getattr(current_user, "is_bot", False)):
+            return None
+        from app.services.twofa import bot_setup_path_ok, bot_setup_remaining
+
+        if not bot_setup_remaining(current_user):
+            return None
+        path = request.path or ""
+        if bot_setup_path_ok(path):
+            return None
+        return redirect("/bot-setup")
+
+    @app.before_request
     def _viewer_cannot_mutate():
         if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
             return None
@@ -166,6 +194,10 @@ def create_app() -> Flask:
         pending_n = 0
         chat_lines = []
         chat_cards = []
+        can_manage_people = False
+        can_manage_regions = False
+        property_choices = []
+        header_property_id = None
         if getattr(current_user, "is_authenticated", False):
             from app.models import Notice, PendingAction
             from app.services.records import open_shift
@@ -176,11 +208,29 @@ def create_app() -> Flask:
                 place = shift.property.name
                 city = shift.property.city.name if shift.property.city else ""
                 confirmed = bool(shift.confirmed)
+                header_property_id = shift.property.id
+            try:
+                from app.services.parse import property_catalog
+                from app.services.context import current_property
+
+                property_choices = property_catalog(current_user)
+                here = current_property(current_user)
+                if here:
+                    place = here.name
+                    city = here.city.name if here.city else city
+                    header_property_id = here.id
+                    confirmed = True
+            except Exception:
+                db.session.rollback()
             if not city:
                 from app.services.records import site_profile
 
                 profile = site_profile()
                 city = (profile.default_city if profile else "") or city
+            from app.services.access.management import can_open_people_page, can_manage_regions as _can_manage_regions
+
+            can_manage_people = can_open_people_page(current_user)
+            can_manage_regions = _can_manage_regions(current_user)
             try:
                 share = share_state(current_user)
             except Exception:
@@ -214,6 +264,25 @@ def create_app() -> Flask:
                 for row in cards:
                     payload = _loads(row.payload_json)
                     parts = [line.strip() for line in (row.summary or "").splitlines() if line.strip()]
+                    place_line = ""
+                    pid = payload.get("property_id")
+                    name = (payload.get("property_name") or "").strip()
+                    city_name = (payload.get("city") or "").strip()
+                    if pid:
+                        from app.models import Property as _Property
+                        from app.services.records import property_place as _place
+
+                        prop = db.session.get(_Property, int(pid))
+                        if prop:
+                            place_line = _place(prop)
+                    if not place_line and name:
+                        place_line = f"{name} in {city_name}" if city_name else name
+                    if not place_line:
+                        for change in payload.get("_changes") or []:
+                            field = (change.get("field") or "").lower()
+                            if field in {"property", "site"} and change.get("after"):
+                                place_line = str(change.get("after"))
+                                break
                     chat_cards.append(
                         {
                             "id": row.id,
@@ -224,6 +293,7 @@ def create_app() -> Flask:
                             "changes": payload.get("_changes") or [],
                             "waiting_for": payload.get("waiting_for") or "",
                             "payload": payload,
+                            "place": place_line,
                         }
                     )
             else:
@@ -246,13 +316,17 @@ def create_app() -> Flask:
             "SITE_NAME": "Apt",
             "header_city": city or "City",
             "header_property": place or "Property",
+            "header_property_id": header_property_id,
             "header_confirmed": confirmed,
+            "property_choices": property_choices,
             "share": share,
             "notices": notices,
             "pending_n": pending_n,
             "chat_lines": chat_lines,
             "chat_cards": chat_cards,
             "chat_key": chat_key,
+            "can_manage_people": can_manage_people,
+            "can_manage_regions": can_manage_regions,
             "assistant_name": assistant_name,
             "drive": bool(request.cookies.get("apt_drive") == "1"),
         }

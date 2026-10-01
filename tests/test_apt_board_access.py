@@ -2,6 +2,35 @@
 from tests.apt_test_support import *  # noqa: F401,F403
 
 class AptTest07(AptTestBase):
+    def test_a_regional_manager_sees_their_region_in_places(self):
+        from app.models import Property, Region, RegionAccess, RegionCity
+        from app.services.browse import place_groups
+        from app.services.people import create_user
+        from app.services.records import ensure_property
+
+        owner = self.owner()
+        inside = ensure_property("Cedar Ridge", "Midland", "Texas", owner.id)
+        outside = ensure_property("Palm Grove", "Corpus Christi", "Texas", owner.id)
+        db.session.commit()
+        region = Region(name="Permian", created_at=utcnow())
+        db.session.add(region)
+        db.session.flush()
+        db.session.add(RegionCity(region_id=region.id, city_id=inside.city_id, created_at=utcnow()))
+        inside.region_id = region.id
+        manager, _generated = create_user(
+            username="rpermain", password="field-pass", display_name="Rita",
+            role="regional_manager", created_by=owner,
+        )
+        db.session.add(RegionAccess(user_id=manager.id, region_id=region.id, created_at=utcnow()))
+        db.session.commit()
+        names = {
+            place["name"]
+            for group in place_groups(user=manager)
+            for place in group["places"]
+        }
+        self.assertIn("Cedar Ridge", names)
+        self.assertNotIn("Palm Grove", names)
+
     def test_one_sentence_makes_an_office_manager_for_those_properties(self):
         from app.models import PropertyAccess
         from app.services.people import find_user
@@ -17,13 +46,23 @@ class AptTest07(AptTestBase):
             "create office manager jasmine who can edit units on woodview and brookview and be notified on woodview",
             idempotency_key="office-j",
         )
-        heard_words = (heard.get("reply") or "") + " " + self.save(owner)
-        self.assertIn("office manager", heard_words)
+        # The chat holds the login until it has a real name, number, and email.
+        self.assertIn("full name", (heard.get("reply") or "").lower())
+        self.assertIsNone(find_user("jasmine"))
+        answered = handle_message(
+            owner,
+            "Jasmine Carter, 432-555-0142, jasmine@example.com",
+            idempotency_key="office-j-details",
+        )
+        heard_words = (answered.get("reply") or "") + " " + self.save(owner)
         self.assertIn("Woodview", heard_words)
         self.assertIn("Brookview", heard_words)
         self.assertIn("Temporary password", heard_words)
         jasmine = find_user("jasmine")
-        self.assertEqual(jasmine.role, "field")
+        self.assertEqual(jasmine.role, "office")
+        self.assertEqual(jasmine.display_name, "Jasmine Carter")
+        self.assertEqual(jasmine.phone, "432-555-0142")
+        self.assertEqual(jasmine.email, "jasmine@example.com")
         wood_row = PropertyAccess.query.filter_by(user_id=jasmine.id, property_id=wood.id).one()
         brook_row = PropertyAccess.query.filter_by(user_id=jasmine.id, property_id=brook.id).one()
         self.assertTrue(wood_row.can_edit)

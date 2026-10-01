@@ -331,10 +331,14 @@ def apply_invite_viewer(user, payload, source) -> dict:
             display_name=payload.get("display_name") or username,
             role=role,
             email=payload.get("email") or None,
+            phone=payload.get("phone") or "",
             created_by=user,
             can_see_reports=payload.get("can_see_reports", True),
             can_see_history=payload.get("can_see_history", role != "viewer" or payload.get("can_see_history", True)),
             can_see_live_map=bool(payload.get("can_see_live_map", False)),
+            is_bot=bool(payload.get("is_bot")),
+            security_email=payload.get("security_email") or None,
+            reset_email=payload.get("reset_email") or None,
         )
     except ValueError as exc:
         return {"ok": False, "reply": str(exc)}
@@ -349,18 +353,35 @@ def apply_invite_viewer(user, payload, source) -> dict:
         "user",
         created.id,
         {},
-        {"username": created.username, "role": created.role, "email": created.email},
+        {"username": created.username, "role": created.role, "email": created.email, "phone": created.phone, "display_name": created.display_name},
     )
     from app.services.providers import ROLE_LABELS as ROLE_WORD
 
-    mail = created.email or "no email"
+    reach = ", ".join(bit for bit in (created.phone, created.email or "") if bit) or "no phone or email"
     secret = f" Temporary password: {generated}." if generated else ""
+    bot_note = ""
+    if created.is_bot:
+        bot_note = " Marked as a bot: first sign-in must turn on 2FA, and the reset inbox should be a different email from login and 2FA."
+    granted = []
+    for grant in payload.get("_grants") or []:
+        if not isinstance(grant, dict):
+            continue
+        result = apply_grant_access(user, {**grant, "username": created.username}, source)
+        if result.get("reply"):
+            granted.append(result["reply"])
     return {
         "ok": True,
-        "reply": (
-            f"Added {created.username} as {ROLE_WORD.get(created.role, created.role)} ({mail}). "
-            f"They sign in with that username.{secret} "
-            f"One-time link, 7 days: /join/{token}"
+        "reply": " ".join(
+            bit
+            for bit in (
+                (
+                    f"Added {created.display_name or created.username} as {ROLE_WORD.get(created.role, created.role)} ({reach}). "
+                    f"They sign in with that username.{secret}{bot_note} "
+                    f"One-time link, 7 days: /join/{token}"
+                ),
+                *granted,
+            )
+            if bit
         ),
         "user_id": created.id,
         "username": created.username,
@@ -422,18 +443,22 @@ def apply_update_viewer(user, payload, source) -> dict:
     target = find_person(payload.get("username") or "")
     if not target:
         return {"ok": False, "reply": "I can't find that login."}
-    from app.services.access import can_create_user, can_manage_user
+    from app.services.access import can_create_user, can_manage_user, role_of
 
-    if not can_manage_user(user, target):
+    if not can_manage_user(user, target) and not (role_of(user) == "owner" and target.id == user.id):
         return {"ok": False, "reply": "This login cannot manage that person."}
     wanted_role = normalize_role(payload.get("role") or "") if payload.get("role") else ""
     if payload.get("role") and not wanted_role:
-        return {"ok": False, "reply": "I don't know that role. Say owner, admin, regional manager, property manager, assistant manager, office, maintenance manager, or maintenance person."}
+        return {"ok": False, "reply": "I don't know that role. Say owner, admin, regional manager, regional property manager, property manager, assistant manager, office, maintenance supervisor, or maintenance person."}
+    if wanted_role and target.role == "owner":
+        wanted_role = ""
     if wanted_role and not can_create_user(user, wanted_role):
         return {"ok": False, "reply": "This login cannot assign that role."}
     before = {
         "role": target.role,
         "email": target.email,
+        "phone": target.phone,
+        "display_name": target.display_name,
         "can_see_reports": target.can_see_reports,
         "can_see_history": target.can_see_history,
         "can_see_live_map": target.can_see_live_map,
@@ -441,6 +466,31 @@ def apply_update_viewer(user, payload, source) -> dict:
     }
     if wanted_role:
         target.role = wanted_role
+    if "is_bot" in payload and payload["is_bot"] is not None:
+        make = bool(payload.get("is_bot"))
+        if make and target.role == "owner":
+            return {"ok": False, "reply": "The owner login cannot be a bot."}
+        if not make and target.is_bot and role_of(user) != "owner":
+            return {"ok": False, "reply": "Only an owner can unmark a bot. That clears 2FA."}
+        if not make and target.is_bot:
+            from app.services.twofa import turn_off
+
+            turn_off(target)
+        target.is_bot = make
+    if "security_email" in payload:
+        from app.services.people import clean_email
+
+        try:
+            target.security_email = clean_email(payload.get("security_email"))
+        except ValueError as exc:
+            return {"ok": False, "reply": str(exc)}
+    if "reset_email" in payload:
+        from app.services.people import clean_email
+
+        try:
+            target.reset_email = clean_email(payload.get("reset_email"))
+        except ValueError as exc:
+            return {"ok": False, "reply": str(exc)}
     if payload.get("clear_email"):
         first = User.query.filter_by(role="owner").order_by(User.id.asc()).first()
         if first and first.id == target.id:
@@ -458,11 +508,18 @@ def apply_update_viewer(user, payload, source) -> dict:
             setattr(target, flag, bool(payload[flag]))
     if payload.get("display_name"):
         target.display_name = str(payload["display_name"])[:150]
-    audit(user.id, source, "update", "user", target.id, before, {"role": target.role, "email": target.email, "active": target.active})
-    mail = target.email or "no email"
+    if payload.get("phone") is not None:
+        from app.services.people import clean_phone
+
+        try:
+            target.phone = clean_phone(payload.get("phone"))
+        except ValueError as exc:
+            return {"ok": False, "reply": str(exc)}
+    audit(user.id, source, "update", "user", target.id, before, {"role": target.role, "email": target.email, "phone": target.phone, "display_name": target.display_name, "active": target.active})
+    reach = ", ".join(bit for bit in (target.phone, target.email or "") if bit) or "no phone or email"
     return {
         "ok": True,
-        "reply": f"{target.label()} is {target.role}, {mail}. They'll see it when they log in again.",
+        "reply": f"{target.label()} is {target.role}, {reach}. They'll see it when they log in again.",
         "user_id": target.id,
     }
 

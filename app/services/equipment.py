@@ -79,6 +79,13 @@ def empty() -> dict:
         "model": "",
         "serial": "",
         "size": "",
+        "phone": "",
+        "vendor": "",
+        "parts_link": "",
+        "repair_notes": "",
+        "purchase_date": "",
+        "purchase_price": "",
+        "warranty_expires": "",
         "confidence": 0.0,
         "missing": [],
         "conflict": "",
@@ -121,6 +128,10 @@ def describe(row: dict | None) -> str:
         bits.append(f"model {row['model']}")
     if row.get("serial"):
         bits.append(f"serial {row['serial']}")
+    if row.get("vendor"):
+        bits.append(f"vendor {row['vendor']}")
+    if row.get("phone"):
+        bits.append(f"call {row['phone']}")
     return " ".join(bits).strip()
 
 
@@ -161,6 +172,18 @@ def parse_equipment(text: str) -> dict:
         row["size"] = f"{ton.group(1)} ton"
         if not row["kind"]:
             row["kind"] = "air conditioner"
+    for key, pattern in (
+        ("phone", r"\bphone\s*[:=]\s*([^,;]+)"),
+        ("vendor", r"\bvendor\s*[:=]\s*([^,;]+)"),
+        ("parts_link", r"\bparts(?:\s+link)?\s*[:=]\s*(https?://\S+)"),
+        ("repair_notes", r"\brepair(?:\s+notes?)?\s*[:=]\s*([^;]+)"),
+        ("purchase_date", r"\bpurchased?\s+(?:on\s+)?(\d{4}-\d{2}-\d{2})"),
+        ("purchase_price", r"\bpurchase\s+price\s*[:=]\s*\$?([0-9]+(?:\.[0-9]{1,2})?)"),
+        ("warranty_expires", r"\bwarranty\s+(?:through|expires?\s+on)\s+(\d{4}-\d{2}-\d{2})"),
+    ):
+        found = re.search(pattern, raw, re.I)
+        if found:
+            row[key] = found.group(1).strip().rstrip(".,")[:500]
     filled = [key for key in ("brand", "model", "serial", "size") if row[key]]
     if row["serial"] and (row["model"] or row["brand"]):
         row["confidence"] = 0.9
@@ -180,7 +203,7 @@ def merge_equipment(typed: dict | None, seen: dict | None) -> dict:
     base = empty()
     typed = typed or empty()
     seen = seen or empty()
-    for key in ("kind", "brand", "model", "serial", "size"):
+    for key in ("kind", "brand", "model", "serial", "size", "phone", "vendor", "parts_link", "repair_notes", "purchase_date", "purchase_price", "warranty_expires"):
         if (typed.get(key) or "").strip():
             base[key] = str(typed[key]).strip()
         elif (seen.get(key) or "").strip():
@@ -222,6 +245,8 @@ def plate_from_json(text: str) -> dict:
     row["model"] = str(data.get("model") or "").strip().upper()[:80]
     row["serial"] = str(data.get("serial") or "").strip().upper()[:80]
     row["size"] = str(data.get("size") or "").strip()[:40]
+    for key, limit in (("phone", 40), ("vendor", 120), ("parts_link", 500), ("repair_notes", 4000), ("purchase_date", 10), ("purchase_price", 24), ("warranty_expires", 10)):
+        row[key] = str(data.get(key) or "").strip()[:limit]
     try:
         row["confidence"] = float(data.get("confidence") or 0)
     except (TypeError, ValueError):
@@ -282,19 +307,28 @@ def read_photo(user, image: bytes, mime: str) -> dict:
     rows = [row for row in keys_for(user) if provider_spec(row.provider).get("vision")]
     if not rows:
         return empty()
+    from app.services import budget
+
     notes = []
     for cred in rows:
         from app.services.clock import utcnow
 
+        label = provider_spec(cred.provider).get("label") or cred.provider
         if cred.backoff_until and cred.backoff_until > utcnow():
-            notes.append(provider_spec(cred.provider).get("label") or cred.provider)
+            notes.append(label)
+            continue
+        if budget.would_exceed(cred, "", reply=1000 + budget.reply_cap(cred)):
+            notes.append(label)
             continue
         seen = read_image(cred, image, mime)
         if seen.get("quota"):
             cred.backoff_until = backoff_until(seen.get("seconds") or 60)
             db.session.commit()
-            notes.append(provider_spec(cred.provider).get("label") or cred.provider)
+            notes.append(label)
             continue
+        # The read cost tokens whether or not it found a nameplate.
+        cost = int(seen.pop("tokens", 0) or 0) or budget.IMAGE_TOKENS
+        budget.record(cred, cost)
         seen.pop("ok", None)
         if has_identity(seen) or seen.get("kind"):
             return seen

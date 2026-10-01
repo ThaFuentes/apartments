@@ -53,13 +53,20 @@
           .then(function (rows) {
             results.innerHTML = "";
             if (!rows.length) {
-              results.innerHTML = "<p class=\"lead\">Not on your sites yet. In chat: add " + q + " from the city to my sites.</p>";
+              const emptyMessage = document.createElement("p");
+              emptyMessage.className = "lead";
+              emptyMessage.textContent = "Not on your sites yet. In chat, ask to add “" + q + "” from its city to your sites.";
+              results.appendChild(emptyMessage);
               return;
             }
             rows.forEach(function (row) {
               const button = document.createElement("button");
               button.type = "button";
-              button.innerHTML = row.name + "<small>" + (row.city || "") + "</small>";
+              const name = document.createElement("span");
+              name.textContent = row.name || "";
+              const city = document.createElement("small");
+              city.textContent = row.city || "";
+              button.append(name, city);
               button.addEventListener("click", function () {
                 if (many && picked) {
                   if (picked.querySelector("[data-id='" + row.id + "']")) return;
@@ -106,6 +113,11 @@
         const hit = !q || blob.toLowerCase().indexOf(q) !== -1;
         card.hidden = !hit;
         if (hit) shown += 1;
+      });
+      list.querySelectorAll("[data-building-block]").forEach(function (block) {
+        const any = Array.prototype.some.call(block.querySelectorAll("[data-unit-card]"), function (card) { return !card.hidden; });
+        block.hidden = !any;
+        if (q && any) block.open = true;
       });
       if (empty) empty.hidden = shown !== 0;
     });
@@ -475,8 +487,9 @@
   }
 
   const install = document.getElementById("apt-install");
-  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
-  if (standalone) localStorage.setItem("apt-installed", "1");
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;      if (standalone) {
+        try { localStorage.setItem("apt-installed", "1"); } catch (err) {}
+      }
   window.addEventListener("appinstalled", function () {
     localStorage.setItem("apt-installed", "1");
     if (install) install.hidden = true;

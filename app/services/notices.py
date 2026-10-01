@@ -31,7 +31,7 @@ def _clear(user_id: int, kind: str) -> None:
 def refresh_notices(user) -> None:
     if not user or not getattr(user, "is_authenticated", False):
         return
-    if user.role == "viewer":
+    if user.is_viewer:
         return
     now = utcnow()
     old = (

@@ -9,6 +9,149 @@ from app.models import ApiCredential
 from app.services.talk.phrases import ADD_USER, AS_ROLE, EMAIL, GIVE_BOSS, PASSWORD, _ORDINALS, _STAFF_NAME_FIRST, _STAFF_ROLE_FIRST
 from app.services.talk.textutil import _role_word
 
+# A spoken number: 432-555-0100, (432) 555 0100, +1 432.555.0100.
+_SPOKEN_PHONE = re.compile(r"(?:\+?1[\s.-]?)?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})(?!\d)")
+_ROLE_WORDS = re.compile(
+    r"\b(?:owner|admin|administrator|regional|manager|managers|property|assistant|office|maintenance|supervisor|person|employee|worker|boss|viewer|field|read-only|readonly|bot)\b",
+    re.I,
+)
+_NAME_NOISE = re.compile(
+    r"\b(?:add|invite|create|make|login|logins|user|person|new|as|the|a|an|named|name|called|and|is|for|her|his|their|him|them|number|phone|cell|email|mail|full|also|who|can|edit|see|notify|units?|at|on)\b",
+    re.I,
+)
+
+
+def _phone_in(text: str) -> str:
+    match = _SPOKEN_PHONE.search(text or "")
+    if not match:
+        return ""
+    return f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
+
+
+def _name_in(text: str, username: str = "") -> str:
+    """The human name in her sentence, with the role, number, and email taken out."""
+    blob = EMAIL.sub(" ", text or "")
+    blob = _SPOKEN_PHONE.sub(" ", blob)
+    blob = _NAME_NOISE.sub(" ", blob)
+    blob = _ROLE_WORDS.sub(" ", blob)
+    words = [
+        word.strip(" .'-)")
+        for word in re.split(r"[^A-Za-z.'-]+", blob)
+        if len(word.strip(" .'-)")) > 1
+    ]
+    wanted = (username or "").strip().lower()
+    words = [word for word in words if word.lower() != wanted]
+    if not words or len(words) > 4:
+        return ""
+    return " ".join(word.capitalize() for word in words)
+
+
+def _missing_person_details(payload: dict) -> list[str]:
+    """A new login needs a real full name, a number, and an email before it is saved."""
+    name = (payload.get("display_name") or "").strip()
+    username = (payload.get("username") or "").strip()
+    missing = []
+    if not name or name.lower() == username.lower():
+        missing.append("full name")
+    if not (payload.get("phone") or "").strip():
+        missing.append("phone")
+    if not (payload.get("email") or "").strip():
+        missing.append("email")
+    return missing
+
+
+def _hold_for_details(user, payload: dict, role: str, key: str, source: str):
+    """Ask for the missing details instead of saving a half-filled login."""
+    from app.services.pending import propose
+    from app.services.providers import ROLE_LABELS
+
+    missing = _missing_person_details(payload)
+    if not missing:
+        return None
+    held = {
+        **payload,
+        "needs_answer": True,
+        "waiting_for": "person_details",
+        "asked": int(payload.get("asked") or 0) + 1,
+    }
+    who = payload.get("display_name") or payload.get("username") or "them"
+    summary = (
+        f"Add {who} as {ROLE_LABELS.get(role, role)}. I still need their {', '.join(missing)} "
+        "before this is saved. Say 'no email' if they have none. Nothing changes until then."
+    )
+    return propose(user, "invite_viewer", held, summary, "low", key, key, source)
+
+
+def _answer_person_details(user, text: str, key: str, source: str):
+    """She is answering the full name, number, and email question for a new login."""
+    from app.models import PendingAction
+    from app.services.records import dumps, loads
+
+    row = (
+        PendingAction.query.filter_by(user_id=user.id, tool="invite_viewer", status="needs_answer")
+        .order_by(PendingAction.id.desc())
+        .first()
+    )
+    if not row:
+        return None
+    payload = loads(row.payload_json)
+    if payload.get("waiting_for") != "person_details":
+        return None
+    raw = (text or "").strip()
+    if not raw:
+        return {"ok": True, "pending": True, "reply": row.summary}
+    low = raw.lower()
+    # The question may have scrolled away, so accept either the details
+    # themselves or an explicit "skip for now"; anything else is a new
+    # command and the question will be re-asked below.
+    skipping = bool(re.search(r"\b(?:skip|later|not now|never ?mind|forget it)\b", low))
+    email = EMAIL.search(raw)
+    phone = _phone_in(raw)
+    # Her answer is the details themselves, so the real name may repeat the username.
+    name = _name_in(raw, "")
+    said_none = {
+        "email": bool(re.search(r"\bno\s*(?:e-?mail)\b|\bwithout (?:an? )?e-?mail\b|\bno\s+address\b", low)),
+        "phone": bool(re.search(r"\bno\s*(?:phone|number|cell|mobile)\b|\bwithout (?:a )?(?:phone|number)\b", low)),
+    }
+    if not (email or phone or name or skipping or any(said_none.values())):
+        return None
+    if email:
+        payload["email"] = email.group(0)
+        payload["no_email"] = False
+    if phone:
+        payload["phone"] = phone
+        payload["no_phone"] = False
+    if name:
+        payload["display_name"] = name
+    if said_none["email"]:
+        payload["no_email"] = True
+        payload["email"] = ""
+    if said_none["phone"]:
+        payload["no_phone"] = True
+        payload["phone"] = ""
+    if skipping:
+        payload["no_email"] = True
+        payload["no_phone"] = True
+    missing = []
+    shown = (payload.get("display_name") or "").strip()
+    if not shown or shown.lower() == (payload.get("username") or "").strip().lower():
+        missing.append("full name")
+    if not (payload.get("phone") or "").strip() and not payload.get("no_phone"):
+        missing.append("phone")
+    if not (payload.get("email") or "").strip() and not payload.get("no_email"):
+        missing.append("email")
+    if missing:
+        payload["asked"] = int(payload.get("asked") or 1) + 1
+        row.payload_json = dumps(payload)
+        row.summary = f"Still need their {', '.join(missing)} for {payload.get('username')}. 'no email' or 'no phone' is fine if they have none."
+        row.status = "needs_answer"
+        db.session.commit()
+        return {"ok": True, "pending": True, "reply": row.summary}
+    from app.services.talk.interpret import _commit_waiting
+
+    # Her answer filled the card; the card still takes its own Save.
+    return _commit_waiting(user, row, "invite_viewer", payload, key, source)
+
 def _staff_clauses(rest: str) -> list[tuple[str, list[str]]]:
     rest = re.sub(r"^(?:who|that|she|he|they)\s+", "", (rest or "").strip(), flags=re.I)
     rest = re.sub(r"^can\s+(?:do\s+)?(?:her\s+|his\s+|their\s+)?", "", rest, flags=re.I)
@@ -68,8 +211,9 @@ def _staff_from_sentence(actor, text: str, key: str, source: str):
     if not existing and not can_create_user(actor, requested_role):
         return {"ok": False, "reply": "This login cannot create that role."}
     role = requested_role
+    deferred_grants = False
 
-    office = role_word.lower() == "office manager"
+    office = requested_role == "office"
     title = "office manager" if office else "employee" if role == "field" else role.replace("_", " ")
     clauses = _staff_clauses(raw[tail_at:])
     from app.services.pending import request_apply
@@ -88,27 +232,50 @@ def _staff_from_sentence(actor, text: str, key: str, source: str):
         )
         lines.append(changed.get("reply") or "")
     else:
+        mail = EMAIL.search(raw)
+        spoken_name = _name_in(raw, username)
+        invite_payload = {
+            "username": username,
+            "display_name": spoken_name or named,
+            "role": role,
+            "email": mail.group(0) if mail else "",
+            "phone": _phone_in(raw),
+            "password": (PASSWORD.search(raw).group(1) if PASSWORD.search(raw) else ""),
+            "can_see_reports": bool(re.search(r"\breports?\b", raw, re.I)),
+            "can_see_history": True,
+            "can_see_live_map": bool(re.search(r"\b(live map|the map)\b", raw, re.I)),
+            "_say": f"Add {spoken_name or named} as {title}.",
+        }
+        if clauses:
+            # The door clauses ride on the invite so they land when the person is
+            # actually created, whether that is now or after the details arrive.
+            invite_payload["_grants"] = [
+                {
+                    "property_name": hint,
+                    "see": True,
+                    "edit": True if mode == "edit" else False if mode == "see" else None,
+                    "notify": True if mode == "notify" else None,
+                }
+                for mode, hints in clauses
+                for hint in hints
+            ]
+            deferred_grants = True
+        held = _hold_for_details(actor, invite_payload, role, f"{key}:invite", source)
+        if held:
+            lines.append(held.get("reply") or "")
+            return {"ok": True, "reply": " ".join(bit for bit in lines if bit)}
         invited = request_apply(
             actor,
             "invite_viewer",
-            {
-                "username": username,
-                "display_name": named,
-                "role": role,
-                "email": (EMAIL.search(raw).group(0) if EMAIL.search(raw) else ""),
-                "password": (PASSWORD.search(raw).group(1) if PASSWORD.search(raw) else ""),
-                "can_see_reports": bool(re.search(r"\breports?\b", raw, re.I)),
-                "can_see_history": True,
-                "can_see_live_map": bool(re.search(r"\b(live map|the map)\b", raw, re.I)),
-                "_say": f"Add {named} as {title}.",
-            },
+            invite_payload,
             source,
             f"{key}:invite",
             batch_key=key,
         )
         lines.append(invited.get("reply") or "")
     count = 0
-    for mode, hints in clauses:
+    # Clauses that already ride on the invite must not be granted twice.
+    for mode, hints in ([] if deferred_grants else clauses):
         edit = True if mode == "edit" else False if mode == "see" else None
         notify = True if mode == "notify" else None
         for hint in hints:
@@ -122,7 +289,7 @@ def _staff_from_sentence(actor, text: str, key: str, source: str):
                 batch_key=key,
             )
             lines.append(granted.get("reply") or "")
-    if not clauses:
+    if not clauses and not deferred_grants:
         lines.append("Say which properties, like edit units on Woodview.")
     return {"ok": True, "reply": " ".join(bit for bit in lines if bit)}
 
@@ -241,18 +408,29 @@ def _person_to_add(user, text: str, key: str, source: str):
 
 def _offer_login(user, text, role_word: str, username: str, key: str, source: str) -> dict:
     role = _role_word(role_word)
+    from app.services.access import can_create_user
+    from app.services.people import find_user
+
+    if find_user(username):
+        return {"ok": False, "reply": f"{username} already has a login."}
+    if not can_create_user(user, role):
+        return {"ok": False, "reply": "This login cannot create that role."}
     email = EMAIL.search(text)
     password = PASSWORD.search(text)
     payload = {
         "username": username,
-        "display_name": username.replace(".", " ").replace("_", " ").title(),
+        "display_name": _name_in(text, username) or username.replace(".", " ").replace("_", " ").title(),
         "role": role,
         "email": email.group(0) if email else "",
+        "phone": _phone_in(text),
         "password": password.group(1) if password else "",
         "can_see_reports": True,
         "can_see_history": True,
         "can_see_live_map": False,
     }
+    held = _hold_for_details(user, payload, role, key, source)
+    if held:
+        return held
     from app.services.pending import commit_apply
 
     return commit_apply(user, "invite_viewer", payload, source, key)

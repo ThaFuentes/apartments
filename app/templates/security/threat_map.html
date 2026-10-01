@@ -1,0 +1,114 @@
+{% extends "security/base.html" %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='security/threat-map/threat-map.css') }}?v=apt1">
+{% endblock %}
+{% block security_content %}
+<div class="tm-wrap" id="tm-wrap" data-tm-alert="{{ alert_url or '' }}">
+  <div class="tm-toolbar">
+    <div class="tm-windows" role="tablist" aria-label="Time window">
+      <button type="button" class="tm-win" data-window="lifetime">Lifetime</button>
+      <button type="button" class="tm-win" data-window="30d">30 day</button>
+      <button type="button" class="tm-win" data-window="7d">7 day</button>
+      <button type="button" class="tm-win" data-window="24h">24 hour</button>
+      <button type="button" class="tm-win tm-win-live is-on" data-window="live">LIVE</button>
+    </div>
+    <div class="tm-playbar">
+      <button type="button" class="tm-play" id="tm-play">Play replay</button>
+      <div class="tm-speeds" role="group" aria-label="Replay pace">
+        <button type="button" class="tm-speed is-on" data-speed="1">1x</button>
+        <button type="button" class="tm-speed" data-speed="2">2x</button>
+        <button type="button" class="tm-speed" data-speed="4">4x</button>
+        <button type="button" class="tm-speed" data-speed="8">8x</button>
+        <button type="button" class="tm-speed" data-speed="16">16x</button>
+        <button type="button" class="tm-speed" data-speed="32">32x</button>
+      </div>
+      <span class="tm-play-status" id="tm-play-status">idle</span>
+    </div>
+    <div class="tm-stats" id="tm-stats">
+      <span data-k="total">—</span> events
+      · <span data-k="ips">—</span> IPs
+      · <span data-k="ccs">—</span> countries
+      <span data-k="life-wrap" hidden> · <span data-k="life">—</span> lifetime</span>
+      · <span data-k="ms" class="tm-dim"></span>
+    </div>
+    <div class="tm-pulse" id="tm-pulse" hidden>checking live feed…</div>
+  </div>
+  <div class="tm-stage">
+    <svg id="tm-svg" role="img" aria-label="World threat map"></svg>
+    <canvas id="tm-fx"></canvas>
+    <div class="tm-banner" id="tm-banner" hidden>
+      <div class="tm-banner-tag" id="tm-banner-tag">LIVE HIT</div>
+      <div class="tm-banner-msg" id="tm-banner-msg"></div>
+    </div>
+    <div class="tm-feed" id="tm-feed" aria-live="polite"></div>
+    <div class="tm-hud" id="tm-hud" hidden></div>
+    <div class="tm-load" id="tm-load" hidden>
+      <div class="tm-load-card">
+        <div class="tm-load-spin" aria-hidden="true"></div>
+        <strong id="tm-load-title">Loading large replay</strong>
+        <span id="tm-load-msg">Waiting…</span>
+        <div class="tm-load-bar" aria-hidden="true"><i id="tm-load-fill"></i></div>
+      </div>
+    </div>
+    <div class="tm-arm" id="tm-arm" data-state="standby" aria-live="polite">
+      <div class="tm-arm-frame">
+        <div class="tm-arm-head">
+          <span class="tm-arm-sys">WPN SYS // APT</span>
+          <span class="tm-arm-link" id="tm-arm-link">NO LINK</span>
+        </div>
+        <div class="tm-arm-word" id="tm-arm-word">STANDBY</div>
+        <div class="tm-arm-bar" aria-hidden="true"><i></i></div>
+        <div class="tm-arm-sub" id="tm-arm-sub">SENSORS COLD</div>
+      </div>
+    </div>
+    <aside class="tm-drawer" id="tm-drawer" hidden>
+      <button type="button" class="tm-drawer-close" id="tm-close" aria-label="Close">×</button>
+      <h2 id="tm-drawer-title">Country</h2>
+      <div class="tm-drawer-modes" role="tablist" aria-label="Country time range">
+        <button type="button" class="tm-dmode is-on" id="tm-dmode-window" data-mode="window">Live</button>
+        <button type="button" class="tm-dmode" id="tm-dmode-history" data-mode="history">History</button>
+      </div>
+      <p class="tm-dim" id="tm-drawer-sub"></p>
+      <p class="tm-drawer-pulse" id="tm-drawer-pulse" hidden></p>
+      <h3 id="tm-drawer-fam-h">Attack types</h3>
+      <ul class="tm-fam" id="tm-drawer-fams"></ul>
+      <div id="tm-drawer-users-wrap">
+        <h3>Known accounts</h3>
+        <ul class="tm-users" id="tm-drawer-users"></ul>
+      </div>
+      <h3 id="tm-drawer-ips-h">Sample sources</h3>
+      <ul class="tm-ips" id="tm-drawer-ips"></ul>
+    </aside>
+  </div>
+  <section class="tm-board" id="tm-board">
+    <div class="tm-board-top">
+      <div>
+        <h3>Live stats</h3>
+        <p class="tm-dim" id="tm-board-sub">—</p>
+      </div>
+      <div class="tm-legend" aria-hidden="true">
+        <span><i class="tm-leg-quiet"></i> Quiet</span>
+        <span><i class="tm-leg-hot"></i> Attacks</span>
+        <span><i class="tm-leg-heavy"></i> Heavy</span>
+      </div>
+    </div>
+    <div class="tm-board-grid">
+      <div>
+        <h4>Attack types</h4>
+        <ul class="tm-board-list" id="tm-board-fams"></ul>
+      </div>
+      <div>
+        <h4>Top origins</h4>
+        <ul class="tm-board-list" id="tm-board-ccs"></ul>
+      </div>
+      <div>
+        <h4 id="tm-board-recent-h">Recent hits</h4>
+        <ul class="tm-board-list tm-board-recent" id="tm-board-recent"></ul>
+      </div>
+    </div>
+  </section>
+</div>
+<script src="{{ url_for('static', filename='security/threat-map/vendor/d3.min.js') }}"></script>
+<script src="{{ url_for('static', filename='security/threat-map/vendor/topojson-client.min.js') }}"></script>
+<script src="{{ url_for('static', filename='security/threat-map/threat-map.js') }}?v=apt1"></script>
+{% endblock %}

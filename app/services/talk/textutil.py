@@ -75,10 +75,11 @@ def _role_word(word: str) -> str:
         "admin": "admin",
         "regional": "regional_manager",
         "regional manager": "regional_manager",
+        "regional property manager": "regional_property_manager",
         "property manager": "property_manager",
         "assistant manager": "assistant_manager",
         "office": "office",
-        "office manager": "field",
+        "office manager": "office",
         "maintenance manager": "maintenance_manager",
         "maintenance regional": "maintenance_regional",
         "maintenance regional manager": "maintenance_regional",
@@ -88,8 +89,8 @@ def _role_word(word: str) -> str:
         "employee": "field",
         "field": "field",
         "worker": "field",
-        "boss": "office",
-        "viewer": "office",
+        "boss": "viewer",
+        "viewer": "viewer",
         "owner": "owner",
     }
     return roles.get(" ".join((word or "").lower().split()), "office")

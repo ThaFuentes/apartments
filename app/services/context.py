@@ -20,11 +20,20 @@ def _visible(user, prop: Property | None) -> Property | None:
     return prop if can_see_property(user, prop.id) else None
 
 
-def remembered_property(user) -> Property | None:
+def personal_default_property(user) -> Property | None:
     prop_id = getattr(user, "default_property_id", None)
     if not prop_id:
         return None
     return _visible(user, db.session.get(Property, int(prop_id)))
+
+
+def remembered_property(user) -> Property | None:
+    """Use an inherited team lock unless policy lets this person choose."""
+    from app.services.access.management import can_choose_own_default_property, inherited_default_property
+
+    if not can_choose_own_default_property(user):
+        return _visible(user, inherited_default_property(user))
+    return personal_default_property(user)
 
 
 def only_property(user) -> Property | None:
@@ -32,6 +41,15 @@ def only_property(user) -> Property | None:
 
     props = property_catalog(user)
     return _visible(user, props[0]) if len(props) == 1 else None
+
+
+SITE_BOUND_ROLES = {
+    "office",
+    "assistant_manager",
+    "maintenance_supervisor",
+    "maintenance_manager",
+    "maintenance_person",
+}
 
 
 def current_property(user) -> Property | None:
@@ -45,9 +63,17 @@ def current_property(user) -> Property | None:
         prop = _visible(user, shift.property or db.session.get(Property, shift.property_id))
         if prop:
             return prop
+    from app.services.access.core import access_map, role_of
+
+    if role_of(user) in SITE_BOUND_ROLES:
+        assigned = set(access_map(user))
+        if len(assigned) == 1:
+            return _visible(user, db.session.get(Property, next(iter(assigned))))
     if getattr(user, "default_property_confirmed", False):
         return remembered_property(user)
-    return None
+    from app.services.access.management import inherited_default_property
+
+    return _visible(user, inherited_default_property(user))
 
 
 def context_lines(user) -> list[str]:
@@ -64,7 +90,12 @@ def context_lines(user) -> list[str]:
     elif shift and not shift.confirmed:
         lines.append("ONSITE PROPERTY CHECK REQUIRED: a visit is open but not confirmed. Ask whether the saved property is the one she is at before property/unit work; do not use the remembered default instead.")
     if remembered:
-        if getattr(user, "default_property_confirmed", False):
+        from app.services.access.management import inherited_default_property
+
+        inherited = inherited_default_property(user)
+        if inherited and not getattr(user, "default_property_confirmed", False):
+            status = "This is assigned by the property manager and is locked unless the manager or regional policy opens the choice. Do not offer to change it."
+        elif getattr(user, "default_property_confirmed", False):
             status = "She has confirmed this usual site; do not ask again until she changes it."
         else:
             status = (
@@ -202,6 +233,12 @@ def default_reminder_answer(text: str) -> bool | None:
 
 def apply_set_default(user, payload: dict, source: str) -> dict:
     source = (source or "").strip().lower() or "human"
+    from app.services.access.management import can_choose_own_default_property
+
+    if not can_choose_own_default_property(user):
+        inherited = remembered_property(user)
+        where = f"{property_place(inherited)}" if inherited else "your assigned property"
+        return {"ok": False, "reply": f"Your property manager has set {where} as your default. Ask them or a regional manager to open up your default-property choice."}
     prop = None
     if payload.get("property_id"):
         prop = db.session.get(Property, int(payload["property_id"]))
@@ -231,6 +268,10 @@ def remember_reply(user) -> str:
 
 
 def clear_default(user, source: str = "human") -> dict:
+    from app.services.access.management import can_choose_own_default_property
+
+    if not can_choose_own_default_property(user):
+        return {"ok": False, "reply": "Your property manager has set your default property. Ask them or a regional manager to open up your default-property choice."}
     before = user.default_property_id
     before_confirmed = bool(user.default_property_confirmed)
     if not before:
@@ -247,6 +288,10 @@ def prompt_default_for_onsite(user, source: str = "ai", key: str = "") -> dict |
     shift = open_shift(user)
     prop = _visible(user, shift.property if shift and shift.confirmed else None)
     if not prop:
+        return None
+    from app.services.access.management import can_choose_own_default_property
+
+    if not can_choose_own_default_property(user):
         return None
     if getattr(user, "default_property_id", None) == prop.id and getattr(user, "default_property_confirmed", False):
         return None

@@ -7,10 +7,13 @@ matching — lives here so no module imports another applier module.
 """
 from __future__ import annotations
 
+import json
 import re
+from datetime import date
+from urllib.parse import urlsplit
 
 from app.builddb.builddb import db
-from app.models import Equipment, Expense, Job, Property, Trip
+from app.models import Equipment, EquipmentTemplate, Expense, Job, Property, Trip
 from app.services.clock import utcnow
 from app.services.geo import geocode, haversine_miles, lookup_place
 from app.services.records import audit, open_shift
@@ -51,7 +54,13 @@ def _locate_property(prop: Property, name: str, city: str, region: str, given_ad
 
     found = lookup_place(name, city, region)
     if not found:
+        # No web hit: still give the property a city-level pin so mileage and
+        # maps work with the address she can type later.
         _pin_property(prop, "")
+        if prop.lat is None and prop.city is not None:
+            point = geocode("\n".join(bit for bit in (prop.city.name, prop.city.region) if bit) or "")
+            if point:
+                prop.lat, prop.lng = point
         return prop.address or ""
     prop.address = found["address"][:300]
     if found.get("lat") is not None and found.get("lng") is not None:
@@ -88,11 +97,43 @@ def _worked_stamp(value, tz_name: str | None):
     return local.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-_PIECE_KEYS = ("kind", "brand", "model", "serial", "size", "style", "color", "notes", "note")
+_PIECE_KEYS = (
+    "kind", "brand", "model", "serial", "size", "style", "color", "notes", "note",
+    "phone", "vendor", "purchase_date", "purchase_price", "warranty_expires",
+    "repair_notes", "parts_link", "template_id",
+)
 
 
 def _clip(value, limit: int) -> str:
     return str(value or "").strip()[:limit]
+
+
+def _equipment_date(value):
+    raw = _clip(value, 10)
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _equipment_price(value):
+    if value in (None, ""):
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    return amount if 0 <= amount <= 1_000_000 else None
+
+
+def _equipment_template_id(value, property_id):
+    try:
+        row = db.session.get(EquipmentTemplate, int(value)) if value else None
+    except (TypeError, ValueError):
+        return None
+    return row.id if row and row.property_id == property_id else None
 
 
 def _piece_filled(eq: dict) -> bool:
@@ -118,6 +159,10 @@ def _piece_view(row) -> dict:
         "size": row.size_label,
         "model": row.model_number,
         "serial": row.serial_number,
+        "phone": row.phone,
+        "vendor": row.vendor,
+        "parts_link": row.parts_link,
+        "repair_notes": row.repair_notes,
     }
 
 
@@ -139,6 +184,66 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
     style = _clip(eq.get("style"), 80)
     color = _clip(eq.get("color"), 40)
     note = _clip(eq.get("notes") if eq.get("notes") is not None else eq.get("note"), 2000)
+    phone = _clip(eq.get("phone"), 40)
+    vendor = _clip(eq.get("vendor"), 120)
+    repair_notes = _clip(eq.get("repair_notes"), 4000)
+    parts_link = _clip(eq.get("parts_link"), 500)
+    parsed_link = urlsplit(parts_link) if parts_link else None
+    if parsed_link and parsed_link.scheme.lower() not in {"http", "https"}:
+        parts_link = ""
+    purchase_date = _equipment_date(eq.get("purchase_date"))
+    warranty_expires = _equipment_date(eq.get("warranty_expires"))
+    purchase_price = _equipment_price(eq.get("purchase_price"))
+    template_id = _equipment_template_id(eq.get("template_id"), property_id)
+    if serial:
+        existing_serial = Equipment.query.filter(
+            Equipment.deleted_at.is_(None), Equipment.property_id == property_id,
+            db.func.upper(Equipment.serial_number) == serial,
+        ).first()
+        if existing_serial and (unit is None or existing_serial.unit_id != unit.id):
+            return None, [existing_serial]
+    if not template_id and kind and model:
+        template = EquipmentTemplate.query.filter_by(
+            property_id=property_id, kind=kind, brand=brand, model_number=model
+        ).first()
+        if template is None:
+            template = EquipmentTemplate(
+                property_id=property_id,
+                kind=kind,
+                brand=brand,
+                model_number=model,
+                size_label=size,
+                style=style,
+                color=color,
+                notes=note,
+            phone=phone,
+            vendor=vendor,
+            parts_link=parts_link,
+            created_by_id=user.id,
+            )
+            db.session.add(template)
+            db.session.flush()
+        template_id = template.id
+        size = size or template.size_label
+        style = style or template.style
+        color = color or template.color
+        note = note or template.notes
+        phone = phone or template.phone
+        vendor = vendor or template.vendor
+        parts_link = parts_link or template.parts_link
+    elif template_id:
+        template = db.session.get(EquipmentTemplate, template_id)
+        if template:
+            kind = kind or template.kind
+            brand = brand or template.brand
+            model = model or template.model_number
+            size = size or template.size_label
+            style = style or template.style
+            color = color or template.color
+            note = note or template.notes
+            phone = phone or template.phone
+            vendor = vendor or template.vendor
+            parts_link = parts_link or template.parts_link
     query = Equipment.query.filter(Equipment.deleted_at.is_(None), Equipment.property_id == property_id)
     if unit is not None:
         query = query.filter(Equipment.unit_id == unit.id)
@@ -175,6 +280,9 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
         "kind": target.kind, "brand": target.brand, "style": target.style,
         "model": target.model_number, "serial": target.serial_number,
         "size": target.size_label, "color": target.color, "notes": target.notes,
+        "phone": target.phone, "vendor": target.vendor, "purchase_date": target.purchase_date,
+        "purchase_price": target.purchase_price, "warranty_expires": target.warranty_expires,
+        "repair_notes": target.repair_notes, "parts_link": target.parts_link,
         "unit_id": target.unit_id, "property_id": target.property_id,
     }
     if created:
@@ -182,6 +290,7 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
             property_id=property_id,
             unit_id=unit.id if unit else None,
             job_id=job.id if job else None,
+            template_id=template_id,
             kind=kind,
             brand=brand,
             model_number=model,
@@ -190,6 +299,13 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
             style=style,
             color=color,
             notes=note,
+            phone=phone,
+            vendor=vendor,
+            purchase_date=purchase_date,
+            purchase_price=purchase_price,
+            warranty_expires=warranty_expires,
+            repair_notes=repair_notes,
+            parts_link=parts_link,
             confidence=float(eq["confidence"]) if eq.get("confidence") not in (None, "") else None,
             source=source,
             created_by_id=user.id,
@@ -214,6 +330,22 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
             row.color = color
         if note:
             row.notes = note
+        if phone:
+            row.phone = phone
+        if vendor:
+            row.vendor = vendor
+        if parts_link:
+            row.parts_link = parts_link
+        if purchase_date:
+            row.purchase_date = purchase_date
+        if purchase_price is not None:
+            row.purchase_price = purchase_price
+        if warranty_expires:
+            row.warranty_expires = warranty_expires
+        if repair_notes:
+            row.repair_notes = repair_notes
+        if template_id and not row.template_id:
+            row.template_id = template_id
         if job and not row.job_id:
             row.job_id = job.id
     if job:
@@ -249,11 +381,50 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
             "size": row.size_label,
             "color": row.color,
             "notes": row.notes,
+            "phone": row.phone,
+            "vendor": row.vendor,
+            "purchase_date": row.purchase_date.isoformat() if row.purchase_date else None,
+            "purchase_price": row.purchase_price,
+            "warranty_expires": row.warranty_expires.isoformat() if row.warranty_expires else None,
+            "repair_notes": row.repair_notes,
+            "parts_link": row.parts_link,
             "unit_id": row.unit_id,
             "property_id": row.property_id,
+            "template_id": row.template_id,
         },
     )
     row._apt_created = created
+    if created and unit is not None:
+        from app.models import EquipmentMove
+
+        snapshot = {
+            "kind": row.kind, "brand": row.brand, "model": row.model_number,
+            "serial": row.serial_number, "size": row.size_label, "style": row.style,
+            "color": row.color, "vendor": row.vendor, "phone": row.phone,
+        }
+        install_move = EquipmentMove(
+            equipment_id=row.id,
+            from_unit_id=None,
+            to_unit_id=unit.id,
+            from_unit_number="",
+            to_unit_number=unit.unit_number,
+            event_type="install",
+            source_inventory_missing=False,
+            equipment_snapshot=json.dumps(snapshot),
+            from_property_id=property_id,
+            to_property_id=property_id,
+            moved_by_id=user.id,
+            reason="Equipment record added to unit inventory",
+            note=note,
+            created_at=utcnow(),
+        )
+        db.session.add(install_move)
+        db.session.flush()
+        audit(user.id, source, "install", "equipment", row.id, {}, {
+            **snapshot, "property_id": property_id, "unit_id": unit.id,
+            "title": f"Installed {row.kind or 'equipment'} in unit {unit.unit_number}",
+            "related_unit_ids": [unit.id], "move_id": install_move.id,
+        })
     return row, []
 
 

@@ -12,7 +12,17 @@ CAPS = [
             "unit 12 is make-ready",
             "nobody home at 14, skipping",
         ),
-        howto="Say the unit number and what you did. One job per unit. Appliances save with their own serial and notes.",
+        howto="Say the unit number and what you did. One job per unit. Appliances save with their own serial and notes; say model and serial when you have them.",
+    ),
+    Capability(
+        tool="move_equipment",
+        label="install, remove, or move equipment",
+        says=(
+            "move the washer from unit 200 to unit 403",
+            "remove the old fridge from unit 12",
+            "installed a dryer model W123 serial S456 in unit 8",
+        ),
+        howto="Say install, remove, or move with the appliance and unit numbers. If the old unit has no saved inventory, Apt records that gap and starts a traceable item at the destination; it will not invent a serial.",
     ),
     Capability(
         tool="unit_board",

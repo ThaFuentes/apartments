@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}New password{% endblock %}
+{% block main %}
+<section class="hero narrow">
+  <h1>Choose a new password</h1>
+  <form method="post" action="/reset/{{ token }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>New password <input name="password" type="password" minlength="8" autocomplete="new-password" required></label>
+    <label>Again <input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label>
+    <button type="submit">Save password</button>
+  </form>
+</section>
+{% endblock %}

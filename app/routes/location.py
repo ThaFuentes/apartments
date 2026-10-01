@@ -16,7 +16,7 @@ from app.routes.common import bp, login_required, _history_ok, _key, _new_key
 @bp.get("/map")
 @login_required
 def map_page():
-    if current_user.role == "viewer" and not current_user.can_see_live_map and not current_user.can_see_history:
+    if current_user.is_viewer and not current_user.can_see_live_map and not current_user.can_see_history:
         abort(403)
     props = Property.query.filter(Property.deleted_at.is_(None), Property.lat.isnot(None)).all()
     pins = [
@@ -41,7 +41,7 @@ def map_page():
 @bp.post("/share")
 @login_required
 def share_toggle():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.share import start_share, stop_share
     from app.services.records import open_shift
@@ -61,7 +61,7 @@ def share_toggle():
 @bp.post("/api/ping")
 @login_required
 def ping():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.share import add_ping
 
@@ -112,7 +112,7 @@ def pack(property_id):
 @bp.post("/media")
 @login_required
 def upload():
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     blob = request.files.get("photo")
     if not blob:
@@ -217,7 +217,7 @@ def _photo_proposal(user, media, merged, quota: str) -> dict:
 @bp.get("/media/<int:media_id>")
 @login_required
 def media_file(media_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     media = db.session.get(Media, media_id)
     if not media:

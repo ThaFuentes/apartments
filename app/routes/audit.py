@@ -1,0 +1,100 @@
+"""The audit log: who changed what, on which unit, with the before and after."""
+from __future__ import annotations
+
+from datetime import timedelta
+
+from flask import abort, render_template, request
+from flask_login import current_user
+
+from app.builddb.builddb import db
+from app.models import Property, UnitChange, User
+from app.routes.common import bp, login_required
+from app.services.access import can_read_history, visible_property_ids
+from app.services.clock import utcnow
+from app.services.records import loads
+
+# Fields that are plumbing, not a change someone wants to read.
+_QUIET = {"property_id", "unit_id", "related_unit_ids", "deleted_at", "id"}
+
+
+@bp.get("/audit")
+@login_required
+def audit_log():
+    """Every recorded change on the properties this login can see."""
+    if not can_read_history(current_user):
+        abort(403)
+    allowed = visible_property_ids(current_user)
+    properties = (
+        Property.query.filter(Property.id.in_(allowed), Property.deleted_at.is_(None))
+        .order_by(Property.name.asc())
+        .all()
+        if allowed
+        else []
+    )
+    filters = {
+        "property": (request.args.get("property") or "").strip(),
+        "who": (request.args.get("who") or "").strip(),
+        "action": (request.args.get("action") or "").strip(),
+        "source": (request.args.get("source") or "").strip(),
+        "days": (request.args.get("days") or "14").strip(),
+    }
+    try:
+        days = max(1, min(180, int(filters["days"] or 14)))
+    except ValueError:
+        days = 14
+    rows = []
+    total = 0
+    if allowed:
+        query = UnitChange.query.filter(UnitChange.property_id.in_(allowed))
+        if filters["property"]:
+            try:
+                query = query.filter(UnitChange.property_id == int(filters["property"]))
+            except ValueError:
+                query = query.filter(UnitChange.property_id.in_([]))
+        if filters["who"]:
+            query = query.join(User, User.id == UnitChange.actor_id).filter(
+                db.or_(
+                    User.username.ilike(f"%{filters['who']}%"),
+                    User.display_name.ilike(f"%{filters['who']}%"),
+                )
+            )
+        if filters["action"]:
+            query = query.filter(UnitChange.action.ilike(f"%{filters['action']}%"))
+        if filters["source"] in ("ai", "human"):
+            query = query.filter(UnitChange.source == filters["source"])
+        query = query.filter(UnitChange.created_at >= utcnow() - timedelta(days=days))
+        total = query.count()
+        rows = query.order_by(UnitChange.id.desc()).limit(300).all()
+    entries = []
+    for row in rows:
+        detail = loads(row.details_json)
+        before = detail.get("before") if isinstance(detail.get("before"), dict) else {}
+        after = detail.get("after") if isinstance(detail.get("after"), dict) else {}
+        changes = [
+            {"field": key, "before": before.get(key, "—"), "after": value}
+            for key, value in after.items()
+            if key not in _QUIET and before.get(key) != value
+        ]
+        entries.append(
+            {
+                "when": row.created_at,
+                "who": row.actor.label() if row.actor else "a removed login",
+                "source": row.source,
+                "property": row.unit.property.name if row.unit and row.unit.property else "",
+                "unit": row.unit.unit_number if row.unit else "",
+                "action": row.action,
+                "summary": row.summary,
+                "changes": changes,
+            }
+        )
+    owner_console = getattr(current_user, "role", "") == "owner"
+    return render_template(
+        "audit.html",
+        entries=entries,
+        properties=properties,
+        filters=filters,
+        days=days,
+        total=total,
+        shown=len(entries),
+        owner_console=owner_console,
+    )

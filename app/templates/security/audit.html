@@ -1,0 +1,30 @@
+{% extends "security/base.html" %}
+{% block security_content %}
+<p class="sec-lead">Every product write. Reverse restores a delete, re-deletes a restore, or puts an update back to the earlier values.</p>
+<form method="get" class="sec-filters">
+  <label>Days <input name="days" value="{{ days }}" inputmode="numeric"></label>
+  <button type="submit">Show</button>
+</form>
+<table class="sec-table">
+  <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Record</th><th></th></tr></thead>
+  <tbody>
+  {% for row in entries %}
+    <tr>
+      <td>{{ row.when|apt_datetime }}</td>
+      <td>{{ row.who }} · {{ row.source }}</td>
+      <td>{{ row.action }}</td>
+      <td>{{ row.entity }} {{ row.entity_id or "" }}</td>
+      <td>
+        {% if row.reversible %}
+        <form method="post" action="/security/audit/{{ row.id }}/reverse">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="ghost" type="submit">Reverse</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% if not entries %}<p class="sec-muted">No product audit rows in this window.</p>{% endif %}
+{% endblock %}

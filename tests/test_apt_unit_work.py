@@ -2,6 +2,83 @@
 from tests.apt_test_support import *  # noqa: F401,F403
 
 class AptTest04(AptTestBase):
+    def test_move_with_missing_source_inventory_creates_auditable_destination_record(self):
+        from app.models import Equipment, EquipmentMove, UnitChange
+        from app.services.appliers_units import apply_move_equipment
+        from app.services.records import ensure_property, loads
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        source_unit = Unit(property_id=prop.id, unit_number="200", created_by_id=user.id, created_at=utcnow())
+        db.session.add(source_unit)
+        db.session.commit()
+
+        result = apply_move_equipment(user, {
+            "property_id": prop.id,
+            "source_unit_number": "200",
+            "target_unit_number": "403",
+            "kind": "washer",
+            "item_hint": "GE washer model WTW5000 serial SN-403",
+        }, "human")
+        self.assertTrue(result["ok"], result)
+        item = db.session.get(Equipment, result["equipment_id"])
+        move = db.session.get(EquipmentMove, result["move_id"])
+        self.assertEqual(item.unit.unit_number, "403")
+        self.assertEqual(item.serial_number, "SN-403")
+        self.assertEqual(move.event_type, "install")
+        self.assertTrue(move.source_inventory_missing)
+        self.assertEqual((move.from_unit_number, move.to_unit_number), ("200", "403"))
+        self.assertEqual(loads(move.equipment_snapshot)["model"], "WTW5000")
+        self.assertEqual(UnitChange.query.filter_by(unit_id=source_unit.id).count(), 1)
+        self.assertGreaterEqual(UnitChange.query.filter_by(unit_id=item.unit_id).count(), 1)
+
+    def test_same_model_reuses_template_but_keeps_serials_per_unit(self):
+        from app.models import Equipment, EquipmentTemplate
+        from app.services.appliers_common import file_piece
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        first = Unit(property_id=prop.id, unit_number="12", created_by_id=user.id, created_at=utcnow())
+        second = Unit(property_id=prop.id, unit_number="26", created_by_id=user.id, created_at=utcnow())
+        db.session.add_all([first, second])
+        db.session.flush()
+        shared = {"kind": "washer", "brand": "GE", "model": "WTW5000", "vendor": "Parts Co", "phone": "432-555-0100", "purchase_date": "2026-09-01", "purchase_price": "499.99", "warranty_expires": "2028-09-01", "serial": "SN-12"}
+        one, _ = file_piece(user, shared, first, None, prop.id, "human")
+        two, _ = file_piece(user, {**shared, "serial": "SN-26", "parts_link": "javascript:alert(1)"}, second, None, prop.id, "human")
+        db.session.commit()
+
+        self.assertNotEqual(one.id, two.id)
+        self.assertNotEqual(one.serial_number, two.serial_number)
+        self.assertEqual(one.template_id, two.template_id)
+        self.assertEqual(EquipmentTemplate.query.count(), 1)
+        self.assertEqual(two.vendor, "Parts Co")
+        self.assertEqual(two.phone, "432-555-0100")
+        self.assertEqual(two.parts_link, "")
+        self.assertEqual(one.purchase_date.isoformat(), "2026-09-01")
+        self.assertEqual(one.purchase_price, 499.99)
+        self.assertEqual(one.warranty_expires.isoformat(), "2028-09-01")
+
+    def test_building_blocks_report_the_unit_span(self):
+        from app.models import Unit
+        from app.services.browse import unit_cards
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Cedar Ridge", "Midland", "Texas", user.id)
+        db.session.commit()
+        for number, building in (("100", "1"), ("110", "1"), ("120", "1"), ("121", "2"), ("141", "2")):
+            db.session.add(
+                Unit(property_id=prop.id, unit_number=number, building=building, created_at=utcnow())
+            )
+        db.session.commit()
+        groups = unit_cards(prop.id)["groups"]
+        by_key = {group["key"]: group for group in groups}
+        self.assertEqual(by_key["1"]["range"], "100-120")
+        self.assertEqual(by_key["2"]["range"], "121-141")
+        self.assertEqual(len(by_key["1"]["cards"]), 3)
+        self.assertEqual(by_key["1"]["label"], "Building 1")
+
     def test_a_note_stays_on_one_washer(self):
         from app.models import Equipment
         from app.services.records import ensure_property
@@ -208,11 +285,17 @@ class AptTest04(AptTestBase):
         db.session.commit()
         added = handle_message(owner, "add employee jasmine", idempotency_key="add-jasmine")
         self.assertIn("jasmine", added["reply"].lower())
-        self.assertIn("employee", added["reply"].lower())
+        self.assertIn("full name", added["reply"].lower())
+        detailed = handle_message(
+            owner, "Jasmine Carter, 432-555-0101, jasmine@example.com", idempotency_key="add-jasmine-details"
+        )
+        self.assertIn("Jasmine Carter", detailed["reply"])
         self.save(owner)
         jasmine = find_user("jasmine")
-        self.assertEqual(jasmine.role, "field")
-        self.assertEqual(jasmine.display_name, "Jasmine")
+        self.assertEqual(jasmine.role, "maintenance_person")
+        self.assertEqual(jasmine.display_name, "Jasmine Carter")
+        self.assertEqual(jasmine.phone, "432-555-0101")
+        self.assertEqual(jasmine.email, "jasmine@example.com")
         handle_message(owner, "give jasmine edit units at woodview", idempotency_key="grant-jasmine")
         self.save(owner)
         wood = Property.query.filter(Property.deleted_at.is_(None)).one()
@@ -290,6 +373,7 @@ class AptTest04(AptTestBase):
         madison = ensure_property("Madison Sq", "Lubbock", "Texas", owner.id)
         db.session.commit()
         handle_message(owner, "add employee jasmine", idempotency_key="emp-j")
+        handle_message(owner, "Jasmine Carter, 432-555-0101, jasmine@example.com", idempotency_key="emp-j-details")
         self.save(owner)
         granted = handle_message(owner, "give jasmine woodview", idempotency_key="see-w")
         self.assertIn("Woodview", (granted.get("reply") or "") + self.save(owner))
@@ -408,3 +492,24 @@ class AptTest04(AptTestBase):
         self.assertIn(b"Building 1", unit_page.data)
         self.assertIn(b"equipment", unit_page.data)
         self.assertIn(b"labor", unit_page.data)
+
+    def test_a_building_range_reads_a_two_word_property(self):
+        from app.models import Property, Unit
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Cedar Ridge", "Midland", "Texas", user.id)
+        db.session.commit()
+        heard = handle_message(user, "add building 3 units 200-210 at cedar ridge", idempotency_key="bldg-two-words")
+        self.assertIn("Building", heard.get("reply") or "")
+        self.save(user)
+        rows = (
+            Unit.query.filter_by(property_id=prop.id)
+            .filter(Unit.deleted_at.is_(None))
+            .order_by(Unit.unit_number)
+            .all()
+        )
+        self.assertEqual([row.unit_number for row in rows], [str(number) for number in range(200, 211)])
+        self.assertTrue(all(row.building == "3" for row in rows))
+        # The sentence is units for a building, never a brand-new property.
+        self.assertIsNone(Property.query.filter(Property.name.ilike("%building 3%")).first())

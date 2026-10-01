@@ -300,12 +300,12 @@ def _typed_address(text: str) -> dict | None:
 
 def _save_typed_address(user, parsed: dict, key: str, source: str) -> dict:
     from app.services.appliers_common import _property_match
-    from app.services.pending import commit_apply
+    from app.services.pending import apply_now
 
     prop, missing = _property_match({"property_name": parsed["property_name"]})
     if not prop:
         return {"ok": False, "reply": missing}
-    return commit_apply(
+    return apply_now(
         user,
         "update_property",
         {"property_id": prop.id, "address": parsed["address"]},
@@ -460,6 +460,16 @@ def _property_delete(text: str) -> dict | None:
     return {"property_name": name, "delete_all": delete_all}
 
 
+def _rename_target(target: str) -> tuple[str, str]:
+    """Read the property being renamed. A bare name keeps every word."""
+    target = target.strip()
+    if not re.search(r",|\b(?:at|in|from)\b", target, re.I):
+        # "rename cedar ridge to ..." names the property; there is no city here.
+        return target, ""
+    slots = _slots_from_destination(target)
+    return slots.get("property_name") or slots.get("place") or target, slots.get("city") or ""
+
+
 def _property_rename(text: str) -> dict | None:
     raw = (text or "").strip().rstrip(".")
     match = re.search(r"\brename\s+(.+?)\s+to\s+(.+)$", raw, re.I)
@@ -468,17 +478,17 @@ def _property_rename(text: str) -> dict | None:
         if not match:
             return None
         target = re.sub(r"^\s*(?:the\s+)?(?:property|prop|place|site|apartment|apt)\s+", "", match.group(1), flags=re.I)
-        slots = _slots_from_destination(target)
+        name, city = _rename_target(target)
         return {
-            "match_name": slots.get("property_name") or slots.get("place") or target.strip(),
-            "city": slots.get("city") or "",
+            "match_name": name,
+            "city": city,
             "address": match.group(2).strip(),
         }
     target = re.sub(r"^\s*(?:the\s+)?(?:property|prop|place|site|apartment|apt)\s+", "", match.group(1), flags=re.I)
-    slots = _slots_from_destination(target)
+    name, city = _rename_target(target)
     return {
-        "match_name": slots.get("property_name") or slots.get("place") or target.strip(),
-        "city": slots.get("city") or "",
+        "match_name": name,
+        "city": city,
         "new_name": _tidy_place(match.group(2)),
     }
 
@@ -530,6 +540,43 @@ def _file_remove(user, text: str, key: str, source: str):
     return _ask_remove(user, parsed, key, source)
 
 
+def _merge_address_into_pending(user, name: str, city: str, address: str) -> dict | None:
+    """If she just added this property and it is still waiting on Save, put the street on that card."""
+    from app.models import PendingAction
+    from app.services.records import dumps, loads
+
+    wanted_name = (name or "").strip().lower()
+    wanted_city = (city or "").strip().lower()
+    if not wanted_name or not address:
+        return None
+    rows = (
+        PendingAction.query.filter_by(user_id=user.id, tool="upsert_property")
+        .filter(PendingAction.status.in_(("pending", "needs_answer")))
+        .order_by(PendingAction.id.desc())
+        .all()
+    )
+    for row in rows:
+        payload = loads(row.payload_json)
+        have_name = (payload.get("property_name") or "").strip().lower()
+        have_city = (payload.get("city") or "").strip().lower()
+        if have_name != wanted_name:
+            continue
+        if wanted_city and have_city and have_city != wanted_city:
+            continue
+        payload["address"] = address
+        if wanted_city and not have_city:
+            payload["city"] = city
+        row.payload_json = dumps(payload)
+        bits = [line.strip() for line in (row.summary or "").splitlines() if line.strip()]
+        headline = bits[0] if bits else f"Add {name}."
+        row.summary = f"{headline}\nStreet: {address}\nNothing changes until you save it."
+        from app.builddb.builddb import db
+
+        db.session.commit()
+        return {"ok": True, "pending": True, "reply": row.summary}
+    return None
+
+
 def _file_edit(user, text: str, key: str, source: str):
     """Edit a named record or property without guessing the target."""
     board_action = _board_payload(text)
@@ -543,7 +590,7 @@ def _file_edit(user, text: str, key: str, source: str):
         return None
     if re.search(r"\b(plan|trip)\b", text or "", re.I) and not re.search(r"\b(address|addy|property)\b", text or "", re.I):
         return None
-    from app.services.pending import commit_apply
+    from app.services.pending import apply_now, commit_apply
     from app.services.parse import resolve_or_lines, resolve_property
     from app.services.records import property_place
 
@@ -558,6 +605,15 @@ def _file_edit(user, text: str, key: str, source: str):
         # extraction, which can absorb the repeated word "Address".
         parsed["property_name"] = address_target
     hint = parsed.get("property_name") or typed.get("property_name") or ""
+    city_in_hint = ""
+    placed = re.search(
+        r"\bthe\s+([a-z][a-z .'-]{1,40}?)\s+(?:apartments?|property|properties|site|place)\s+([a-z0-9][a-z0-9 .'-]{1,60}?)\s+(?:with|at|:)\s+",
+        text or "",
+        re.I,
+    )
+    if placed:
+        city_in_hint = _tidy_place(placed.group(1))
+        hint = _tidy_place(_clean_slot(placed.group(2)))
     if not hint:
         cleaned = re.sub(
             r"\b(please|edit|update|change|correct|the|this|my|property|properties|apartment|apartments|address|addy|name)\b",
@@ -568,19 +624,48 @@ def _file_edit(user, text: str, key: str, source: str):
         hint = _tidy_place(_clean_slot(cleaned))
     if not hint:
         return {"ok": True, "reply": "Which property should I edit?"}
-    verdict = resolve_property(hint, user=user)
-    if verdict["state"] == "unknown":
+    # A city word inside the target phrase ("the lubbock apartment brookview")
+    # scopes the match; it is never part of the property name.
+    scoped = re.search(
+        r"\bthe\s+([a-z]+(?:\s+[a-z]+)?)\s+(?:apartments?|property|properties|site|place)\s+(.+)$",
+        hint,
+        re.I,
+    )
+    if scoped and not city_in_hint:
+        city_in_hint = scoped.group(1).strip().title()
+        hint = _tidy_place(_clean_slot(scoped.group(2)))
+    verdict = resolve_property(hint, city_in_hint, user=user)
+    address = parsed.get("address") or typed.get("address") or ""
+    if verdict["state"] == "unknown" and address:
+        merged = _merge_address_into_pending(user, hint, city_in_hint, address)
+        if merged:
+            return merged
+    if verdict["state"] == "unknown" and not address:
         return {"ok": False, "reply": f"I don't have {hint} yet, so I didn't create one. Say add {hint} if it is new."}
-    prop, ask = resolve_or_lines(hint, user=user)
-    if not prop:
-        return {"ok": True, "reply": ask}
-    payload = {"property_id": prop.id}
-    if parsed.get("address"):
-        payload["address"] = parsed["address"]
+    if verdict["state"] == "resolved":
+        prop = verdict["property"]
+        payload = {"property_id": prop.id}
+    elif address:
+        # The target may be staged but not saved yet (she said the add and the
+        # address in one breath). Name + city resolve when the save click runs.
+        payload = {"property_name": hint}
+        if city_in_hint:
+            payload["city"] = city_in_hint
+    else:
+        prop, ask = resolve_or_lines(hint, user=user)
+        if not prop:
+            return {"ok": True, "reply": ask}
+        payload = {"property_id": prop.id}
+    if address:
+        payload["address"] = address
     if parsed.get("city"):
         payload["city"] = parsed["city"]
         payload["region"] = parsed.get("region") or ""
     _close_questions(user)
+    if payload.get("property_id"):
+        # An explicit edit sentence names its target: it applies now, like the
+        # property page's own save button would.
+        return apply_now(user, "update_property", payload, source, key)
     return commit_apply(user, "update_property", payload, source, key)
 
 

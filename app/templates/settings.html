@@ -3,6 +3,9 @@
 {% block main %}
 <section class="sheet">
   <h1>Settings</h1>
+  {% if can_manage_people and current_user.role != 'owner' %}
+  <p><a href="/users">People</a> — add a login or change who works where.</p>
+  {% endif %}
   {% if current_user.role == 'owner' %}
   <p><a href="/users">People</a> — add a boss or an employee. Their email can stay blank.</p>
   <form method="post" class="stack">
@@ -53,14 +56,18 @@
   </form>
   <h2>AI keys</h2>
   <p class="lead">Add the keys you already pay for or a free Gemini key. 1st is used first, then 2nd, then 3rd, if a key is out of quota. Only the last 4 characters are shown. You can also say “make Gemini 1st” in chat.</p>
+  <p class="lead">Every key has a burst budget (tokens over a few minutes). When a key reaches it, that key rests and the next one answers, so a free key is never pushed into a lockout. Burst tokens of 0 turns the budget off. Max reply tokens caps one answer; 0 leaves the provider default.</p>
   {% for row in keys %}
   <article class="card">
     <strong>{{ row.provider_label }}</strong>
-    <p>····{{ row.last4 }}{% if row.use_order %} · {{ row.use_order }}{% if row.use_order == 1 %}st{% elif row.use_order == 2 %}nd{% elif row.use_order == 3 %}rd{% else %}th{% endif %}{% elif row.preferred %} · 1st{% endif %}{% if not row.active %} · off{% endif %}</p>
+    <p>····{{ row.last4 }}{% if row.use_order %} · {{ row.use_order }}{% if row.use_order == 1 %}st{% elif row.use_order == 2 %}nd{% elif row.use_order == 3 %}rd{% else %}th{% endif %}{% elif row.preferred %} · 1st{% endif %}{% if not row.active %} · off{% endif %}{% if row.burst_tokens %} · {{ row.used }} of {{ row.burst_tokens }} tokens in the last {{ ((row.burst_seconds or 180) // 60) }} min{% else %} · no burst limit{% endif %}</p>
     <form method="post" action="/settings/key/{{ row.id }}" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label>Model <input name="model" value="{{ row.model_id or '' }}" autocomplete="off"></label>
       <label>Base URL <input name="base_url" value="{{ row.base_url or '' }}" placeholder="Only for a custom endpoint" autocomplete="off"></label>
+      <label>Max reply tokens <input name="max_reply_tokens" value="{{ row.max_reply_tokens or '' }}" inputmode="numeric" placeholder="0 = provider default"></label>
+      <label>Burst tokens <input name="burst_tokens" value="{{ row.burst_tokens }}" inputmode="numeric" placeholder="5000"></label>
+      <label>Burst minutes <input name="burst_minutes" value="{{ ((row.burst_seconds or 180) // 60) }}" inputmode="numeric" placeholder="3"></label>
       <label>Order
         <select name="use_order">
           {% for place in [1, 2, 3, 4] %}

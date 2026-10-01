@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Help — {{ role_display }}{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <h1>Help</h1>
+    <p class="lead">What you can do as a {{ role_display }}, and how to do it.</p>
+  </div>
+
+  <div class="card stack">
+    <h2>Welcome, {{ role_display }}</h2>
+    <p>{{ intro }}</p>
+  </div>
+
+  <div class="card stack">
+    <h2>What you can do</h2>
+    <p>{{ summary }}</p>
+  </div>
+
+  {% if topics %}
+  <div class="card stack">
+    <h2>Help topics</h2>
+    {% for label, caps in topics %}
+    <h3>{{ label }}</h3>
+    <ul>
+      {% for cap in caps %}
+      <li>
+        <strong>{{ cap.label }}</strong>
+        {% if cap.howto %}
+          — {{ cap.howto }}
+        {% else %}
+          {% if cap.says %}
+            Try saying: "{{ cap.says[0] }}"
+          {% endif %}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="card stack">
+    <p>No help topics available for your role.</p>
+  </div>
+  {% endif %}
+
+  {% if role != 'viewer' %}
+  <div class="card stack">
+    <h2>Ask in chat</h2>
+    <p>You can also ask for help in the chat. Try saying:</p>
+    <ul>
+      <li>"help" — show this help page</li>
+      <li>"what can you do" — see what's available for your role</li>
+      <li>"how do I log work at a unit" — get step-by-step help</li>
+    </ul>
+    <p>The chat can guide you through maintenance work and upkeep tasks step by step.</p>
+  </div>
+
+  <div class="card stack">
+    <h2>Quick tips</h2>
+    <ul>
+      <li>Say the unit number and what you did to log work — like "unit 12 fixed the ac"</li>
+      <li>Changes wait for your confirmation before they're saved</li>
+      <li>You can attach photos of nameplates to record equipment serial numbers</li>
+      <li>Use "yes" or "no" to confirm the property when you arrive</li>
+    </ul>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

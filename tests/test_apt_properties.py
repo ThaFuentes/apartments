@@ -38,6 +38,40 @@ class AptTest03(AptTestBase):
         self.assertEqual(again.id, first.id)
         spelled = ensure_property("Brookview", "Odessa", "Texas", user.id)
         self.assertEqual(spelled.id, first.id)
+    def test_same_key_twice_does_not_raise_duplicate(self):
+        """A second request with the same key (double click, retry, or two
+        workers) must not crash on uq_idem_user_key or write twice."""
+        from unittest.mock import patch
+
+        from app.models import IdempotencyKey
+        from app.services import pending
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.commit()
+        payload = {
+            "property_id": prop.id,
+            "property_name": "Woodview",
+            "city": "Odessa",
+            "region": "Texas",
+            "address": "123 Happy St",
+        }
+        key = "edit-race-key"
+        first = pending.apply_now(user, "update_property", payload, "human", key)
+        self.assertTrue(first.get("ok"))
+        real_prior = pending._prior
+        calls = {"n": 0}
+
+        def racing_prior(user_id, k):
+            calls["n"] += 1
+            return None if calls["n"] == 1 else real_prior(user_id, k)
+
+        with patch.object(pending, "_prior", side_effect=racing_prior):
+            second = pending.apply_now(user, "update_property", payload, "human", key)
+        self.assertTrue(second.get("ok"))
+        self.assertTrue(second.get("duplicate"))
+        self.assertEqual(IdempotencyKey.query.filter_by(user_id=user.id, key_text=key).count(), 1)
     def test_brookv_files_washer_and_dryer_on_unit_26(self):
         from app.models import Equipment
         from app.services.records import ensure_property
@@ -168,7 +202,9 @@ class AptTest03(AptTestBase):
         ensure_property("Woodview", "Odessa", "Texas", owner.id)
         db.session.commit()
         handle_message(owner, "add employee jasmine", idempotency_key="mu-jasmine")
+        handle_message(owner, "Jasmine Carter, 432-555-0101, jasmine@example.com", idempotency_key="mu-jasmine-details")
         handle_message(owner, "add employee mario", idempotency_key="mu-mario")
+        handle_message(owner, "Mario Diaz, 432-555-0102, mario@example.com", idempotency_key="mu-mario-details")
         handle_message(owner, "give jasmine edit units at woodview", idempotency_key="mu-grant")
         self.save(owner)
         jasmine = find_user("jasmine")
@@ -331,7 +367,7 @@ class AptTest03(AptTestBase):
             "lng": -102.36,
             "label": "Woodview Apartments",
         }
-        with patch("app.services.appliers.lookup_place", return_value=hit):
+        with patch("app.services.geo.lookup_place", return_value=hit):
             result = handle_message(user, "it's at woodview odessa texas", idempotency_key="addy")
             result_words = (result.get("reply") or "") + " " + self.save(user)
         self.assertIn("4101 East 42nd Street", result_words)

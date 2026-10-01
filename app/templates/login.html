@@ -22,5 +22,8 @@
     {% endif %}
     <button type="submit">{% if setup %}Create owner account{% else %}Sign in{% endif %}</button>
   </form>
+  {% if not setup %}
+  <p><a href="/forgot">Forgot password</a></p>
+  {% endif %}
 </section>
 {% endblock %}

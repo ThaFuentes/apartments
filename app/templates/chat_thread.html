@@ -1,6 +1,6 @@
 <div class="thread" id="thread" data-assistant="{{ assistant_name or 'Apt' }}" data-next="{{ request.path }}" aria-live="polite" aria-relevant="additions text">
   {% if not chat_lines %}
-  <p class="bubble assistant"><span class="who">{{ assistant_name or "Apt" }}</span>Hi. I'm {{ assistant_name or "Apt" }}. Tell me a site, what you did, or ask what's on your record.</p>
+  <p class="bubble assistant"><span class="who">{{ assistant_name or "Apt" }}</span>Hi{% if current_user.is_authenticated %}, {{ (current_user.display_name or current_user.username).split()[0] }}{% endif %}. I'm {{ assistant_name or "Apt" }}. Tell me a unit, a resident, or what's still open.</p>
   {% endif %}
   {% for msg in chat_lines %}
   <p class="bubble {{ msg.role }}">{% if msg.role == 'assistant' %}<span class="who">{{ assistant_name or "Apt" }}</span>{% endif %}{{ msg.body }}{% if msg.created_at %}<time>{{ msg.created_at|chat_clock }}</time>{% endif %}</p>
@@ -12,6 +12,7 @@
       <div class="approval-heading">
         <span class="approval-state">{{ 'Review before saving' if card.status == 'pending' else 'Needs your answer' }}</span>
         <h2 class="card-title">{{ card.headline }}</h2>
+        {% if card.place %}<span class="card-place">{{ card.place }}</span>{% endif %}
       </div>
     </div>
     {% if card.changes %}

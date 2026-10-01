@@ -135,6 +135,7 @@ def _file_trip_plan(user, text: str, key: str, source: str):
         _close_questions(user)
         return commit_apply(user, "plan_day", planned, source, key)
     slots = _plan_slots(text) or {}
+    explicit_plan = bool(slots.get("property_name") or slots.get("place")) and (slots.get("city") or slots.get("work_items"))
     hint = slots.get("property_name") or slots.get("place") or ""
     if hint:
         verdict = resolve_property(hint, user=user)
@@ -164,13 +165,15 @@ def _file_trip_plan(user, text: str, key: str, source: str):
             "reply": "Where should I plan this? Tell me the property and the city. I will make the plan, not a new property.",
         }
     _close_questions(user)
-    return _file_outing(user, slots, key, source)
+    # A full plan sentence (property + city or per-unit work) is explicit:
+    # it files the trip now instead of staging another card.
+    return _file_outing(user, slots, key, source, apply=explicit_plan)
 
 
 def _file_trip_readings(user, text: str, key: str, source: str):
     """Starting and ending mileage on the open plan, when that is all she said."""
     from app.models import Trip
-    from app.services.pending import commit_apply
+    from app.services.pending import apply_now
     from app.services.plan import pull_plan_extras
 
     if _is_trip_plan(text) or parse_outing(text):
@@ -199,7 +202,9 @@ def _file_trip_readings(user, text: str, key: str, source: str):
     if extras.get("odometer_end") is not None:
         payload["odometer_end"] = extras["odometer_end"]
     _close_questions(user)
-    return commit_apply(user, "update_trip", payload, source, key)
+    # Exact odometer readings on a named open trip are like the odometer
+    # command: the numbers are the record, so they apply now.
+    return apply_now(user, "update_trip", payload, source, key)
 
 
 def _plan_delete(text: str) -> dict | None:

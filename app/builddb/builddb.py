@@ -61,10 +61,12 @@ def init_db(app):
         _evolve_credentials()
         _evolve_mail()
         _evolve_equipment()
+        _evolve_equipment_history()
         _evolve_units()
         _evolve_trip_mileage()
         _evolve_roles_and_scope()
         _evolve_users()
+        _evolve_bots_hats_and_roles()
         _say("[apt] MariaDB schema ready")
 
 
@@ -88,6 +90,12 @@ def _evolve_credentials():
         statements.append("ALTER TABLE api_credentials ADD COLUMN preferred TINYINT(1) NOT NULL DEFAULT 0")
     if "use_order" not in have:
         statements.append("ALTER TABLE api_credentials ADD COLUMN use_order INT NOT NULL DEFAULT 0")
+    if "max_reply_tokens" not in have:
+        statements.append("ALTER TABLE api_credentials ADD COLUMN max_reply_tokens INT NOT NULL DEFAULT 0")
+    if "burst_tokens" not in have:
+        statements.append("ALTER TABLE api_credentials ADD COLUMN burst_tokens INT NOT NULL DEFAULT 5000")
+    if "burst_seconds" not in have:
+        statements.append("ALTER TABLE api_credentials ADD COLUMN burst_seconds INT NOT NULL DEFAULT 180")
     if not statements:
         return
     with db.engine.begin() as conn:
@@ -147,6 +155,53 @@ def _evolve_equipment():
             conn.execute(text(sql))
 
 
+def _evolve_equipment_history():
+    """Add equipment sourcing fields and create template/movement history tables."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    statements = []
+    if "equipment" in names:
+        have = {col["name"] for col in inspect(db.engine).get_columns("equipment")}
+        additions = {
+            "template_id": "INT NULL",
+            "phone": "VARCHAR(40) NOT NULL DEFAULT ''",
+            "vendor": "VARCHAR(120) NOT NULL DEFAULT ''",
+            "purchase_date": "DATE NULL",
+            "purchase_price": "FLOAT NULL",
+            "warranty_expires": "DATE NULL",
+            "repair_notes": "VARCHAR(4000) NOT NULL DEFAULT ''",
+            "parts_link": "VARCHAR(500) NOT NULL DEFAULT ''",
+            "updated_at": "DATETIME NULL",
+        }
+        for name, sql_type in additions.items():
+            if name not in have:
+                statements.append(f"ALTER TABLE equipment ADD COLUMN {name} {sql_type}")
+    if "equipment_moves" in names:
+        have = {col["name"] for col in inspect(db.engine).get_columns("equipment_moves")}
+        additions = {
+            "from_unit_number": "VARCHAR(40) NOT NULL DEFAULT ''",
+            "to_unit_number": "VARCHAR(40) NOT NULL DEFAULT ''",
+            "event_type": "VARCHAR(20) NOT NULL DEFAULT 'move'",
+            "source_inventory_missing": "TINYINT(1) NOT NULL DEFAULT 0",
+            "equipment_snapshot": "VARCHAR(4000) NOT NULL DEFAULT '{}'",
+        }
+        for name, sql_type in additions.items():
+            if name not in have:
+                statements.append(f"ALTER TABLE equipment_moves ADD COLUMN {name} {sql_type}")
+    if statements:
+        with db.engine.begin() as conn:
+            for sql in statements:
+                conn.execute(text(sql))
+    # Metadata create_all ran before this migration; create newly declared tables now.
+    from app.models import EquipmentMove, EquipmentTemplate  # noqa: F401
+
+    db.create_all()
+
+
 def _evolve_units():
     """Occupied and make-ready live on the unit row."""
     from sqlalchemy import inspect, text
@@ -186,6 +241,8 @@ def _evolve_users():
         statements.append("ALTER TABLE users ADD COLUMN default_property_id INT NULL")
     if "default_property_confirmed" not in have:
         statements.append("ALTER TABLE users ADD COLUMN default_property_confirmed TINYINT(1) NOT NULL DEFAULT 0")
+    if "phone" not in have:
+        statements.append("ALTER TABLE users ADD COLUMN phone VARCHAR(40) NOT NULL DEFAULT ''")
     if not statements:
         return
     with db.engine.begin() as conn:
@@ -207,7 +264,7 @@ def _evolve_roles_and_scope():
         if "can_manage_users" not in columns:
             statements.append("ALTER TABLE users ADD COLUMN can_manage_users TINYINT(1) NOT NULL DEFAULT 0")
         if columns.get("role", {}).get("type") is not None:
-            statements.append("ALTER TABLE users MODIFY COLUMN role VARCHAR(32) NOT NULL DEFAULT 'office'")
+            statements.append("ALTER TABLE users MODIFY COLUMN role VARCHAR(40) NOT NULL DEFAULT 'office'")
     if "properties" in names:
         have = {col["name"] for col in inspect(db.engine).get_columns("properties")}
         if "region_id" not in have:
@@ -216,12 +273,71 @@ def _evolve_roles_and_scope():
         have = {col["name"] for col in inspect(db.engine).get_columns("property_access")}
         if "can_manage_people" not in have:
             statements.append("ALTER TABLE property_access ADD COLUMN can_manage_people TINYINT(1) NOT NULL DEFAULT 0")
+    if "user_capabilities" in names:
+        have = {col["name"] for col in inspect(db.engine).get_columns("user_capabilities")}
+        if "scope_key" not in have:
+            statements.append("ALTER TABLE user_capabilities ADD COLUMN scope_key VARCHAR(80) NOT NULL DEFAULT 'global'")
     if "regions" in names:
         pass
     if statements:
         with db.engine.begin() as conn:
             for sql in statements:
                 conn.execute(text(sql))
+    # The unique index needs the column to exist first, so it runs on its own.
+    if "user_capabilities" in names:
+        try:
+            indexes = {row["name"] for row in inspect(db.engine).get_indexes("user_capabilities")}
+        except Exception:
+            indexes = set()
+        if "uq_user_capability_scope" not in indexes:
+            try:
+                with db.engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            "ALTER TABLE user_capabilities ADD UNIQUE KEY "
+                            "uq_user_capability_scope (user_id, capability, scope_key)"
+                        )
+                    )
+            except Exception:
+                pass
+
+
+def _evolve_bots_hats_and_roles():
+    """Bot logins, dual security/reset inboxes, extra hats, and custom titles."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    statements = []
+    if "users" in names:
+        have = {col["name"] for col in inspect(db.engine).get_columns("users")}
+        additions = {
+            "is_bot": "TINYINT(1) NOT NULL DEFAULT 0",
+            "security_email": "VARCHAR(120) NULL",
+            "reset_email": "VARCHAR(120) NULL",
+            "extra_data": "JSON NULL",
+            "reset_token_hash": "VARCHAR(64) NULL",
+            "reset_token_expires": "DATETIME NULL",
+        }
+        for name, sql_type in additions.items():
+            if name not in have:
+                statements.append(f"ALTER TABLE users ADD COLUMN {name} {sql_type}")
+    if "role_capability_defaults" in names:
+        have = {col["name"] for col in inspect(db.engine).get_columns("role_capability_defaults")}
+        if "role" in have:
+            statements.append("ALTER TABLE role_capability_defaults MODIFY COLUMN role VARCHAR(40) NOT NULL")
+    if statements:
+        with db.engine.begin() as conn:
+            for sql in statements:
+                try:
+                    conn.execute(text(sql))
+                except Exception:
+                    pass
+    from app.models import CustomRole, UserHat  # noqa: F401
+
+    db.create_all()
 
 
 def _evolve_trip_mileage():

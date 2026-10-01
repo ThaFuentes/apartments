@@ -6,7 +6,7 @@ not name.
 from __future__ import annotations
 
 from app.builddb.builddb import db
-from app.models import Expense, Job, JobEvent, Media, Property, Unit, UnitVisit
+from app.models import EquipmentMove, Expense, Job, JobEvent, Media, Property, Unit, UnitVisit
 from app.services.clock import money, utcnow
 from app.services.records import (
     CONFIDENCE_FLOOR,
@@ -361,9 +361,13 @@ def apply_log_expense(user, payload, source) -> dict:
 
 
 def apply_move_equipment(user, payload, source) -> dict:
-    """Move one uniquely identified equipment card between units at one property."""
-    from app.services.equipment import kind_label
+    """Move/install/remove one appliance, retaining a full origin/destination history."""
+    import json
 
+    from app.models import Equipment
+    from app.services.equipment import kind_label, parse_equipment
+
+    source = _src(source)
     try:
         property_id = int(payload.get("property_id") or 0)
     except (TypeError, ValueError):
@@ -372,26 +376,104 @@ def apply_move_equipment(user, payload, source) -> dict:
     if not prop or prop.deleted_at:
         return {"ok": False, "reply": "Which assigned property is this for?"}
 
+    action = (payload.get("action") or "move").strip().lower()
+    if action == "install":
+        number = normalize_unit(payload.get("target_unit_number") or payload.get("source_unit_number") or "")
+        if not number:
+            return {"ok": False, "reply": "Which unit did you install it in?"}
+        unit = Unit.query.filter_by(property_id=prop.id, unit_number=number).filter(Unit.deleted_at.is_(None)).first()
+        if not unit:
+            unit = Unit(property_id=prop.id, unit_number=number, created_by_id=user.id, created_at=utcnow())
+            db.session.add(unit)
+            db.session.flush()
+            audit(user.id, source, "create", "unit", unit.id, {}, {"unit_number": number, "property_id": prop.id})
+        item_hint = payload.get("item_hint") or ""
+        from app.services.appliers_common import file_piece
+        parsed = parse_equipment(item_hint)
+        serial = (payload.get("serial_number") or parsed.get("serial") or "").strip().upper()
+        if serial:
+            existing = Equipment.query.filter(
+                Equipment.deleted_at.is_(None), Equipment.property_id == prop.id,
+                db.func.upper(Equipment.serial_number) == serial,
+            ).first()
+            if existing:
+                if existing.unit_id == unit.id:
+                    return {"ok": True, "reply": f"Serial {serial} is already recorded in unit {number}; I did not add a duplicate.", "equipment_id": existing.id, "unit_id": unit.id, "property_id": prop.id}
+                return {"ok": False, "reply": f"Serial {serial} is already assigned to another unit. Nothing was installed."}
+        piece = {
+            "kind": payload.get("kind") or parsed.get("kind") or "",
+            "brand": parsed.get("brand") or "",
+            "model": payload.get("model") or parsed.get("model") or "",
+            "serial": serial,
+            "size": parsed.get("size") or "",
+            "notes": payload.get("note") or "",
+            "phone": parsed.get("phone") or "",
+            "vendor": parsed.get("vendor") or "",
+            "parts_link": parsed.get("parts_link") or "",
+            "repair_notes": parsed.get("repair_notes") or "",
+            "purchase_date": parsed.get("purchase_date") or "",
+            "purchase_price": parsed.get("purchase_price") or "",
+            "warranty_expires": parsed.get("warranty_expires") or "",
+        }
+        item, _ambiguous = file_piece(user, piece, unit, None, prop.id, source, force_new=True)
+        if not item:
+            return {"ok": False, "reply": "Tell me what equipment you installed."}
+        if item.template_id is None and item.kind and item.model_number:
+            from app.models import EquipmentTemplate
+            template = EquipmentTemplate.query.filter_by(property_id=prop.id, kind=item.kind, brand=item.brand, model_number=item.model_number).first()
+            if template is None:
+                template = EquipmentTemplate(property_id=prop.id, kind=item.kind, brand=item.brand, model_number=item.model_number, size_label=item.size_label, style=item.style, color=item.color, phone=item.phone, vendor=item.vendor, parts_link=item.parts_link, created_by_id=user.id)
+                db.session.add(template)
+                db.session.flush()
+            item.template_id = template.id
+        label = kind_label(item.kind) or item.kind or "equipment"
+        install_move = EquipmentMove.query.filter_by(equipment_id=item.id, event_type="install").order_by(EquipmentMove.id.desc()).first()
+        if item.template_id is None and item.kind and item.model_number:
+            from app.models import EquipmentTemplate
+            template = EquipmentTemplate.query.filter_by(property_id=prop.id, kind=item.kind, brand=item.brand, model_number=item.model_number).first()
+            if template is None:
+                template = EquipmentTemplate(property_id=prop.id, kind=item.kind, brand=item.brand, model_number=item.model_number, size_label=item.size_label, style=item.style, color=item.color, phone=item.phone, vendor=item.vendor, parts_link=item.parts_link, created_by_id=user.id)
+                db.session.add(template)
+                db.session.flush()
+            item.template_id = template.id
+        if not install_move:
+            snapshot = {"kind": item.kind, "brand": item.brand, "model": item.model_number, "serial": item.serial_number, "size": item.size_label, "vendor": item.vendor, "phone": item.phone}
+            install_move = EquipmentMove(
+                equipment_id=item.id, from_unit_id=None, to_unit_id=unit.id,
+                from_unit_number="", to_unit_number=unit.unit_number,
+                event_type="install", equipment_snapshot=json.dumps(snapshot),
+                from_property_id=prop.id, to_property_id=prop.id, moved_by_id=user.id,
+                reason="Equipment installed in unit", note=_clip(payload.get("note"), 2000), created_at=utcnow(),
+            )
+            db.session.add(install_move)
+            db.session.flush()
+            audit(user.id, source, "install", "equipment", item.id, {}, {
+                "kind": item.kind, "brand": item.brand, "model": item.model_number,
+                "serial": item.serial_number, "property_id": prop.id, "unit_id": unit.id,
+                "title": f"Installed {label} in unit {unit.unit_number}", "related_unit_ids": [unit.id],
+                "move_id": install_move.id,
+            })
+        return {"ok": True, "reply": f"Recorded the {label} installation in unit {number} at {prop.name}.", "equipment_id": item.id, "unit_id": unit.id, "property_id": prop.id, "move_id": install_move.id if install_move else None}
+
     source_number = normalize_unit(payload.get("source_unit_number") or "")
     target_number = normalize_unit(payload.get("target_unit_number") or "")
-    if not source_number or not target_number:
+    removing = payload.get("action") == "remove"
+    if not source_number or (not target_number and not removing):
         return {"ok": False, "reply": "I need the current unit and the new unit number."}
     source_unit = Unit.query.filter_by(property_id=prop.id, unit_number=source_number).filter(Unit.deleted_at.is_(None)).first()
-    target_unit = Unit.query.filter_by(property_id=prop.id, unit_number=target_number).filter(Unit.deleted_at.is_(None)).first()
     if not source_unit:
         return {"ok": False, "reply": f"I can't find unit {source_number} at {prop.name}."}
-    if not target_unit:
-        return {"ok": False, "reply": f"I can't find unit {target_number} at {prop.name}. Add that unit first so I don't guess."}
-    if source_unit.id == target_unit.id:
-        return {"ok": False, "reply": "Those are the same unit. Which unit should receive the appliance?"}
-
-    from app.models import Equipment
-    from app.services.equipment import appliance_kinds
+    target_unit = None
+    if not removing:
+        target_unit = Unit.query.filter_by(property_id=prop.id, unit_number=target_number).filter(Unit.deleted_at.is_(None)).first()
+        if target_unit and source_unit.id == target_unit.id:
+            return {"ok": False, "reply": "Those are the same unit. Which unit should receive the appliance?"}
 
     kind_hint = (payload.get("kind") or "").strip().lower()
-    if not kind_hint:
-        kind_hint = (appliance_kinds(payload.get("item_hint") or "") or [""])[0]
-    serial_hint = (payload.get("serial_number") or "").strip().upper()
+    item_hint = str(payload.get("item_hint") or "")
+    parsed = parse_equipment(item_hint)
+    kind_hint = kind_hint or parsed.get("kind") or ""
+    serial_hint = (payload.get("serial_number") or parsed.get("serial") or "").strip().upper()
     query = Equipment.query.filter(
         Equipment.deleted_at.is_(None),
         Equipment.property_id == prop.id,
@@ -409,47 +491,148 @@ def apply_move_equipment(user, payload, source) -> dict:
     if serial_hint:
         query = query.filter(db.func.upper(Equipment.serial_number) == serial_hint)
     rows = query.order_by(Equipment.id.asc()).all()
-    if len(rows) != 1:
-        if not rows:
-            return {"ok": False, "reply": f"I can't find a {kind_hint or 'matching appliance'} in unit {source_number}."}
-        options = "; ".join(
-            " ".join(bit for bit in (row.brand, row.model_number, f"serial {row.serial_number}" if row.serial_number else "") if bit)
-            for row in rows[:6]
-        )
+    if len(rows) > 1:
+        options = "; ".join(" ".join(bit for bit in (row.brand, row.model_number, f"serial {row.serial_number}" if row.serial_number else "") if bit) for row in rows[:6])
         return {"ok": False, "reply": f"There is more than one match in unit {source_number}. Tell me the serial to choose one: {options}"}
 
-    item = rows[0]
-    if serial_hint and (item.serial_number or "").strip().upper() != serial_hint:
-        return {"ok": False, "reply": f"I didn't find serial {serial_hint} in unit {source_number}. Nothing moved."}
-    before = {"unit_id": source_unit.id, "unit_number": source_unit.unit_number}
-    item.unit_id = target_unit.id
-    audit(
-        user.id,
-        source,
-        "move",
-        "equipment",
-        item.id,
-        before,
-        {
-            "unit_id": target_unit.id,
-            "unit_number": target_unit.unit_number,
-            "property_id": prop.id,
-            "title": f"Moved {kind_label(item.kind) or item.kind} from unit {source_number} to unit {target_number}",
-            "related_unit_ids": [source_unit.id, target_unit.id],
-        },
+    missing_source_inventory = not rows
+    if missing_source_inventory and removing:
+        return {"ok": False, "reply": f"There is no saved {kind_hint or 'appliance'} record in unit {source_number}; nothing was removed."}
+    if missing_source_inventory and serial_hint:
+        existing_serial = Equipment.query.filter(
+            Equipment.deleted_at.is_(None), Equipment.property_id == prop.id,
+            db.func.upper(Equipment.serial_number) == serial_hint,
+        ).first()
+        if existing_serial:
+            return {"ok": False, "reply": f"Serial {serial_hint} is already on another equipment card. Nothing moved."}
+
+    if not removing and target_unit is None:
+        target_unit = Unit(property_id=prop.id, unit_number=target_number, created_by_id=user.id, created_at=utcnow())
+        db.session.add(target_unit)
+        db.session.flush()
+        audit(user.id, source, "create", "unit", target_unit.id, {}, {"unit_number": target_number, "property_id": prop.id})
+
+    if missing_source_inventory:
+        template_id = None
+        if kind_hint and parsed.get("model"):
+            from app.models import EquipmentTemplate
+            template = EquipmentTemplate.query.filter_by(
+                property_id=prop.id, kind=kind_hint, brand=parsed.get("brand") or "",
+                model_number=parsed["model"],
+            ).first()
+            if template is None:
+                template = EquipmentTemplate(
+                    property_id=prop.id, kind=kind_hint, brand=parsed.get("brand") or "",
+                    model_number=parsed["model"], size_label=parsed.get("size") or "",
+                    created_by_id=user.id,
+                )
+                db.session.add(template)
+                db.session.flush()
+            template_id = template.id
+        item = Equipment(
+            property_id=prop.id,
+            unit_id=target_unit.id,
+            template_id=template_id,
+            kind=kind_hint,
+            brand=parsed.get("brand") or "",
+            model_number=parsed.get("model") or "",
+            serial_number=serial_hint,
+            size_label=parsed.get("size") or "",
+            source=source,
+            created_by_id=user.id,
+            created_at=utcnow(),
+        )
+        db.session.add(item)
+        db.session.flush()
+        audit(user.id, source, "create", "equipment", item.id, {}, {
+            "kind": item.kind, "brand": item.brand, "model": item.model_number,
+            "serial": item.serial_number, "property_id": prop.id,
+            "unit_id": target_unit.id, "template_id": item.template_id,
+        })
+    else:
+        item = rows[0]
+        if item.serial_number and serial_hint and item.serial_number.upper() != serial_hint:
+            return {"ok": False, "reply": f"Serial {serial_hint} does not match the source card. Nothing moved."}
+        if parsed.get("model") and item.model_number and parsed["model"].upper() != item.model_number.upper():
+            return {"ok": False, "reply": "The model does not match the source card. Nothing moved."}
+        if target_unit:
+            duplicate = Equipment.query.filter(
+                Equipment.deleted_at.is_(None), Equipment.property_id == prop.id,
+                Equipment.unit_id == target_unit.id, Equipment.id != item.id,
+                db.func.lower(Equipment.kind) == (item.kind or "").lower(),
+            )
+            if item.serial_number:
+                duplicate = duplicate.filter(db.func.upper(Equipment.serial_number) == item.serial_number.upper())
+            if duplicate.first():
+                return {"ok": False, "reply": f"Unit {target_number} already has this serial. Nothing moved."}
+        if target_unit and item.template_id is None and item.kind and item.model_number:
+            from app.models import EquipmentTemplate
+            template = EquipmentTemplate.query.filter_by(
+                property_id=prop.id, kind=item.kind, brand=item.brand, model_number=item.model_number,
+            ).first()
+            if template is None:
+                template = EquipmentTemplate(
+                    property_id=prop.id, kind=item.kind, brand=item.brand,
+                    model_number=item.model_number, size_label=item.size_label,
+                    style=item.style, color=item.color, notes=item.notes,
+                    phone=item.phone, vendor=item.vendor, parts_link=item.parts_link,
+                    created_by_id=user.id,
+                )
+                db.session.add(template)
+                db.session.flush()
+            item.template_id = template.id
+
+    before = {"unit_id": source_unit.id, "unit_number": source_unit.unit_number, "property_id": prop.id}
+    item.unit_id = source_unit.id if removing else target_unit.id
+    item.deleted_at = utcnow() if removing else None
+    snapshot = {
+        "kind": item.kind, "brand": item.brand, "model": item.model_number,
+        "serial": item.serial_number, "size": item.size_label, "style": item.style,
+        "color": item.color, "vendor": item.vendor, "phone": item.phone,
+    }
+    move = EquipmentMove(
+        equipment_id=item.id,
+        from_unit_id=source_unit.id,
+        to_unit_id=target_unit.id if target_unit else None,
+        from_unit_number=source_number,
+        to_unit_number=target_number,
+        event_type="remove" if removing else "install" if missing_source_inventory else "move",
+        source_inventory_missing=missing_source_inventory,
+        equipment_snapshot=json.dumps(snapshot),
+        from_property_id=prop.id,
+        to_property_id=prop.id,
+        moved_by_id=user.id,
+        reason=_clip(payload.get("reason") or ("Removed from unit" if removing else f"Moved from unit {source_number} to unit {target_number}"), 300),
+        note=_clip(payload.get("note"), 2000),
+        created_at=utcnow(),
     )
+    db.session.add(move)
+    db.session.flush()
     label = kind_label(item.kind) or item.kind or "appliance"
-    return {
-        "ok": True,
-        "reply": f"Moved the {label} from unit {source_number} to unit {target_number} at {prop.name}. History was saved under your login.",
-        "equipment_id": item.id,
-        "unit_id": target_unit.id,
+    audit(user.id, source, "remove" if removing else "move", "equipment", item.id, before, {
+        "unit_id": target_unit.id if target_unit else source_unit.id,
+        "unit_number": target_number if target_unit else source_number,
         "property_id": prop.id,
+        "title": f"{('Removed' if removing else 'Moved')} {label} {'from unit ' + source_number if removing else 'from unit ' + source_number + ' to unit ' + target_number}",
+        "related_unit_ids": [source_unit.id] + ([target_unit.id] if target_unit else []),
+        "move_id": move.id,
+        "source_inventory_missing": missing_source_inventory,
+    })
+    if missing_source_inventory:
+        reply = f"No {label} was previously listed in unit {source_number}; I recorded that inventory gap and added the {label} to unit {target_number} at {prop.name}."
+    elif removing:
+        reply = f"Removed the {label} from unit {source_number} at {prop.name}. Its history remains on the record."
+    else:
+        reply = f"Moved the {label} from unit {source_number} to unit {target_number} at {prop.name}."
+    return {
+        "ok": True, "reply": reply, "equipment_id": item.id,
+        "unit_id": target_unit.id if target_unit else source_unit.id,
+        "property_id": prop.id, "move_id": move.id,
     }
 
 
 def apply_note_equipment(user, payload, source) -> dict:
-    """A note, serial, or style for one appliance in one unit."""
+    """A note, serial, style, phone, vendor, or parts link for one appliance in one unit."""
     source = _src(source)
     prop = db.session.get(Property, int(payload.get("property_id") or 0))
     if not prop or prop.deleted_at:
@@ -501,6 +684,14 @@ def apply_note_equipment(user, payload, source) -> dict:
         bits.append(f"Model {row.model_number}.")
     if row.notes:
         bits.append(f"Note: {row.notes}.")
+    if row.phone:
+        bits.append(f"Phone: {row.phone}.")
+    if row.vendor:
+        bits.append(f"Vendor: {row.vendor}.")
+    if row.parts_link:
+        bits.append(f"Parts: {row.parts_link}.")
+    if row.repair_notes:
+        bits.append(f"Repair: {row.repair_notes}.")
     return {"ok": True, "reply": " ".join(bits), "equipment_id": row.id, "unit_id": unit.id}
 
 

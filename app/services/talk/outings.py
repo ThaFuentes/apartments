@@ -129,7 +129,7 @@ def _ask_trip(user, slots: dict, key: str, source: str, row, question: str) -> d
     return propose(user, "plan_trip", payload, question, "low", key, key, source)
 
 
-def _file_outing(user, slots: dict, key: str, source: str, row=None) -> dict:
+def _file_outing(user, slots: dict, key: str, source: str, row=None, apply: bool = False) -> dict:
     from app.services.records import find_properties
 
     slots = dict(slots)
@@ -241,11 +241,16 @@ def _file_outing(user, slots: dict, key: str, source: str, row=None) -> dict:
         payload["odometer_end"] = slots["odometer_end"]
     if slots.get("work_items"):
         payload["work_items"] = slots["work_items"]
-    from app.services.pending import commit_apply
+    from app.services.pending import apply_now, commit_apply
 
     if slots.get("gas"):
         payload["gas"] = slots["gas"]
-    result = commit_apply(user, "plan_trip", payload, source, key)
+    if row is not None or apply:
+        # She is answering an open question on a staged card, or she said a full
+        # plan sentence: either way her words are the save click.
+        result = apply_now(user, "plan_trip", payload, source, key)
+    else:
+        result = commit_apply(user, "plan_trip", payload, source, key)
     if result.get("ok") and slots.get("gas"):
         if result.get("trip_id") and result.get("property_id"):
             _remember_gas(user, result["trip_id"], result["property_id"], slots["gas"], source)

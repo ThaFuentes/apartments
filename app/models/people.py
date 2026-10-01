@@ -16,8 +16,15 @@ class User(UserMixin, db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     display_name = db.Column(db.String(150), nullable=False, default="")
     email = db.Column(db.String(120), unique=True, nullable=True)
+    phone = db.Column(db.String(40), nullable=False, default="")
     password_hash = db.Column(db.String(256), nullable=False)
-    role = db.Column(db.String(32), nullable=False, default="office")
+    role = db.Column(db.String(40), nullable=False, default="office")
+    is_bot = db.Column(db.Boolean, nullable=False, default=False)
+    security_email = db.Column(db.String(120), nullable=True)
+    reset_email = db.Column(db.String(120), nullable=True)
+    extra_data = db.Column(db.JSON, nullable=True)
+    reset_token_hash = db.Column(db.String(64), nullable=True)
+    reset_token_expires = db.Column(db.DateTime, nullable=True)
     active = db.Column(db.Boolean, nullable=False, default=True)
     can_see_reports = db.Column(db.Boolean, nullable=False, default=True)
     can_see_history = db.Column(db.Boolean, nullable=False, default=True)
@@ -45,7 +52,8 @@ class User(UserMixin, db.Model):
 
     @property
     def is_viewer(self):
-        return self.role == "viewer" or self.role == "office"
+        """A legacy read-only login. Office is a working role and is not a viewer."""
+        return self.role == "viewer"
 
     @property
     def is_field(self):
@@ -55,8 +63,22 @@ class User(UserMixin, db.Model):
     def is_admin(self):
         return self.role == "admin"
 
+    @property
+    def is_bot_account(self):
+        return bool(self.is_bot)
+
     def label(self):
         return self.display_name or self.username
+
+    def role_line(self):
+        from app.services.hats import describe_hats
+        from app.services.roles import role_label
+
+        hats = describe_hats(self)
+        base = role_label(self.role)
+        if hats:
+            return f"{base}, also {hats}"
+        return base
 class AssistantProfile(db.Model):
     __tablename__ = "assistant_profiles"
     __table_args__ = _OPTS
@@ -96,6 +118,19 @@ class ApiCredential(db.Model):
     use_order = db.Column(db.Integer, nullable=False, default=0)
     model_checked_at = db.Column(db.DateTime, nullable=True)
     backoff_until = db.Column(db.DateTime, nullable=True)
+    max_reply_tokens = db.Column(db.Integer, nullable=False, default=0)
+    burst_tokens = db.Column(db.Integer, nullable=False, default=5000)
+    burst_seconds = db.Column(db.Integer, nullable=False, default=180)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+class ApiUsage(db.Model):
+    """Tokens a key spent, so a burst window can rest it before the provider 429s."""
+
+    __tablename__ = "api_usage"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    credential_id = db.Column(db.Integer, db.ForeignKey("api_credentials.id", ondelete="CASCADE"), nullable=False)
+    tokens = db.Column(db.Integer, nullable=False, default=0)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 class PropertyAccess(db.Model):
     """Which locations a login can see, edit, manage, and be told about."""
@@ -162,6 +197,43 @@ class UserCapability(db.Model):
     granted = db.Column(db.Boolean, nullable=False, default=False)
     changed_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+class UserHat(db.Model):
+    """An extra operational title on top of the login's security role.
+
+    Owner stays owner. A hat is how Amy is also maintenance supervisor at Madison Sq.
+    """
+
+    __tablename__ = "user_hats"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "role", "property_id", "region_id", name="uq_user_hat_place"),
+        _OPTS,
+    )
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role = db.Column(db.String(40), nullable=False)
+    property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=True)
+    region_id = db.Column(db.Integer, db.ForeignKey("regions.id", ondelete="CASCADE"), nullable=True)
+    label = db.Column(db.String(120), nullable=False, default="")
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+
+class CustomRole(db.Model):
+    """A company-defined title that starts from a built-in role's permissions."""
+
+    __tablename__ = "custom_roles"
+    __table_args__ = (db.UniqueConstraint("slug", name="uq_custom_role_slug"), _OPTS)
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    slug = db.Column(db.String(40), nullable=False)
+    label = db.Column(db.String(80), nullable=False)
+    based_on = db.Column(db.String(40), nullable=False, default="office")
+    active = db.Column(db.Boolean, nullable=False, default=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+
 class RoleCapabilityDefault(db.Model):
     """A role capability override scoped to the company, a region, or a property."""
 
@@ -172,7 +244,7 @@ class RoleCapabilityDefault(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    role = db.Column(db.String(32), nullable=False)
+    role = db.Column(db.String(40), nullable=False)
     capability = db.Column(db.String(64), nullable=False)
     scope_key = db.Column(db.String(80), nullable=False, default="global")
     granted = db.Column(db.Boolean, nullable=False, default=False)

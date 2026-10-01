@@ -14,13 +14,53 @@ from app.services.talk.textutil import _after_kind, _clean_slot, _color_in, _pla
 def _file_move_equipment(user, text: str, key: str, source: str):
     """Understand an explicit appliance move, using only a resolved property context."""
     match = re.search(
-        r"\b(?:move|moved|transfer|transferred|put)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+from\s+(?:unit\s*)?#?([a-z0-9-]+)\s+to\s+(?:unit\s*)?#?([a-z0-9-]+)(?:\s+(?:at|in)\s+(.+?))?(?:[.!?]|$)",
+        r"\b(?:move|moved|transfer|transferred|put|remove|removed|take out|uninstall|uninstalled)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+from\s+(?:unit\s*)?#?([a-z0-9-]+)(?:\s+to\s+(?:unit\s*)?#?([a-z0-9-]+))?(?:\s+(?:at|in)\s+(.+?))?(?:[.!?]|$)",
         (text or "").strip(),
         re.I,
     )
     if not match:
+        # A destination-only install still records a new installation without a prior inventory row.
+        match = re.search(
+            r"\b(?:install|installed|put|move|moved|transfer|transferred)\s+(?:the\s+|a\s+|an\s+)?(.+?)\s+(?:in|into|to)\s+(?:unit\s*)?#?([a-z0-9-]+)(?:\s+(?:at|in)\s+(.+?))?(?:[.!?]|$)",
+            (text or "").strip(), re.I,
+        )
+        if not match:
+            return None
+        install_groups = match.groups()
+        install_text = install_groups[0]
+        from app.services.equipment import appliance_kinds
+        if not appliance_kinds(install_text):
+            return None
+        from app.services.parse import resolve_or_lines
+        from app.services.records import open_shift
+        place_hint = (install_groups[2] or "").strip()
+        prop = None
+        if place_hint:
+            prop, question = resolve_or_lines(place_hint, user=user)
+            if not prop:
+                return {"ok": False, "reply": question}
+        else:
+            shift = open_shift(user)
+            prop = shift.property if shift and shift.confirmed else None
+            if not prop:
+                from app.services.board import resolve_property as resolve_by_unit
+                prop, question = resolve_by_unit("", install_groups[1], user=user)
+                if not prop:
+                    return {"ok": False, "reply": question}
+        from app.services.equipment import parse_equipment
+        parsed = parse_equipment(install_text)
+        from app.services.pending import commit_apply
+        return commit_apply(user, "move_equipment", {
+            "property_id": prop.id,
+            "target_unit_number": install_groups[1], "action": "install",
+            "kind": parsed.get("kind") or "", "item_hint": install_text,
+            "serial_number": parsed.get("serial") or "", "model": parsed.get("model") or "",
+        }, source, key)
+    groups = match.groups()
+    removing = groups[2] is None and bool(re.search(r"\b(?:remove|removed|take out|uninstall|uninstalled)\b", text, re.I))
+    if groups[2] is None and not removing:
         return None
-    item_hint = (match.group(1) or "").strip()
+    item_hint = (groups[0] or "").strip()
     from app.services.equipment import SERIAL, appliance_kinds
 
     serial = SERIAL.search(item_hint)
@@ -28,7 +68,7 @@ def _file_move_equipment(user, text: str, key: str, source: str):
     kinds = appliance_kinds(cleaned_hint)
     if not kinds:
         return None
-    place_hint = (match.group(4) or "").strip()
+    place_hint = (groups[3] or "").strip()
     prop = None
     if place_hint:
         from app.services.parse import resolve_or_lines
@@ -44,20 +84,27 @@ def _file_move_equipment(user, text: str, key: str, source: str):
         if shift and shift.confirmed:
             prop = shift.property
         if not prop:
-            # "moved the fridge from 104 to 203" — the unit number says where.
-            prop, question = resolve_by_unit("", match.group(2), user=user)
+            # Source inventory need not exist; use the named source unit to resolve site context.
+            prop, question = resolve_by_unit("", groups[1], user=user)
             if not prop:
                 return {"ok": False, "reply": question}
 
     payload = {
         "property_id": prop.id,
-        "source_unit_number": match.group(2),
-        "target_unit_number": match.group(3),
+        "source_unit_number": groups[1],
+        "target_unit_number": groups[2] or "",
+        "action": "remove" if removing else "move",
         "kind": kinds[0],
         "item_hint": item_hint,
     }
     if serial:
         payload["serial_number"] = serial.group(1).upper()
+    if removing and re.search(r"\b(?:remove|removed|take out|uninstall|uninstalled)\s+(?:the\s+)?(?:old|existing|broken|discarded)?\s*(?:washer|dryer|stove|range|fridge|refrigerator|dishwasher|microwave|water heater|air conditioner|ac)\b", text, re.I):
+        payload["action"] = "remove"
+    if parsed_model := re.search(r"\bmodel\s*[:#]?\s*([A-Z0-9-]{3,})", item_hint, re.I):
+        payload["model"] = parsed_model.group(1).upper()
+    if removing:
+        payload["action"] = "remove"
     from app.services.pending import commit_apply
 
     return commit_apply(user, "move_equipment", payload, source, key)
@@ -87,7 +134,7 @@ def _board_payload(text: str) -> dict | None:
     if building_add:
         return {"action": "set_building", "unit_number": building_add.group(1), "building": building_add.group(2), "property_hint": building_add.group(3)}
     built = re.search(
-        r"\b(?:add|create)\s+building\s+([a-z0-9][a-z0-9-]{0,20})\s+units?\s+(.+?)\s+(?:at|to|in|on)\s+([a-z][a-z0-9']{3,40})\s*$",
+        r"\b(?:add|create)\s+building\s+([a-z0-9][a-z0-9-]{0,20})\s+units?\s+(.+?)\s+(?:at|to|in|on)\s+([a-z][a-z0-9' -]{3,40})\s*$",
         raw,
         re.I,
     )
@@ -95,7 +142,7 @@ def _board_payload(text: str) -> dict | None:
         # "add building A to Woodview with units 101-112" — she names the
         # property before the unit range.
         built = re.search(
-            r"\b(?:add|create)\s+building\s+([a-z0-9][a-z0-9-]{0,20})\s+(?:to|at|in)\s+([a-z][a-z0-9']{3,40})\s+with\s+units?\s+(.+?)\s*$",
+            r"\b(?:add|create)\s+building\s+([a-z0-9][a-z0-9-]{0,20})\s+(?:to|at|in)\s+([a-z][a-z0-9' -]{3,40})\s+with\s+units?\s+(.+?)\s*$",
             raw,
             re.I,
         )
@@ -108,7 +155,7 @@ def _board_payload(text: str) -> dict | None:
             }
     if not built:
         built = re.search(
-            r"\bbuilding\s+([a-z0-9][a-z0-9-]{0,20})\s+(?:at|in)\s+([a-z][a-z0-9']{3,40})\s+(?:is\s+)?units?\s+(.+)$",
+            r"\bbuilding\s+([a-z0-9][a-z0-9-]{0,20})\s+(?:at|in)\s+([a-z][a-z0-9' -]{3,40})\s+(?:is\s+)?units?\s+(.+)$",
             raw,
             re.I,
         )
@@ -127,7 +174,7 @@ def _board_payload(text: str) -> dict | None:
             "property_hint": built.group(3),
         }
     added = re.search(
-        r"\badd\s+units?\s+(.+?)\s+(?:at|to|on|in)\s+([a-z][a-z0-9']{3,40})\s*$",
+        r"\badd\s+units?\s+(.+?)\s+(?:at|to|on|in)\s+([a-z][a-z0-9' -]{3,40})\s*$",
         raw,
         re.I,
     )
@@ -159,7 +206,7 @@ def _board_payload(text: str) -> dict | None:
             "property_hint": order.group(3),
         }
     done = re.search(
-        r"\b(.+?)\s+(?:is\s+)?done\s+in\s+(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)(?:\s+(?:at|in)\s+([a-z][a-z0-9']{3,40}))?$",
+        r"\b(.+?)\s+(?:is\s+)?done\s+in\s+(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)(?:\s+(?:at|in)\s+([a-z][a-z0-9' -]{3,40}))?$",
         raw,
         re.I,
     )
@@ -351,7 +398,7 @@ def _pieces_from_sentence(text: str, kinds: list[str]) -> list[dict]:
         return [{"kind": kind} for kind in kinds]
     parsed = parse_equipment(text)
     item = {"kind": kinds[0]}
-    for key in ("brand", "model", "serial", "size"):
+    for key in ("brand", "model", "serial", "size", "phone", "vendor", "parts_link", "repair_notes", "purchase_date", "purchase_price", "warranty_expires"):
         if parsed.get(key):
             item[key] = parsed[key]
     style = _style_in(text)
@@ -380,7 +427,7 @@ def _item_note_sentence(text: str) -> dict | None:
         return None
     parsed = parse_equipment(raw)
     item = {"kind": kinds[0]}
-    for key in ("brand", "model", "serial", "size"):
+    for key in ("brand", "model", "serial", "size", "phone", "vendor", "parts_link", "repair_notes", "purchase_date", "purchase_price", "warranty_expires"):
         if parsed.get(key):
             item[key] = parsed[key]
     style = _style_in(raw)
@@ -392,7 +439,7 @@ def _item_note_sentence(text: str) -> dict | None:
     note = _plain_note(_after_kind(raw, kinds[0]))
     if note and len(note) >= 3:
         item["notes"] = note
-    if not any(item.get(key) for key in ("brand", "model", "serial", "size", "style", "color", "notes")):
+    if not any(item.get(key) for key in ("brand", "model", "serial", "size", "style", "color", "notes", "phone", "vendor", "parts_link", "repair_notes", "purchase_date", "purchase_price", "warranty_expires")):
         return None
     return {"hint": place[0], "unit_number": place[1], "equipment": item}
 
@@ -401,6 +448,7 @@ def _file_item_note(user, text: str, key: str, source: str):
     parsed = _item_note_sentence(text)
     if not parsed:
         return None
+    from app.services.equipment import describe
     from app.services.pending import commit_apply
     from app.services.parse import resolve_or_lines
     from app.services.records import property_place
@@ -408,11 +456,35 @@ def _file_item_note(user, text: str, key: str, source: str):
     prop, ask = resolve_or_lines(parsed["hint"], user=user)
     if not prop:
         return {"ok": False, "reply": ask}
+    equipment = parsed["equipment"]
+    if not (equipment.get("serial") or equipment.get("model")):
+        from app.models import Equipment, Unit
+
+        unit = Unit.query.filter_by(property_id=prop.id, unit_number=parsed["unit_number"]).first()
+        if unit is not None:
+            rows = [
+                row
+                for row in Equipment.query.filter_by(property_id=prop.id, unit_id=unit.id).all()
+                if not row.deleted_at and (row.kind or "").lower() == (equipment.get("kind") or "").lower()
+            ]
+            if len(rows) > 1:
+                from app.services.equipment import kind_label
+
+                label = kind_label(equipment.get("kind") or "") or equipment.get("kind") or "appliance"
+                bits = []
+                for row in rows:
+                    name = describe({"kind": row.kind, "brand": row.brand, "model": row.model_number, "serial": row.serial_number}) or (row.kind or "appliance")
+                    bits.append(f"{name} (serial {row.serial_number or 'none'})")
+                return {
+                    "ok": True,
+                    "needs_answer": True,
+                    "reply": f"Unit {parsed['unit_number']} at {prop.name} has {len(rows)} {label} cards. Say the serial. " + "; ".join(bits),
+                }
     _close_questions(user)
     return commit_apply(
         user,
         "note_equipment",
-        {"property_id": prop.id, "unit_number": parsed["unit_number"], "equipment": parsed["equipment"]},
+        {"property_id": prop.id, "unit_number": parsed["unit_number"], "equipment": equipment},
         source,
         key,
     )

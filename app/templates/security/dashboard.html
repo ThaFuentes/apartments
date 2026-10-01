@@ -1,0 +1,53 @@
+{% extends "security/base.html" %}
+{% block security_content %}
+<p class="sec-lead">Live wrapper signals plus the product audit. Reverse a change from Full audit. The threat map is the same live globe used on AX.</p>
+<div class="sec-kpis">
+  <div class="sec-kpi"><strong>{{ stats.events_24h }}</strong><span>Events 24h</span></div>
+  <div class="sec-kpi"><strong>{{ stats.events_total }}</strong><span>Events total</span></div>
+  <div class="sec-kpi"><strong>{{ stats.blocked_total }}</strong><span>Blocks</span></div>
+  <div class="sec-kpi"><strong>{{ stats.active_temp_bans }}</strong><span>Temp bans</span></div>
+  <div class="sec-kpi"><strong>{{ stats.perm_bans }}</strong><span>Perm bans</span></div>
+  <div class="sec-kpi"><strong>{{ stats.honeypot_hits }}</strong><span>Honeypot</span></div>
+  <div class="sec-kpi"><strong>{{ stats.device_bans_active }}</strong><span>Device bans</span></div>
+  <div class="sec-kpi"><strong>{{ stats.product_audit_24h }}</strong><span>Product audit 24h</span></div>
+  <div class="sec-kpi"><strong>{{ stats.account_login_locks }}</strong><span>Login locks</span></div>
+</div>
+<div class="sec-split">
+  <section class="sec-panel">
+    <h2>Recent events</h2>
+    {% if not events %}<p class="sec-muted">No wrapper events yet.</p>{% endif %}
+    <table class="sec-table">
+      <thead><tr><th>When</th><th>Type</th><th>IP</th><th>Path</th></tr></thead>
+      <tbody>
+      {% for row in events %}
+        <tr>
+          <td>{{ row.when }}</td>
+          <td>{{ row.type }}</td>
+          <td class="mono">{{ row.ip }}</td>
+          <td>{{ row.path }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p><a href="/security/events">All events →</a></p>
+  </section>
+  <section class="sec-panel">
+    <h2>Active bans</h2>
+    {% if not bans %}<p class="sec-muted">No IP bans on the reputation table.</p>{% endif %}
+    <table class="sec-table">
+      <thead><tr><th>IP</th><th>Grade</th><th>Score</th><th>Until</th></tr></thead>
+      <tbody>
+      {% for row in bans %}
+        <tr>
+          <td class="mono">{{ row.ip }}</td>
+          <td>{{ row.grade }}</td>
+          <td>{{ row.score }}</td>
+          <td>{{ row.ban_until or "—" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p><a href="/security/threat-map">Open threat map →</a></p>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>Audit log</h1>
+  <p class="lead">Every change on the units you can see: who made it, when, and what it looked like before.{% if owner_console %} Owners reverse product writes from the <a href="/security/audit">security console</a>.{% endif %}</p>
+  <form method="get" action="/audit" class="filters">
+    <label>Property
+      <select name="property">
+        <option value="">All properties</option>
+        {% for prop in properties %}
+        <option value="{{ prop.id }}" {% if filters.property == prop.id|string %}selected{% endif %}>{{ prop.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Person <input name="who" value="{{ filters.who }}" placeholder="name or username"></label>
+    <label>Change <input name="action" value="{{ filters.action }}" placeholder="make ready, note, delete"></label>
+    <label>From
+      <select name="source">
+        <option value="">People and the chat</option>
+        <option value="human" {% if filters.source == 'human' %}selected{% endif %}>People only</option>
+        <option value="ai" {% if filters.source == 'ai' %}selected{% endif %}>The chat only</option>
+      </select>
+    </label>
+    <label>Days <input name="days" value="{{ days }}" inputmode="numeric" size="4"></label>
+    <button type="submit">Show</button>
+  </form>
+  <p class="hint">{{ total }} change{{ '' if total == 1 else 's' }} in the last {{ days }} days{% if shown < total %} · showing the newest {{ shown }}{% endif %}.</p>
+  {% if not entries %}
+  <p class="empty">Nothing recorded yet. Unit edits, make readies, and notes show up here with the person's name.</p>
+  {% endif %}
+  <ol class="audit-timeline">
+    {% for row in entries %}
+    <li class="audit-entry">
+      <div class="audit-head">
+        <strong>{% if row.unit %}{{ row.property }} · unit {{ row.unit }}{% else %}{{ row.property }}{% endif %}</strong>
+        <time>{{ row.when|apt_datetime }}</time>
+      </div>
+      <p class="hint">{{ row.who }} · {{ row.source }} · {{ row.action|replace('_', ' ') }}{% if row.summary %} · {{ row.summary }}{% endif %}</p>
+      {% if row.changes %}
+      <ul class="audit-changes">
+        {% for change in row.changes %}
+        <li>{{ change.field|replace('_', ' ') }}: {{ change.before }} → {{ change.after }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endblock %}

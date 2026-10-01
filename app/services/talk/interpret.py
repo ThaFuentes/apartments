@@ -9,6 +9,8 @@ from app.services.appliers_reports import apply_query_record
 from app.services.clock import local_today
 from app.services.pending import propose
 from app.services.records import dumps, job_status, loads, open_shift, site_profile
+from app.services.changes.details import describe_change
+from app.services.pending import _with_site_details
 
 from app.services.talk.outings import _answer_here, _answer_trip, _bare_day, _close_questions, _miles_numbers, parse_outing
 from app.services.talk.phrases import ADD_SITE, ADD_USER, AMOUNT, ARRIVE, DELETE, DROVE, END_DAY, END_VISIT, GIVE_BOSS, GOING, HERE, ODO, ODO_ONLY, QUESTION, REPORT, RESTORE, SEND, SETTINGS, SKIP, UNIT_JOB, WORK_VERB
@@ -196,7 +198,9 @@ def _direct_action(user, text: str, key: str, source: str):
     bits = []
     ok = True
     if miles.get("estimate") is not None:
-        result = commit_apply(user, "estimate_miles", {"miles": miles["estimate"]}, source, key + ":est")
+        from app.services.pending import apply_now
+
+        result = apply_now(user, "estimate_miles", {"miles": miles["estimate"]}, source, key + ":est")
         bits.append(result.get("reply") or "")
         ok = bool(result.get("ok"))
     if miles.get("stated") is not None:
@@ -425,31 +429,29 @@ def _direct(user, tool, payload, key, source, summary_prefix: str) -> dict:
 
 
 def _commit_waiting(user, row, tool, payload, key, source) -> dict:
-    """Complete the missing fields, then require a separate Save for this item."""
-    from app.services.changes import changes_text, describe_change, headline
-    from app.services.pending import _with_site_details
-    from app.services.records import dumps
+    """Complete the missing fields, then save: her answer is the save click.
+
+    When a check fails the card goes back to needs_answer with the reason.
+    """
+    from app.services.pending import apply_now
 
     payload = dict(payload)
     payload.pop("needs_answer", None)
     payload.pop("waiting_for", None)
     payload.pop("_changes", None)
     payload["fields_confirmed"] = True
-    changes = _with_site_details(user, tool, payload, describe_change(tool, payload, user))
-    payload["_changes"] = changes
-    summary = headline(tool, payload, changes)
-    if changes:
-        summary += "\n" + changes_text(changes)
-    summary += "\nNothing changes until you save this item."
+    result = apply_now(user, tool, payload, source, key)
     fresh = db.session.get(PendingAction, row.id)
-    if not fresh:
-        return {"ok": False, "reply": "That approval card is gone. Please tell me the work again."}
-    fresh.status = "pending"
-    fresh.payload_json = dumps(payload)
-    fresh.summary = summary
-    fresh.risk = "material"
-    db.session.commit()
-    return {"ok": True, "pending": True, "reply": summary, "proposal": {"id": fresh.id, "tool": fresh.tool, "summary": summary, "status": fresh.status, "changes": changes, "payload": payload, "risk": fresh.risk}}
+    if fresh:
+        if result.get("ok"):
+            fresh.status = "accepted"
+            fresh.result_json = dumps(result)
+        else:
+            fresh.status = "needs_answer"
+            fresh.payload_json = dumps(payload)
+            fresh.summary = result.get("reply") or fresh.summary
+        db.session.commit()
+    return result
 
 
 def _with_place_prompt(user, card: dict) -> dict:
@@ -569,7 +571,7 @@ def _unit_job(user, number: str, title: str, text: str, key: str, source: str) -
     return _with_place_prompt(user, card)
 
 
-def _finish_confirmed_unit_visit(user, result: dict, key: str, source: str) -> dict:
+def _finish_confirmed_unit_visit(user, result: dict, key: str, source: str, *, auto_save: bool = False) -> dict:
     """Finish a unit card whose property was just explicitly confirmed."""
     if not result.get("ok") or not result.get("confirmed"):
         return result
@@ -583,6 +585,14 @@ def _finish_confirmed_unit_visit(user, result: dict, key: str, source: str) -> d
         .order_by(PendingAction.id.desc())
         .first()
     )
+    if row is None and auto_save:
+        # A save click that just confirmed the site may also finish the visit:
+        # look at the newest staged (pending) visit card too.
+        row = (
+            PendingAction.query.filter_by(user_id=user.id, status="pending", tool="record_unit_visit")
+            .order_by(PendingAction.id.desc())
+            .first()
+        )
     if not row:
         return result
     payload = loads(row.payload_json)
@@ -599,12 +609,43 @@ def _finish_confirmed_unit_visit(user, result: dict, key: str, source: str) -> d
         db.session.commit()
         result["reply"] = " ".join(bit for bit in (result.get("reply"), row.summary) if bit)
         return result
-    ready = _commit_waiting(user, row, "record_unit_visit", payload, f"{key}:{row.id}:visit", source)
-    if ready.get("reply"):
-        result["reply"] = " ".join(bit for bit in (result.get("reply"), "Site confirmed. " + ready["reply"]) if bit)
-    result["ok"] = ready.get("ok", result.get("ok", False))
-    result["proposal"] = ready.get("proposal")
-    return result
+    # If the card was created by interpret (has a work-status field), keep it as a
+    # separate Save step. Bare-answer flows already committed the visit and only
+    # needed the onsite lock, so finish it now. A save click (auto_save) both
+    # confirms the site and completes the card in the same turn.
+    if payload.get("status") or payload.get("note"):
+        if auto_save:
+            payload["fields_confirmed"] = True
+            return _commit_waiting(user, row, "record_unit_visit", payload, f"{key}:{row.id}:visit", source)
+        payload.pop("waiting_for", None)
+        payload["fields_confirmed"] = True
+        from app.services.changes import describe_change, headline, changes_text
+
+        changes = _with_site_details(user, "record_unit_visit", payload, describe_change("record_unit_visit", payload, user))
+        payload["_changes"] = changes
+        row.payload_json = dumps(payload)
+        row.status = "pending"
+        row.summary = headline("record_unit_visit", payload, changes)
+        if changes:
+            row.summary += "\n" + changes_text(changes)
+        row.summary += "\nNothing changes until you save it."
+        db.session.commit()
+        if result.get("reply"):
+            result["reply"] = " ".join(bit for bit in (result.get("reply"), "Site confirmed. Say yes, save it to log the work.") if bit)
+        else:
+            result["reply"] = "Site confirmed. Say yes, save it to log the work."
+        result["ok"] = True
+        result["proposal"] = {
+            "id": row.id,
+            "tool": row.tool,
+            "summary": row.summary,
+            "risk": row.risk,
+            "status": row.status,
+            "changes": payload.get("_changes") or [],
+            "payload": payload,
+        }
+        return result
+    return _commit_waiting(user, row, "record_unit_visit", payload, f"{key}:{row.id}:visit", source)
 
 
 def _answer_plate(user, text: str, key: str, source: str) -> dict | None:

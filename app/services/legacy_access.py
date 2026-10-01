@@ -4,13 +4,19 @@ from __future__ import annotations
 ROLE_CAPABILITIES = {
     "owner": {"*"},
     "admin": {
-        "read_company", "read_assigned_properties", "read_reports", "manage_reports", "manage_settings",
+        "read_company", "read_assigned_properties", "read_reports", "manage_reports",
         "manage_users", "manage_regions", "manage_properties", "create_properties", "edit_properties",
-        "write_maintenance", "manage_property_people", "manage_team", "log_personal_expenses", "view_map", "delete_records",
+        "write_maintenance", "manage_property_people", "manage_region_people", "manage_team",
+        "manage_roles", "log_personal_expenses", "view_map", "delete_records",
     },
     "regional_manager": {
         "read_region", "read_assigned_properties", "create_properties_region", "edit_properties",
         "write_maintenance", "manage_region_people", "manage_team", "log_personal_expenses", "view_map", "delete_records",
+    },
+    "regional_property_manager": {
+        "read_region", "read_assigned_properties", "create_properties_region", "edit_properties",
+        "write_maintenance", "manage_region_people", "manage_property_people", "manage_team",
+        "log_personal_expenses", "view_map", "delete_records",
     },
     "maintenance_regional": {
         "read_region", "read_assigned_properties", "manage_region_people", "manage_team",
@@ -26,9 +32,13 @@ ROLE_CAPABILITIES = {
         "read_assigned_properties", "write_maintenance", "manage_team", "log_personal_expenses", "view_map", "delete_records",
     },
     "maintenance_person": {"read_assigned_properties", "write_maintenance", "log_personal_expenses", "delete_records"},
-    "office": {"read_company", "read_reports", "view_map"},
+    # Office works the units from the desk: make readies, move-in dates, keys, and
+    # contractors all land on the record with their name on the change.
+    "office": {"read_company", "read_reports", "write_maintenance", "view_map"},
+    # A legacy read-only login. It sees the records and changes nothing.
+    "viewer": {"read_company", "read_reports", "view_map"},
 }
-LEGACY_ROLE_MAP = {"field": "maintenance_person", "viewer": "office", "employee": "maintenance_person", "boss": "office"}
+LEGACY_ROLE_MAP = {"field": "maintenance_person", "employee": "maintenance_person", "viewer": "viewer", "boss": "viewer"}
 PERSONAL_TOOLS = {"estimate_miles", "log_expense", "log_miles", "log_odometer"}
 OWNER_PROTECTED_TOOLS = {"transfer_ownership", "delete_owner", "promote_owner"}
 TOOL_CAPABILITIES = {
@@ -81,9 +91,12 @@ def baseline_decision(role: str, tool: str, payload: dict | None = None, active:
     if tool == "update_settings":
         allowed = has_default_capability(role, "manage_settings")
         return {"ok": allowed, "reply": "This login cannot manage that company setting."}
+    if tool == "grant_access":
+        allowed = any(has_default_capability(role, cap) for cap in ("manage_users", "manage_region_people", "manage_property_people", "manage_team"))
+        return {"ok": allowed, "reply": "This login cannot change who works at that property."}
     if tool in {"invite_viewer", "update_viewer"}:
-        allowed = has_default_capability(role, "manage_users")
-        return {"ok": allowed, "reply": "This login cannot manage users."}
+        allowed = any(has_default_capability(role, cap) for cap in ("manage_users", "manage_region_people", "manage_property_people"))
+        return {"ok": allowed, "reply": "This login cannot add that role or scope."}
     if tool in PROPERTY_WRITE_TOOLS:
         if not has_default_capability(role, "write_maintenance"):
             return {"ok": False, "reply": "This login cannot make maintenance changes."}

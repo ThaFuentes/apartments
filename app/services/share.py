@@ -31,8 +31,8 @@ def start_share(user: User) -> dict:
     shift = open_shift(user)
     if not shift or not shift.confirmed:
         return {"ok": False, "reply": "Confirm the property before sharing where you are."}
-    if user.role == "viewer":
-        return {"ok": False, "reply": "Viewers do not share a location."}
+    if user.is_viewer:
+        return {"ok": False, "reply": "Office staff do not share a location."}
     now = utcnow()
     shift.sharing_on = True
     shift.share_started_at = now

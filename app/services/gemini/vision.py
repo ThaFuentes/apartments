@@ -39,9 +39,11 @@ def read_nameplate(api_key: str, model: str, image: bytes, mime: str = "image/jp
 
     parsed = plate_from_json(result.get("text") or "")
     parsed["ok"] = True
+    parsed["tokens"] = int(result.get("tokens") or 0)
     if not parsed.get("kind") and not any(parsed.get(k) for k in ("brand", "model", "serial", "size")):
         parsed = empty()
         parsed["ok"] = True
+        parsed["tokens"] = int(result.get("tokens") or 0)
         parsed["confidence"] = 0.2
         parsed["missing"] = ["kind", "brand", "model", "serial"]
     return parsed

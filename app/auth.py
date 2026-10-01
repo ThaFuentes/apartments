@@ -32,6 +32,7 @@ def login_person(user: User) -> None:
     login_user(user, remember=True)
     session.permanent = True
     session["apt_role"] = user.role
+    session["apt_bot"] = bool(getattr(user, "is_bot", False))
     try:
         from poweredbytop.auth.session import bind_login_session
 
@@ -59,6 +60,7 @@ def logout_person() -> None:
     except Exception:
         pass
     session.pop("apt_role", None)
+    session.pop("apt_bot", None)
 
 
 def attempt(username: str, password: str) -> User | None:
@@ -79,6 +81,10 @@ def safe_next(default: str = "/") -> str:
 
 
 def home_for(user) -> str:
+    from app.services.twofa import bot_setup_remaining
+
+    if bot_setup_remaining(user):
+        return "/bot-setup"
     if getattr(user, "role", "") == "viewer":
         return "/reports"
     return "/"

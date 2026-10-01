@@ -327,7 +327,7 @@ class AptTest02(AptTestBase):
             "label": "Woodview",
         }
         with patch("app.services.providers.gemini_complete", return_value={"ok": False, "error": "down"}), patch(
-            "app.services.appliers.lookup_place", return_value=hit
+            "app.services.geo.lookup_place", return_value=hit
         ):
             heard = handle_message(user, said, idempotency_key="add-wood")
             heard_words = (heard.get("reply") or "") + " " + self.save(user)

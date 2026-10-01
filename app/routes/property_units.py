@@ -66,6 +66,7 @@ def property_detail(property_id):
         city_name=city_name,
         state_name=state,
         cards=packed["cards"],
+        groups=packed["groups"],
         loose_jobs=packed["loose_jobs"],
         unit_total=packed["total"],
         sort=sort,
@@ -84,7 +85,7 @@ def property_detail(property_id):
 @bp.post("/properties/<int:property_id>")
 @login_required
 def property_save(property_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 
@@ -106,7 +107,7 @@ def property_save(property_id):
 @bp.post("/properties/<int:property_id>/delete")
 @login_required
 def property_delete(property_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 
@@ -374,6 +375,13 @@ def _equipment_form() -> dict:
         "size": (request.form.get("size") or "").strip(),
         "color": (request.form.get("color") or "").strip(),
         "notes": (request.form.get("notes") or "").strip(),
+        "phone": (request.form.get("phone") or "").strip(),
+        "vendor": (request.form.get("vendor") or "").strip(),
+        "purchase_date": (request.form.get("purchase_date") or "").strip(),
+        "purchase_price": (request.form.get("purchase_price") or "").strip(),
+        "warranty_expires": (request.form.get("warranty_expires") or "").strip(),
+        "repair_notes": (request.form.get("repair_notes") or "").strip(),
+        "parts_link": (request.form.get("parts_link") or "").strip(),
     }
 
 
@@ -397,9 +405,26 @@ def equipment_update(gear_id):
         "size": row.size_label,
         "color": row.color,
         "notes": row.notes,
+        "phone": row.phone, "vendor": row.vendor,
+        "purchase_date": row.purchase_date.isoformat() if row.purchase_date else None,
+        "purchase_price": row.purchase_price,
+        "warranty_expires": row.warranty_expires.isoformat() if row.warranty_expires else None,
+        "repair_notes": row.repair_notes, "parts_link": row.parts_link,
         "unit_id": row.unit_id,
     }
     piece = _equipment_form()
+    from datetime import date
+    from urllib.parse import urlsplit
+    try:
+        purchase_date = date.fromisoformat(piece["purchase_date"]) if piece["purchase_date"] else None
+        warranty_expires = date.fromisoformat(piece["warranty_expires"]) if piece["warranty_expires"] else None
+        purchase_price = float(piece["purchase_price"]) if piece["purchase_price"] else None
+    except ValueError:
+        flash("Purchase dates must be valid dates and price must be a number.", "warn")
+        return redirect(f"/units/{row.unit_id}")
+    if purchase_price is not None and not 0 <= purchase_price <= 1_000_000:
+        flash("Purchase price must be between $0 and $1,000,000.", "warn")
+        return redirect(f"/units/{row.unit_id}")
     row.kind = piece["kind"][:80]
     row.brand = piece["brand"][:80]
     row.style = piece["style"][:80]
@@ -408,7 +433,16 @@ def equipment_update(gear_id):
     row.size_label = piece["size"][:40]
     row.color = piece["color"][:40]
     row.notes = piece["notes"][:2000]
-    audit(current_user.id, "human", "update", "equipment", row.id, before, {"kind": row.kind, "brand": row.brand, "style": row.style, "model": row.model_number, "serial": row.serial_number, "size": row.size_label, "color": row.color, "notes": row.notes, "unit_id": row.unit_id, "property_id": row.property_id})
+    row.phone = piece["phone"][:40]
+    row.vendor = piece["vendor"][:120]
+    row.purchase_date = purchase_date
+    row.purchase_price = purchase_price
+    row.warranty_expires = warranty_expires
+    row.repair_notes = piece["repair_notes"][:4000]
+    parts = piece["parts_link"][:500]
+    parsed = urlsplit(parts) if parts else None
+    row.parts_link = parts if not parsed or parsed.scheme.lower() in {"http", "https"} else ""
+    audit(current_user.id, "human", "update", "equipment", row.id, before, {"kind": row.kind, "brand": row.brand, "style": row.style, "model": row.model_number, "serial": row.serial_number, "size": row.size_label, "color": row.color, "notes": row.notes, "phone": row.phone, "vendor": row.vendor, "purchase_date": row.purchase_date.isoformat() if row.purchase_date else None, "purchase_price": row.purchase_price, "warranty_expires": row.warranty_expires.isoformat() if row.warranty_expires else None, "repair_notes": row.repair_notes, "parts_link": row.parts_link, "unit_id": row.unit_id, "property_id": row.property_id})
     db.session.commit()
     flash(f"Updated this {kind_label(row.kind) or 'item'}.", "ok")
     return redirect(f"/units/{row.unit_id}")
@@ -455,10 +489,11 @@ def equipment_delete(gear_id):
 @login_required
 def drive():
     resp = make_response(redirect(request.form.get("next") or "/"))
+    secure = bool(request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https")
     if request.form.get("on") == "1":
-        resp.set_cookie("apt_drive", "1", max_age=60 * 60 * 12, samesite="Lax", httponly=False)
+        resp.set_cookie("apt_drive", "1", max_age=60 * 60 * 12, samesite="Lax", httponly=True, secure=secure, path="/")
     else:
-        resp.set_cookie("apt_drive", "", expires=0)
+        resp.set_cookie("apt_drive", "", expires=0, samesite="Lax", httponly=True, secure=secure, path="/")
     return resp
 
 @bp.post("/jobs/<int:job_id>/edit")
@@ -502,7 +537,7 @@ def unit_restore(unit_id):
 @bp.post("/jobs/<int:job_id>/delete")
 @login_required
 def job_delete(job_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 
@@ -513,7 +548,7 @@ def job_delete(job_id):
 @bp.post("/jobs/<int:job_id>/restore")
 @login_required
 def job_restore(job_id):
-    if current_user.role == "viewer":
+    if current_user.is_viewer:
         abort(403)
     from app.services.pending import commit_apply
 

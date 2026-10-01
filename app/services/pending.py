@@ -1,6 +1,8 @@
 """Confirm / edit / discard. The same idempotency key never writes twice."""
 from __future__ import annotations
 
+from sqlalchemy.exc import IntegrityError
+
 from app.builddb.builddb import db
 from app.models import IdempotencyKey, PendingAction
 from app.services.access import PERSONAL_TOOLS
@@ -29,6 +31,33 @@ def _prior(user_id: int, key: str) -> dict | None:
     return data
 
 
+def _remember(user_id: int, key: str, tool: str, result: dict) -> dict:
+    """Record the write under its idempotency key.
+
+    Two requests carrying the same key can both clear the prior lookup before
+    either commits (a double click, a retry, or two workers). The unique key
+    makes the loser fall back to the stored result instead of raising a 500.
+    """
+    db.session.add(
+        IdempotencyKey(
+            user_id=user_id,
+            key_text=key[:120],
+            tool=tool[:40],
+            result_json=dumps(result),
+            created_at=utcnow(),
+        )
+    )
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        prior = _prior(user_id, key)
+        if not prior:
+            raise
+        return prior
+    return result
+
+
 def apply_now(user, tool: str, payload: dict, source: str, key: str) -> dict:
     """The action channel: a model tool call, a completed card, or a session
     move runs now. The same idempotency key never writes twice."""
@@ -44,17 +73,7 @@ def apply_now(user, tool: str, payload: dict, source: str, key: str) -> dict:
     if not result.get("ok"):
         db.session.rollback()
         return result
-    db.session.add(
-        IdempotencyKey(
-            user_id=user.id,
-            key_text=key[:120],
-            tool=tool[:40],
-            result_json=dumps(result),
-            created_at=utcnow(),
-        )
-    )
-    db.session.commit()
-    return result
+    return _remember(user.id, key, tool, result)
 
 
 def commit_apply(user, tool: str, payload: dict, source: str, key: str, batch_key: str | None = None) -> dict:
@@ -86,8 +105,11 @@ def _session_only(tool: str, payload: dict) -> bool:
     return bool(keys) and keys <= move | {"property_name", "city", "region", "handoff", "trip_id"}
 
 
-def request_apply(user, tool: str, payload: dict, source: str, key: str, batch_key: str | None = None) -> dict:
-    """Stage the write: one card carrying the full before → after details."""
+def request_apply(user, tool: str, payload: dict, source: str, key: str, batch_key: str | None = None, summary: str | None = None) -> dict:
+    """Stage the write: one card carrying the full before → after details.
+
+    An explicit summary (a question the card is asking) replaces the headline.
+    """
     split = _split_plan_actions(tool, payload or {})
     if split:
         results = []
@@ -117,10 +139,11 @@ def request_apply(user, tool: str, payload: dict, source: str, key: str, batch_k
     changes = _with_site_details(user, tool, payload, changes)
     staged = dict(payload)
     staged["_changes"] = changes
-    summary = headline(tool, payload, changes)
-    if changes:
-        summary += "\n" + changes_text(changes)
-    summary += "\nNothing changes until you save it."
+    if summary is None:
+        summary = headline(tool, payload, changes)
+        if changes:
+            summary += "\n" + changes_text(changes)
+        summary += "\nNothing changes until you save it."
     return propose(user, tool, staged, summary, risk_for(tool), key, batch_key or key, source)
 
 
@@ -607,7 +630,21 @@ def confirm_one(user, row: PendingAction, source: str) -> dict:
             created_at=utcnow(),
         )
     )
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Another request already stored this key; keep its result and treat
+        # this card as saved so the click does not double-write.
+        db.session.rollback()
+        prior = _prior(user.id, row.idempotency_key)
+        if not prior:
+            raise
+        fresh = PendingAction.query.filter_by(id=row.id, user_id=user.id).first()
+        if fresh:
+            fresh.status = "accepted"
+            fresh.result_json = dumps(prior)
+            db.session.commit()
+        return prior
     return result
 
 

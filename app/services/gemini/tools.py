@@ -45,6 +45,14 @@ GEAR_PROPS = {
     "style": {"type": "string"},
     "color": {"type": "string"},
     "notes": {"type": "string"},
+    "phone": {"type": "string", "description": "Service phone"},
+    "vendor": {"type": "string"},
+    "purchase_date": {"type": "string", "description": "YYYY-MM-DD"},
+    "purchase_price": {"type": "number"},
+    "warranty_expires": {"type": "string", "description": "YYYY-MM-DD"},
+    "repair_notes": {"type": "string"},
+    "parts_link": {"type": "string", "description": "HTTP or HTTPS URL"},
+    "template_id": {"type": "integer"},
 }
 
 

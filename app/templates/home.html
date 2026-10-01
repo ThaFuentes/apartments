@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Home{% endblock %}
+{% block body_class %}desk-home{% endblock %}
 {% block main %}
 <section class="sheet">
   <div id="apt-install" class="install" hidden>
@@ -7,37 +8,123 @@
     <button type="button" id="apt-install-go">Install</button>
     <button type="button" id="apt-install-skip" class="quiet">Not now</button>
   </div>
-  <div class="hero">
-    <p class="kicker">{{ board.today.strftime("%A, %b %d").replace(" 0", " ") }}</p>
-    <h1>Today</h1>
-    <p class="lead">What’s still open, where you’ve been, and the latest work.</p>
+  <div class="hero profile-hero">
+    <div class="avatar" aria-hidden="true">{{ board.initials }}</div>
+    <div>
+      <p class="kicker">{{ board.today.strftime("%A, %b %d").replace(" 0", " ") }}</p>
+      <h1>{{ board.greeting }}, {{ board.first_name }}</h1>
+      <p class="lead">
+        {{ board.role_label or "Your desk" }}
+        {% if board.home_name %} at {{ board.home_name }}{% if board.home_city %} · {{ board.home_city }}{% endif %}
+        {% elif board.working %} · {{ board.working }}
+        {% endif %}
+      </p>
+      {% if board.people %}
+      <p class="people-row" aria-label="People at this office">
+        {% for person in board.people[:5] %}
+        <span class="avatar xs" title="{{ person.name }}">{{ person.initials }}</span>
+        {% endfor %}
+        <span class="people-count">{% if board.people|length == 1 %}Just you here today{% else %}{{ board.people|length }} people at this office{% endif %}</span>
+      </p>
+      {% endif %}
+    </div>
   </div>
 
   <div class="stats">
+    {% if not board.site_bound %}
     <a class="stat" href="/places"><strong>{{ board.place_count }}</strong><span>Properties</span></a>
-    <a class="stat" href="/plan"><strong>{{ board.open_count }}</strong><span>Open plan</span></a>
+    {% endif %}
+    <a class="stat" href="{% if board.home_id %}/properties/{{ board.home_id }}?show=make_ready{% else %}/places{% endif %}"><strong>{{ board.ready_count }}</strong><span>Make ready</span></a>
+    <a class="stat" href="{% if board.home_id %}/properties/{{ board.home_id }}?show=occupied{% else %}/places{% endif %}"><strong>{{ board.occupied_count }}</strong><span>Occupied</span></a>
+    <a class="stat" href="/plan"><strong>{{ board.open_count }}</strong><span>Still open</span></a>
+    {% if board.people %}
+    <a class="stat" href="{% if can_manage_people %}/users{% else %}/{% endif %}"><strong>{{ board.people|length }}</strong><span>People here</span></a>
+    {% endif %}
+    {% if not board.site_bound %}
     <a class="stat" href="/miles"><strong>{{ board.miles }}</strong><span>Miles</span></a>
+    {% endif %}
+  </div>
+  <div class="dash-grid">
+    {% if board.site_bound %}
+    <section class="card stack">
+      <h2>Your building today</h2>
+      {% if board.ready_units %}
+      <div class="stack">
+        {% for unit in board.ready_units %}
+        <a class="unit-card make-ready" href="/units/{{ unit.id }}">
+          <strong>Unit {{ unit.number }}</strong>
+          <span class="unit-meta">{% if unit.building %}Building {{ unit.building }} · {% endif %}Make ready</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% elif board.home_name %}
+      <p class="empty">No make-ready units at {{ board.home_name }} right now.</p>
+      {% else %}
+      <p class="empty">Your property will show here once it is assigned.</p>
+      {% endif %}
+      {% if board.home_id %}<p><a href="/properties/{{ board.home_id }}">Open {{ board.home_name }}</a></p>{% endif %}
+    </section>
+    {% else %}
+    <section class="card stack">
+      <h2>Properties</h2>
+      {% if board.places %}
+      <table class="dash-table">
+        <thead><tr><th>Property</th><th>City</th><th>Units</th><th>Last work</th></tr></thead>
+        <tbody>
+        {% for place in board.places %}
+          <tr>
+            <td><a href="/properties/{{ place.id }}">{{ place.name }}</a></td>
+            <td>{{ place.city_label }}</td>
+            <td>{{ place.unit_count or "—" }}</td>
+            <td>{% if place.last %}{{ place.last|apt_when }}{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="empty">No properties yet. Tell chat the site name and city.</p>
+      {% endif %}
+    </section>
+    {% endif %}
+    <section class="card stack">
+      <h2>Still open</h2>
+      {% if not board.plan %}
+      <p class="empty">Nothing is open on the plan.</p>
+      {% else %}
+      <div class="stack">
+        {% for item in board.plan %}
+        <a class="unit-card" href="{% if item.trip_id %}/trips/{{ item.trip_id }}{% else %}/plan{% endif %}">
+          <strong>{% if item.unit %}Unit {{ item.unit }} · {% endif %}{{ item.title }}</strong>
+          <span class="unit-meta">{{ item.property }}{% if item.left %} · {{ item.left }}{% endif %} · {{ item.status }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+    {% if board.people %}
+    <section class="card stack people-card">
+      <h2>People at this office</h2>
+      <ul class="people-list">
+        {% for person in board.people %}
+        <li>
+          <span class="avatar sm" aria-hidden="true">{{ person.initials }}</span>
+          <span>
+            <strong>{{ person.name }}{% if person.is_you %} · you{% endif %}</strong>
+            <span class="unit-meta">{{ person.title }}</span>
+          </span>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
   </div>
 
-  <h2>Still open</h2>
-  {% if not board.plan %}
-  <p class="empty">Nothing is open on the plan.</p>
-  {% else %}
-  <div class="stack">
-    {% for item in board.plan %}
-    <a class="unit-card" href="{% if item.trip_id %}/trips/{{ item.trip_id }}{% else %}/plan{% endif %}">
-      <strong>{% if item.unit %}Unit {{ item.unit }} · {% endif %}{{ item.title }}</strong>
-      <span class="unit-meta">{{ item.property }}{% if item.left %} · {{ item.left }}{% endif %} · {{ item.status }}</span>
-    </a>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  <h2>Where you’ve been</h2>
+  {% if not board.site_bound %}
+  <h2 class="phone-only">Where you’ve been</h2>
   {% if not board.places %}
-  <p class="empty">No properties yet.</p>
+  <p class="empty phone-only">No properties yet.</p>
   {% else %}
-  <div class="stack">
+  <div class="stack phone-only">
     {% for place in board.places %}
     <a class="unit-card" href="/properties/{{ place.id }}">
       <strong>{{ place.name }}</strong>
@@ -50,7 +137,8 @@
     </a>
     {% endfor %}
   </div>
-  <p><a href="/places">All properties</a></p>
+  <p class="phone-only"><a href="/places">All properties</a></p>
+  {% endif %}
   {% endif %}
 
   <h2>Latest work</h2>
@@ -71,6 +159,7 @@
   </div>
   {% endif %}
 
+  {% if not board.site_bound %}
   <details>
     <summary>Add a site</summary>
     <form method="post" action="/sites" class="card stack">
@@ -82,6 +171,7 @@
       <button type="submit">Save site</button>
     </form>
   </details>
+  {% endif %}
 
   <details>
     <summary>Log work</summary>
