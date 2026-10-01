@@ -19,6 +19,9 @@
         {% elif board.working %} · {{ board.working }}
         {% endif %}
       </p>
+      {% if can_manage_people %}
+      <p><a href="/users">Hire someone</a></p>
+      {% endif %}
       {% if board.people %}
       <p class="people-row" aria-label="People at this office">
         {% for person in board.people[:5] %}
@@ -115,6 +118,7 @@
         </li>
         {% endfor %}
       </ul>
+      {% if can_manage_people %}<p><a href="/users">Hire someone</a></p>{% endif %}
     </section>
     {% endif %}
   </div>

@@ -188,20 +188,35 @@ def settings_key_delete(key_id):
 def users():
     if request.method == "POST":
         from app.services.pending import commit_apply
+        from app.services.people import suggest_username
 
+        display = (request.form.get("display_name") or "").strip()
+        username = (request.form.get("username") or "").strip()
+        if not display and not username:
+            flash("Need their name.", "warn")
+            return redirect("/users")
+        if not username:
+            username = suggest_username(display)
+        grants = []
+        for raw in request.form.getlist("property_id"):
+            try:
+                grants.append({"property_id": int(raw), "see": True, "edit": True})
+            except (TypeError, ValueError):
+                continue
         payload = {
-            "username": request.form.get("username") or "",
-            "display_name": request.form.get("display_name") or "",
-            "role": request.form.get("role") or "viewer",
+            "username": username,
+            "display_name": display or username,
+            "role": request.form.get("role") or "office",
             "email": request.form.get("email") or "",
             "phone": request.form.get("phone") or "",
             "password": request.form.get("password") or "",
             "is_bot": request.form.get("is_bot") == "1",
             "security_email": request.form.get("security_email") or "",
             "reset_email": request.form.get("reset_email") or "",
-            "can_see_reports": request.form.get("can_see_reports") == "1",
-            "can_see_history": request.form.get("can_see_history") == "1",
+            "can_see_reports": True,
+            "can_see_history": True,
             "can_see_live_map": request.form.get("can_see_live_map") == "1",
+            "_grants": grants,
         }
         result = commit_apply(current_user, "invite_viewer", payload, "human", _key() or _new_key())
         flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
@@ -214,10 +229,15 @@ def users():
     if not can_manage_company_users(current_user):
         people = [person for person in people if person.id == current_user.id or can_manage_user(current_user, person)]
     properties = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
+    from app.services.access import can_manage_property_people, sees_all
+
+    if current_user.role != "owner" and not sees_all(current_user):
+        properties = [prop for prop in properties if can_manage_property_people(current_user, prop.id)]
     access = {(row.user_id, row.property_id): row for row in PropertyAccess.query.all()}
     from app.models import Region, RegionAccess, UserCapability
     from app.services.access import CAPABILITY_LABELS, ROLE_CAPABILITIES, normalize_role
     from app.services.hats import describe_hat, hats_for
+    from app.services.roles import custom_roles
 
     overrides = {(row.user_id, row.capability): row.granted for row in UserCapability.query.filter_by(scope_key="global").all()}
     regional_policies = {(row.user_id, int(row.scope_key[7:])): row.granted for row in UserCapability.query.filter_by(capability="open_team_default_property").all() if row.scope_key.startswith("region:") and row.scope_key[7:].isdigit()}
@@ -250,6 +270,11 @@ def users():
         hat_text={hat.id: describe_hat(hat) for person in people for hat in hats_for(person)},
         regions=Region.query.filter_by(active=True).order_by(Region.name.asc()).all(),
         can_add_titles=can_create_custom_role(current_user),
+        extra_titles=custom_roles(),
+        seats={
+            person.id: [prop.name for prop in properties if access.get((person.id, prop.id))]
+            for person in people
+        },
         regions_by_manager=regions_by_manager,
         regional_policies=regional_policies,
         msg_key=_new_key(),

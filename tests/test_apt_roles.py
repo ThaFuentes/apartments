@@ -1,7 +1,7 @@
 """Hiring chain, extra hats, and custom titles."""
 from __future__ import annotations
 
-from tests.apt_test_support import AptTestBase, db
+from tests.apt_test_support import APP, AptTestBase, db
 from app.services.access import can_create_user, can_open_people_page
 from app.services.hats import describe_hats, set_hat
 from app.services.legacy_access import has_default_capability
@@ -83,3 +83,9 @@ class RoleChainTests(AptTestBase):
         db.session.commit()
         self.assertTrue(can_open_people_page(owner))
         self.assertTrue(can_open_people_page(pm))
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "pam", "password": "field-pass-9"})
+        page = client.get("/users")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Hire someone", page.data)

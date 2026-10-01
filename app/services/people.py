@@ -51,6 +51,23 @@ def person_label(user_id: int | None) -> str:
     return (person.display_name or person.username or "").strip()
 
 
+def suggest_username(display_name: str) -> str:
+    """A login from a person's name: Dana Desk → dana.desk, then dana.desk2 if taken."""
+    text = re.sub(r"[^a-z0-9]+", ".", (display_name or "").strip().lower()).strip(".")
+    if len(text) < 2:
+        text = "staff"
+    base = text[:70]
+    ident = base
+    n = 2
+    while find_user(ident):
+        ident = f"{base}{n}"[:80]
+        n += 1
+        if n > 80:
+            ident = f"{base}.{secrets.token_hex(2)}"[:80]
+            break
+    return ident
+
+
 def find_user(username: str) -> User | None:
     text = (username or "").strip()
     if not text:

@@ -324,6 +324,10 @@ def apply_invite_viewer(user, payload, source) -> dict:
     if not can_create_user(user, role):
         return {"ok": False, "reply": "This login cannot add that role or scope."}
     username = (payload.get("username") or "").strip()
+    if not username:
+        from app.services.people import suggest_username
+
+        username = suggest_username(payload.get("display_name") or "staff")
     try:
         created, generated = create_user(
             username=username,
@@ -400,10 +404,22 @@ def apply_grant_access(user, payload, source) -> dict:
     person = find_person(payload.get("username") or "")
     if not person:
         return {"ok": False, "reply": "I can't find that login."}
-    verdict = resolve_property(payload.get("property_name") or "", payload.get("city") or "", user=user)
-    if verdict.get("state") != "resolved":
-        return {"ok": False, "reply": verdict.get("message") or "Which property is this for?"}
-    prop = verdict["property"]
+    prop = None
+    raw_id = payload.get("property_id")
+    if raw_id:
+        from app.models import Property
+
+        try:
+            prop = db.session.get(Property, int(raw_id))
+        except (TypeError, ValueError):
+            prop = None
+        if prop and prop.deleted_at:
+            prop = None
+    if prop is None:
+        verdict = resolve_property(payload.get("property_name") or "", payload.get("city") or "", user=user)
+        if verdict.get("state") != "resolved":
+            return {"ok": False, "reply": verdict.get("message") or "Which property is this for?"}
+        prop = verdict["property"]
     if not can_manage_property_people(user, prop.id):
         return {"ok": False, "reply": "You do not manage people at that property."}
     row = PropertyAccess.query.filter_by(user_id=person.id, property_id=prop.id).first()

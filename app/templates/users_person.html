@@ -1,0 +1,180 @@
+<article class="card stack person-card">
+  <header class="person-head">
+    <span class="avatar sm" aria-hidden="true">{{ (person.display_name or person.username).split()[0][0] }}{% if (person.display_name or '').split()|length > 1 %}{{ (person.display_name.split()[1][0]) }}{% endif %}</span>
+    <div>
+      <h3>{{ person.display_name or person.username }} <span class="hint">{{ person.username }}</span>
+        {% if person.is_bot %}<span class="badge">BOT</span>{% endif %}
+      </h3>
+      <p>{{ hat_lines.get(person.id) or person.role }}</p>
+      <p class="unit-meta">
+        {{ person.phone or "No phone" }}
+        · {{ person.email or "No login email" }}
+        {% if seats.get(person.id) %} · {{ seats[person.id]|join(", ") }}{% endif %}
+      </p>
+    </div>
+  </header>
+
+  <form method="post" action="/users/{{ person.id }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Position
+      <select name="role" {% if person.role == 'owner' %}disabled{% endif %}>
+        {% for value, label in all_role_choices %}
+        <option value="{{ value }}" {% if person.role == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+        {% set known = all_role_choices|map(attribute=0)|list %}
+        {% if person.role not in known %}
+        <option value="{{ person.role }}" selected>{{ person.role }} (current)</option>
+        {% endif %}
+      </select>
+    </label>
+    {% if person.role == 'owner' %}
+    <input type="hidden" name="role" value="owner">
+    {% endif %}
+    <label>Login email <input name="email" value="{{ person.email or '' }}" placeholder="Blank keeps the current email"></label>
+    <label>Phone <input name="phone" value="{{ person.phone or '' }}" autocomplete="tel" placeholder="Blank keeps the current number"></label>
+    <div class="actions">
+      <button type="submit">Save</button>
+    </div>
+  </form>
+
+  <details>
+    <summary>Extra role at a property</summary>
+    <form method="post" action="/users/{{ person.id }}/hat" class="stack" style="margin-top:0.7rem">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <p class="hint">Owner stays owner. Amy can also be maintenance supervisor at Madison Sq.</p>
+      {% for hat in hats.get(person.id, []) %}
+      <p>{{ hat_text.get(hat.id) }}
+        <button class="ghost" form="hat-del-{{ hat.id }}" type="submit">Remove</button>
+      </p>
+      {% endfor %}
+      <label>Extra role
+        <select name="role">
+          {% for value, label in hat_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>At property
+        <select name="property_id">
+          <option value="">—</option>
+          {% for prop in properties %}
+          <option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Or region
+        <select name="region_id">
+          <option value="">—</option>
+          {% for region in regions %}
+          <option value="{{ region.id }}">{{ region.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Label <span class="hint">optional</span> <input name="label" placeholder="Maintenance supervisor"></label>
+      <button type="submit">Add extra role</button>
+    </form>
+    {% for hat in hats.get(person.id, []) %}
+    <form id="hat-del-{{ hat.id }}" method="post" action="/users/{{ person.id }}/hat/{{ hat.id }}/delete">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    </form>
+    {% endfor %}
+  </details>
+
+  {% if person.role != 'owner' %}
+  <details>
+    <summary>Properties they can work</summary>
+    <form method="post" action="/users/{{ person.id }}/access" class="stack" style="margin-top:0.7rem">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% for prop in properties %}
+      {% set row = access.get((person.id, prop.id)) %}
+      <fieldset class="stack">
+        <legend>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</legend>
+        <label class="check"><input type="checkbox" name="see-{{ prop.id }}" value="1" {% if row %}checked{% endif %}> See</label>
+        {% if person.role not in ['owner', 'admin', 'viewer'] %}
+        <label class="check"><input type="checkbox" name="edit-{{ prop.id }}" value="1" {% if row and row.can_edit %}checked{% endif %}> Edit units</label>
+        {% endif %}
+        <label class="check"><input type="checkbox" name="notify-{{ prop.id }}" value="1" {% if row and row.notify %}checked{% endif %}> Notify when units change</label>
+      </fieldset>
+      {% endfor %}
+      {% if not properties %}
+      <p class="empty">Add a property first.</p>
+      {% endif %}
+      <button type="submit">Save property access</button>
+    </form>
+  </details>
+
+  <details>
+    <summary>Emails, bot, and permissions</summary>
+    <form method="post" action="/users/{{ person.id }}" class="stack" style="margin-top:0.7rem">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="role" value="{{ person.role }}">
+      <label>2FA email <input name="security_email" value="{{ person.security_email or '' }}" placeholder="Codes go here — keep it different from reset"></label>
+      <label>Password-reset email <input name="reset_email" value="{{ person.reset_email or '' }}" placeholder="Reset links go here — keep it different from 2FA"></label>
+      <label class="check"><input type="checkbox" name="clear_phone" value="1"> Remove phone</label>
+      <label class="check"><input type="checkbox" name="clear_email" value="1"> Remove login email</label>
+      <label class="check"><input type="checkbox" name="can_see_reports" value="1" {% if person.can_see_reports %}checked{% endif %}> Reports</label>
+      <label class="check"><input type="checkbox" name="can_see_history" value="1" {% if person.can_see_history %}checked{% endif %}> History</label>
+      <label class="check"><input type="checkbox" name="can_see_live_map" value="1" {% if person.can_see_live_map %}checked{% endif %}> Live map</label>
+      <label class="check"><input type="checkbox" name="active" value="1" {% if person.active %}checked{% endif %}> Active</label>
+      <button type="submit">Update</button>
+    </form>
+    <div class="actions">
+      <form method="post" action="/users/{{ person.id }}/bot">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="is_bot" value="{{ '0' if person.is_bot else '1' }}">
+        <button class="quiet" type="submit">{% if person.is_bot %}Unmark bot{% else %}Mark as bot{% endif %}</button>
+      </form>
+      <form method="post" action="/users/{{ person.id }}/reset">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="quiet" type="submit">Send password reset</button>
+      </form>
+    </div>
+    <form method="post" action="/users/{{ person.id }}/capabilities" class="stack capability-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h3>What {{ person.display_name or person.username }} can do</h3>
+      <p class="hint">Role defaults are shown. Choose Allow or Deny for a personal override, or Default to follow the role.</p>
+      <div class="capability-grid">
+      {% for capability, label in capabilities.items()|sort(attribute='1') if capability not in ['open_team_default_property', 'manage_security'] %}
+        {% set override = overrides.get((person.id, capability)) %}
+        {% set state = 'allow' if override == true else 'deny' if override == false else 'default' %}
+        <label class="capability-row">
+          <span>{{ label }} <small>{% if default_capabilities.get((person.id, capability)) %}Role default: on{% else %}Role default: off{% endif %}</small></span>
+          <select name="cap-{{ capability }}" aria-label="{{ label }} for {{ person.username }}">
+            <option value="default" {% if state == 'default' %}selected{% endif %}>Role default</option>
+            <option value="allow" {% if state == 'allow' %}selected{% endif %}>Allow</option>
+            <option value="deny" {% if state == 'deny' %}selected{% endif %}>Deny</option>
+          </select>
+        </label>
+      {% endfor %}
+      </div>
+      {% if person.role == 'property_manager' and current_user.role in ['owner', 'admin'] %}
+      {% set team_policy = overrides.get((person.id, 'open_team_default_property')) %}
+      <label>Team members may choose their own default property
+        <select name="team-default-global">
+          <option value="default" {% if team_policy is none %}selected{% endif %}>Default (locked to assigned property)</option>
+          <option value="allow" {% if team_policy == true %}selected{% endif %}>Allow team members to choose</option>
+          <option value="deny" {% if team_policy == false %}selected{% endif %}>Keep team members locked</option>
+        </select>
+      </label>
+      {% endif %}
+      <button type="submit">Save personal permissions</button>
+    </form>
+    {% if person.role == 'property_manager' and current_user.role in ['owner', 'admin', 'regional_manager', 'regional_property_manager'] %}
+    {% for region_id in regions_by_manager.get(person.id, []) %}
+    <form method="post" action="/users/{{ person.id }}/default-policy/{{ region_id }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h4>Regional default-property policy · Region {{ region_id }}</h4>
+      <label>Team members may choose their own default property
+        <select name="policy">
+          <option value="default" {% if regional_policies.get((person.id, region_id)) is none %}selected{% endif %}>Use company/manager policy</option>
+          <option value="allow" {% if regional_policies.get((person.id, region_id)) == true %}selected{% endif %}>Allow team members to choose</option>
+          <option value="deny" {% if regional_policies.get((person.id, region_id)) == false %}selected{% endif %}>Keep team members locked</option>
+        </select>
+      </label>
+      <button type="submit">Save regional policy</button>
+    </form>
+    {% endfor %}
+    {% endif %}
+  </details>
+  {% endif %}
+</article>

@@ -281,3 +281,49 @@ class AptTest09(AptTestBase):
         self.assertEqual(person.phone, "432-555-0123")
         self.assertEqual(person.display_name, "Lena Line")
         self.assertIsNotNone(owner.id)
+
+    def test_hire_form_makes_a_username_and_seats_them(self):
+        from app.models import PropertyAccess
+        from app.services.people import find_user
+        from app.services.records import ensure_property
+
+        owner = self.owner()
+        wood = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        page = client.get("/users")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Hire someone", page.data)
+        self.assertIn(b"Extra job title", page.data)
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        made = client.post(
+            "/users",
+            data={
+                "csrf_token": token,
+                "display_name": "Mona Miles",
+                "role": "office",
+                "property_id": str(wood.id),
+                "phone": "432-555-0199",
+            },
+        )
+        self.assertEqual(made.status_code, 302)
+        person = find_user("mona.miles")
+        self.assertIsNotNone(person)
+        self.assertEqual(person.display_name, "Mona Miles")
+        self.assertEqual(person.role, "office")
+        row = PropertyAccess.query.filter_by(user_id=person.id, property_id=wood.id).one()
+        self.assertTrue(row.can_edit)
+
+    def test_chat_hires_a_person_by_full_name(self):
+        from app.services.records import ensure_property
+
+        owner = self.owner()
+        ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        heard = handle_message(owner, "hire Dana Desk as office at Woodview", idempotency_key="hire-dana")
+        reply = (heard.get("reply") or "").lower()
+        self.assertIn("dana desk", reply)
+        self.assertIn("phone", reply)

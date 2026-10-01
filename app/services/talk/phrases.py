@@ -135,6 +135,11 @@ _STAFF_NAME_FIRST = re.compile(
     re.I,
 )
 
+HIRE_NAMED = re.compile(
+    rf"\b(?:hire|add)\s+([A-Za-z][A-Za-z.'-]+(?:\s+[A-Za-z][A-Za-z.'-]+){{1,3}})\s+as\s+(?:an?\s+)?({_ROLE_NAMES})(?:\s+(?:at|for|on)\s+(.+))?$",
+    re.I,
+)
+
 _UNIT_GEAR = re.compile(
     r"^(?P<head>.+?)\s+(?:to|in|on|for|into)?\s*(?:unit|apt|apartment)\s*#?\s*(?P<num>[0-9]{1,6}[a-z]?)\b"
     r"(?:\s*,?\s+(?:at|in)\s+(?P<place>[a-z][a-z0-9 .',&/-]{1,60}))?[.!?]?$",

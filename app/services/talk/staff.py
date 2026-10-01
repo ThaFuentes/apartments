@@ -6,7 +6,7 @@ import re
 from app.builddb.builddb import db
 from app.models import ApiCredential
 
-from app.services.talk.phrases import ADD_USER, AS_ROLE, EMAIL, GIVE_BOSS, PASSWORD, _ORDINALS, _STAFF_NAME_FIRST, _STAFF_ROLE_FIRST
+from app.services.talk.phrases import ADD_USER, AS_ROLE, EMAIL, GIVE_BOSS, HIRE_NAMED, PASSWORD, _ORDINALS, _STAFF_NAME_FIRST, _STAFF_ROLE_FIRST
 from app.services.talk.textutil import _role_word
 
 # A spoken number: 432-555-0100, (432) 555 0100, +1 432.555.0100.
@@ -193,12 +193,25 @@ def _staff_clauses(rest: str) -> list[tuple[str, list[str]]]:
 
 def _staff_from_sentence(actor, text: str, key: str, source: str):
     raw = (text or "").strip().rstrip(".")
+    hired = HIRE_NAMED.search(raw)
     named = _STAFF_NAME_FIRST.search(raw)
     role_first = _STAFF_ROLE_FIRST.search(raw)
-    if named:
+    if hired:
+        from app.services.people import suggest_username
+
+        full_name, role_word = hired.group(1).strip(), hired.group(2)
+        username = suggest_username(full_name)
+        tail_at = hired.end()
+        spoken = full_name
+        place_hint = (hired.group(3) or "").strip()
+    elif named:
         username, role_word, tail_at = named.group(1), named.group(2), named.end()
+        spoken = ""
+        place_hint = ""
     elif role_first:
         role_word, username, tail_at = role_first.group(1), role_first.group(2), role_first.end()
+        spoken = ""
+        place_hint = ""
     else:
         return None
     from app.services.access import can_create_user, can_manage_user
@@ -216,6 +229,8 @@ def _staff_from_sentence(actor, text: str, key: str, source: str):
     office = requested_role == "office"
     title = "office manager" if office else "employee" if role == "field" else role.replace("_", " ")
     clauses = _staff_clauses(raw[tail_at:])
+    if place_hint:
+        clauses.append(("edit", [place_hint]))
     from app.services.pending import request_apply
 
     person = find_user(username)
@@ -233,7 +248,7 @@ def _staff_from_sentence(actor, text: str, key: str, source: str):
         lines.append(changed.get("reply") or "")
     else:
         mail = EMAIL.search(raw)
-        spoken_name = _name_in(raw, username)
+        spoken_name = spoken or _name_in(raw, username)
         invite_payload = {
             "username": username,
             "display_name": spoken_name or named,

@@ -124,6 +124,25 @@ main { padding: 0.4rem 1rem 1rem; max-width: 40rem; margin: 0 auto; }
 }
 .people-list strong { display: block; font-size: 1rem; }
 .people-card { background: linear-gradient(180deg, #fff8ef 0%, #fffaf3 100%); }
+.hire-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+.hire-card h2 { color: var(--ink); }
+.property-picks {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 0.75rem 0.9rem;
+  background: var(--paper);
+}
+.property-picks legend { font-weight: 750; color: var(--muted); padding: 0 0.25rem; }
+.title-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.person-head { display: flex; gap: 0.8rem; align-items: flex-start; }
+.person-head h3 { margin: 0; }
+@media (min-width: 900px) {
+  .hire-grid { grid-template-columns: 1.3fr 0.9fr; align-items: start; }
+}
 .lead, .empty { color: var(--muted); }
 .stack, .card, .edit, .review { display: flex; flex-direction: column; gap: 0.7rem; }
 .card, .review, .edit, .list li, .hero, .composer, .camera {

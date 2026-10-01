@@ -1,206 +1,83 @@
 {% extends "base.html" %}
 {% block title %}People{% endblock %}
+{% block body_class %}people-desk{% endblock %}
 {% block main %}
 <section class="sheet">
-  <h1>People</h1>
-  <p class="lead">Owner, then admin, then regional manager, then regional property manager, then property manager. Each manager hires the people under them. An owner can also wear a site role, like maintenance supervisor at Madison Sq, and still keep overall control.</p>
-
-  {% if can_add_titles %}
-  <form method="post" action="/roles" class="card stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <h2>Extra job title</h2>
-    <p class="hint">Make a title when the built-in list is missing one. It starts from an existing role’s permissions.</p>
-    <label>Name <input name="label" required placeholder="Leasing agent"></label>
-    <label>Based on
-      <select name="based_on">
-        {% for value, label in hat_choices %}
-        <option value="{{ value }}">{{ label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit">Add title</button>
-  </form>
-  {% endif %}
-
-  <form method="post" class="stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
-    <label>Username <input name="username" required autocapitalize="none" placeholder="boss"></label>
-    <label>Name <input name="display_name" placeholder="How reports should address them"></label>
-    <label>Role
-      <select name="role">
-        {% for value, label in role_choices %}
-        <option value="{{ value }}">{{ label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Login email <span class="hint">optional</span> <input name="email" placeholder="Leave blank if they have none"></label>
-    <label>2FA email <span class="hint">use a different inbox from login and reset</span> <input name="security_email" placeholder="codes@…"></label>
-    <label>Password-reset email <span class="hint">required for bots, and it should not match login or 2FA</span> <input name="reset_email" placeholder="resets@…"></label>
-    <label>Phone <span class="hint">optional</span> <input name="phone" autocomplete="tel" placeholder="432-555-0100"></label>
-    <label>Password <span class="hint">optional — one is created if you leave this blank</span> <input name="password" type="text" minlength="8" autocomplete="off"></label>
-    <label class="check"><input type="checkbox" name="is_bot" value="1"> This is a bot — own login, granular permissions, required 2FA and a separate reset inbox</label>
-    <label class="check"><input type="checkbox" name="can_see_reports" value="1" checked> Reports</label>
-    <label class="check"><input type="checkbox" name="can_see_history" value="1" checked> History</label>
-    <label class="check"><input type="checkbox" name="can_see_live_map" value="1"> Live map</label>
-    <button type="submit">Add person</button>
-  </form>
-  <h2>Logins</h2>
-  {% for person in people %}
-  <form method="post" action="/users/{{ person.id }}" class="card stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <h3>{{ person.display_name or person.username }} <span class="hint">{{ person.username }}</span>
-      {% if person.is_bot %}<span class="badge">BOT</span>{% endif %}
-    </h3>
-    <p>{{ hat_lines.get(person.id) or person.role }}</p>
-    <p>{{ person.email or "No login email" }}{% if person.security_email %} · 2FA {{ person.security_email }}{% endif %}{% if person.reset_email %} · reset {{ person.reset_email }}{% endif %}</p>
-    <label>Role
-      <select name="role" {% if person.role == 'owner' %}disabled{% endif %}>
-        {% for value, label in all_role_choices %}
-        <option value="{{ value }}" {% if person.role == value %}selected{% endif %}>{{ label }}</option>
-        {% endfor %}
-        {% set known = all_role_choices|map(attribute=0)|list %}
-        {% if person.role not in known %}
-        <option value="{{ person.role }}" selected>{{ person.role }} (current)</option>
-        {% endif %}
-      </select>
-    </label>
-    {% if person.role == 'owner' %}
-    <input type="hidden" name="role" value="owner">
-    {% endif %}
-    <label>Login email <input name="email" value="{{ person.email or '' }}" placeholder="Blank keeps the current email"></label>
-    <label>2FA email <input name="security_email" value="{{ person.security_email or '' }}" placeholder="Codes go here — keep it different from reset"></label>
-    <label>Password-reset email <input name="reset_email" value="{{ person.reset_email or '' }}" placeholder="Reset links go here — keep it different from 2FA"></label>
-    <label>Phone <input name="phone" value="{{ person.phone or '' }}" autocomplete="tel" placeholder="Blank keeps the current number"></label>
-    <label class="check"><input type="checkbox" name="clear_phone" value="1"> Remove phone</label>
-    <label class="check"><input type="checkbox" name="clear_email" value="1"> Remove login email</label>
-    <label class="check"><input type="checkbox" name="can_see_reports" value="1" {% if person.can_see_reports %}checked{% endif %}> Reports</label>
-    <label class="check"><input type="checkbox" name="can_see_history" value="1" {% if person.can_see_history %}checked{% endif %}> History</label>
-    <label class="check"><input type="checkbox" name="can_see_live_map" value="1" {% if person.can_see_live_map %}checked{% endif %}> Live map</label>
-    <label class="check"><input type="checkbox" name="active" value="1" {% if person.active %}checked{% endif %}> Active</label>
-    <button type="submit">Update</button>
-  </form>
-  <div class="actions">
-    {% if person.role != 'owner' %}
-    <form method="post" action="/users/{{ person.id }}/bot">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="is_bot" value="{{ '0' if person.is_bot else '1' }}">
-      <button class="quiet" type="submit">{% if person.is_bot %}Unmark bot{% else %}Mark as bot{% endif %}</button>
-    </form>
-    {% endif %}
-    <form method="post" action="/users/{{ person.id }}/reset">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button class="quiet" type="submit">Send password reset</button>
-    </form>
+  <div class="hero profile-hero">
+    <div>
+      <p class="kicker">Team</p>
+      <h1>People</h1>
+      <p class="lead">Hire someone, give them a title, and pick the property they work. Chat can do this too: “hire Dana Desk as office at Woodview.”</p>
+    </div>
   </div>
-  <form method="post" action="/users/{{ person.id }}/hat" class="card stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <h3>Also assigned as</h3>
-    <p class="hint">Owner stays owner. Add a site role so Amy is also maintenance supervisor at Madison Sq.</p>
-    {% for hat in hats.get(person.id, []) %}
-    <p>{{ hat_text.get(hat.id) }}
-      <button class="ghost" form="hat-del-{{ hat.id }}" type="submit">Remove</button>
-    </p>
-    {% endfor %}
-    <label>Extra role
-      <select name="role">
-        {% for value, label in hat_choices %}
-        <option value="{{ value }}">{{ label }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>At property
-      <select name="property_id">
-        <option value="">—</option>
-        {% for prop in properties %}
-        <option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Or region
-      <select name="region_id">
-        <option value="">—</option>
-        {% for region in regions %}
-        <option value="{{ region.id }}">{{ region.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>Label <span class="hint">optional</span> <input name="label" placeholder="Maintenance supervisor"></label>
-    <button type="submit">Add extra role</button>
-  </form>
-  {% for hat in hats.get(person.id, []) %}
-  <form id="hat-del-{{ hat.id }}" method="post" action="/users/{{ person.id }}/hat/{{ hat.id }}/delete">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  </form>
-  {% endfor %}
-  {% if person.role != 'owner' %}
-  <form method="post" action="/users/{{ person.id }}/capabilities" class="card stack capability-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <h3>What {{ person.display_name or person.username }} can do</h3>
-    <p class="hint">Role defaults are shown. Choose Allow or Deny for a personal override, or Default to follow the role. Property assignments still limit which records they can reach. Admins cannot grant security controls.</p>
-    <div class="capability-grid">
-    {% for capability, label in capabilities.items()|sort(attribute='1') if capability not in ['open_team_default_property', 'manage_security'] %}
-      {% set override = overrides.get((person.id, capability)) %}
-      {% set state = 'allow' if override == true else 'deny' if override == false else 'default' %}
-      <label class="capability-row">
-        <span>{{ label }} <small>{% if default_capabilities.get((person.id, capability)) %}Role default: on{% else %}Role default: off{% endif %}</small></span>
-        <select name="cap-{{ capability }}" aria-label="{{ label }} for {{ person.username }}">
-          <option value="default" {% if state == 'default' %}selected{% endif %}>Role default</option>
-          <option value="allow" {% if state == 'allow' %}selected{% endif %}>Allow</option>
-          <option value="deny" {% if state == 'deny' %}selected{% endif %}>Deny</option>
+
+  <div class="hire-grid">
+    <form method="post" class="card stack hire-card">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+      <h2>Hire someone</h2>
+      <label>Their name <input name="display_name" required autocomplete="name" placeholder="Dana Desk"></label>
+      <label>Position
+        <select name="role">
+          {% for value, label in role_choices %}
+          <option value="{{ value }}" {% if value == 'office' %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
         </select>
       </label>
-    {% endfor %}
-    </div>
-    {% if person.role == 'property_manager' and current_user.role in ['owner', 'admin'] %}
-    {% set team_policy = overrides.get((person.id, 'open_team_default_property')) %}
-    <label>Team members may choose their own default property
-      <select name="team-default-global">
-        <option value="default" {% if team_policy is none %}selected{% endif %}>Default (locked to assigned property)</option>
-        <option value="allow" {% if team_policy == true %}selected{% endif %}>Allow team members to choose</option>
-        <option value="deny" {% if team_policy == false %}selected{% endif %}>Keep team members locked</option>
-      </select>
-    </label>
-    {% endif %}
-    <button type="submit">Save personal permissions</button>
-  </form>
-  {% if person.role == 'property_manager' and current_user.role in ['owner', 'admin', 'regional_manager', 'regional_property_manager'] %}
-  {% for region_id in regions_by_manager.get(person.id, []) %}
-  <form method="post" action="/users/{{ person.id }}/default-policy/{{ region_id }}" class="card stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <h4>Regional default-property policy · Region {{ region_id }}</h4>
-    <label>Team members may choose their own default property
-      <select name="policy">
-        <option value="default" {% if regional_policies.get((person.id, region_id)) is none %}selected{% endif %}>Use company/manager policy</option>
-        <option value="allow" {% if regional_policies.get((person.id, region_id)) == true %}selected{% endif %}>Allow team members to choose</option>
-        <option value="deny" {% if regional_policies.get((person.id, region_id)) == false %}selected{% endif %}>Keep team members locked</option>
-      </select>
-    </label>
-    <button type="submit">Save regional policy</button>
-  </form>
-  {% endfor %}
-  {% endif %}
-  <form method="post" action="/users/{{ person.id }}/access" class="card stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <h3>Properties for {{ person.display_name or person.username }}</h3>
-    <p class="hint">They only see the ones you tick. For a property manager's team, the default property is locked to that manager's default (or single shared property) unless the manager, owner, or assigned regional manager opens up the choice.</p>
-    {% for prop in properties %}
-    {% set row = access.get((person.id, prop.id)) %}
-    <fieldset class="stack">
-      <legend>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</legend>
-      <label class="check"><input type="checkbox" name="see-{{ prop.id }}" value="1" {% if row %}checked{% endif %}> See</label>
-      {% if person.role not in ['owner', 'admin', 'viewer'] %}
-      <label class="check"><input type="checkbox" name="edit-{{ prop.id }}" value="1" {% if row and row.can_edit %}checked{% endif %}> Edit units</label>
+      {% if properties %}
+      <fieldset class="stack property-picks">
+        <legend>Works at</legend>
+        {% for prop in properties %}
+        <label class="check"><input type="checkbox" name="property_id" value="{{ prop.id }}" {% if properties|length == 1 %}checked{% endif %}> {{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</label>
+        {% endfor %}
+      </fieldset>
+      {% else %}
+      <p class="hint">Add a property first, then you can seat them there.</p>
       {% endif %}
-      <label class="check"><input type="checkbox" name="notify-{{ prop.id }}" value="1" {% if row and row.notify %}checked{% endif %}> Notify when units change</label>
-    </fieldset>
-    {% endfor %}
-    {% if not properties %}
-    <p class="empty">Add a property first.</p>
+      <label>Phone <span class="hint">optional</span> <input name="phone" autocomplete="tel" placeholder="432-555-0100"></label>
+      <label>Email <span class="hint">optional</span> <input name="email" placeholder="Leave blank if they have none"></label>
+      <details>
+        <summary>Login details if you need them</summary>
+        <div class="stack" style="margin-top:0.7rem">
+          <label>Username <span class="hint">blank makes one from their name</span> <input name="username" autocapitalize="none" placeholder="dana.desk"></label>
+          <label>Password <span class="hint">blank creates one</span> <input name="password" type="text" minlength="8" autocomplete="off"></label>
+          <label>2FA email <input name="security_email" placeholder="codes@…"></label>
+          <label>Password-reset email <input name="reset_email" placeholder="resets@…"></label>
+          <label class="check"><input type="checkbox" name="is_bot" value="1"> This is a bot</label>
+          <label class="check"><input type="checkbox" name="can_see_live_map" value="1"> Live map</label>
+        </div>
+      </details>
+      <button type="submit">Add this person</button>
+    </form>
+
+    {% if can_add_titles %}
+    <form method="post" action="/roles" class="card stack hire-card">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h2>Extra job title</h2>
+      <p class="hint">When the list is missing one, make it here. It copies permissions from a built-in role.</p>
+      {% if extra_titles %}
+      <p class="title-chips">
+        {% for title in extra_titles %}
+        <span class="pill">{{ title.label }}</span>
+        {% endfor %}
+      </p>
+      {% endif %}
+      <label>Title name <input name="label" required placeholder="Leasing agent"></label>
+      <label>Works like
+        <select name="based_on">
+          {% for value, label in hat_choices %}
+          <option value="{{ value }}" {% if value == 'office' %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Add title</button>
+    </form>
     {% endif %}
-    <button type="submit">Save property access</button>
-  </form>
-  {% endif %}
+  </div>
+
+  <h2>On the books</h2>
+  {% for person in people %}
+  {% include "users_person.html" %}
   {% endfor %}
 </section>
 {% endblock %}
