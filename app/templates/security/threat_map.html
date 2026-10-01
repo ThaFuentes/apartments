@@ -1,6 +1,6 @@
 {% extends "security/base.html" %}
 {% block head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='security/threat-map/threat-map.css') }}?v=apt1">
+<link rel="stylesheet" href="/security/assets/threat-map.css?v=apt2">
 {% endblock %}
 {% block security_content %}
 <div class="tm-wrap" id="tm-wrap" data-tm-alert="{{ alert_url or '' }}">
@@ -108,7 +108,7 @@
     </div>
   </section>
 </div>
-<script src="{{ url_for('static', filename='security/threat-map/vendor/d3.min.js') }}"></script>
-<script src="{{ url_for('static', filename='security/threat-map/vendor/topojson-client.min.js') }}"></script>
-<script src="{{ url_for('static', filename='security/threat-map/threat-map.js') }}?v=apt1"></script>
+<script src="/security/assets/vendor/d3.min.js"></script>
+<script src="/security/assets/vendor/topojson-client.min.js"></script>
+<script src="/security/assets/threat-map.js?v=apt2"></script>
 {% endblock %}

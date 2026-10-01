@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ page_title or "Security" }} · Apt</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=21">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt-desk.css') }}?v=1">
+  <link rel="stylesheet" href="/security/console.css?v=3">
+  <style>{% include "security/console.css" %}</style>
   {% block head %}{% endblock %}
 </head>
 <body class="sec-body">
@@ -19,7 +19,7 @@
         <a href="/security/events" {% if request.path.startswith('/security/events') %}class="is-on"{% endif %}>Events</a>
         <a href="/security/audit" {% if request.path.startswith('/security/audit') %}class="is-on"{% endif %}>Full audit</a>
       </nav>
-      <a class="sec-back" href="/">← Back to operations</a>
+      <a class="sec-back" href="/">← Back to the office</a>
     </aside>
     <div class="sec-main">
       <header class="sec-top">

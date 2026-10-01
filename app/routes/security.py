@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import flash, jsonify, redirect, render_template, request
+import os
+
+from flask import current_app, flash, jsonify, redirect, render_template, request, send_from_directory
 from flask_login import current_user
 
 from app.builddb.builddb import db
@@ -34,6 +36,20 @@ def _ensure_geo() -> None:
         print(f"[apt-security] geo table: {exc}", flush=True)
     finally:
         _close(conn)
+
+
+@bp.get("/security/console.css")
+def security_console_css():
+    css = render_template("security/console.css")
+    resp = current_app.response_class(css, mimetype="text/css; charset=utf-8")
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@bp.get("/security/assets/<path:name>")
+def security_assets(name):
+    root = os.path.join(current_app.static_folder, "security", "threat-map")
+    return send_from_directory(root, name)
 
 
 @bp.get("/security")

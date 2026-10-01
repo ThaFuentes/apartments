@@ -214,7 +214,7 @@
   }
 
   async function loadIso() {
-    const res = await fetch("/static/security/threat-map/data/iso-numeric-to-iso2.json");
+    const res = await fetch("/security/assets/data/iso-numeric-to-iso2.json");
     const raw = await res.json();
     state.isoMap = {};
     Object.keys(raw).forEach((k) => {
@@ -410,7 +410,7 @@
 
   async function drawWorld() {
     const { w, h } = sizeCanvas();
-    const world = await (await fetch("/static/security/threat-map/data/countries-110m.json")).json();
+    const world = await (await fetch("/security/assets/data/countries-110m.json")).json();
     const features = topojson.feature(world, world.objects.countries).features;
     state.features = features;
     state.projection = d3.geoNaturalEarth1().fitExtent(
