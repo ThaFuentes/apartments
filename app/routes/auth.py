@@ -181,16 +181,10 @@ def bot_setup():
             if do == "emails":
                 security = clean_email(request.form.get("security_email"))
                 reset = clean_email(request.form.get("reset_email"))
-                if not reset:
-                    flash("A bot needs a password-reset inbox, and it should be different from the login email.", "warn")
-                    return redirect("/bot-setup")
                 current_user.security_email = security
-                current_user.reset_email = reset
+                current_user.reset_email = reset or None
                 db.session.commit()
-                if twofa_util.reset_email_is_separate(current_user):
-                    flash("Reset inbox saved. Keep 2FA codes and password resets on different addresses.", "ok")
-                else:
-                    flash("Use a reset inbox that is not the login email or the 2FA inbox.", "warn")
+                flash("Inboxes saved. The 2FA address and the reset address can match, or they can be different.", "ok")
             elif do == "totp-start":
                 twofa_util.begin_totp_setup(current_user)
                 db.session.commit()

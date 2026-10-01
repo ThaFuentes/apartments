@@ -186,28 +186,17 @@ def twofa_enabled(user) -> bool:
     return False
 
 
-def reset_email_is_separate(user) -> bool:
-    reset = (getattr(user, "reset_email", None) or "").strip().lower()
-    login = (getattr(user, "email", None) or "").strip().lower()
-    security = (getattr(user, "security_email", None) or "").strip().lower()
-    if "@" not in reset:
-        return False
-    if login and reset == login:
-        return False
-    if security and reset == security:
-        return False
-    return True
-
-
 def bot_setup_remaining(user) -> list[str]:
+    """A bot stays on the setup screen until 2FA is on.
+
+    The login, 2FA, and password-reset addresses may match or differ.
+    A blank reset address uses the login email.
+    """
     if not bool(getattr(user, "is_bot", False)):
         return []
-    gaps: list[str] = []
     if not twofa_enabled(user):
-        gaps.append("twofa")
-    if not reset_email_is_separate(user):
-        gaps.append("reset_email")
-    return gaps
+        return ["twofa"]
+    return []
 
 
 _SETUP_OK_PREFIXES = (

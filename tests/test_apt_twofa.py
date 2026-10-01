@@ -24,19 +24,25 @@ class TotpUnitTests(unittest.TestCase):
         self.assertFalse(twofa.totp_ok(secret, "000000"))
         self.assertFalse(twofa.totp_ok(secret, "abcdef"))
 
-    def test_security_and_reset_inboxes_differ(self):
+    def test_security_and_reset_inboxes_can_differ(self):
         user = SimpleNamespace(email="bot@x.test", security_email="codes@y.test", reset_email="resets@z.test")
         self.assertEqual(twofa.twofa_inbox_for(user), "codes@y.test")
         self.assertEqual(twofa.reset_inbox_for(user), "resets@z.test")
-        self.assertTrue(twofa.reset_email_is_separate(user))
 
-    def test_reset_must_not_match_login_or_2fa(self):
-        user = SimpleNamespace(email="bot@x.test", security_email="codes@y.test", reset_email="bot@x.test", is_bot=True)
-        self.assertFalse(twofa.reset_email_is_separate(user))
+    def test_reset_may_match_login_or_2fa(self):
+        user = SimpleNamespace(
+            email="bot@x.test",
+            security_email="bot@x.test",
+            reset_email="bot@x.test",
+            extra_data={"twofa": {"method": "email"}},
+            is_bot=True,
+        )
+        self.assertEqual(twofa.twofa_inbox_for(user), "bot@x.test")
+        self.assertEqual(twofa.reset_inbox_for(user), "bot@x.test")
+        self.assertEqual(twofa.bot_setup_remaining(user), [])
         user.reset_email = "codes@y.test"
-        self.assertFalse(twofa.reset_email_is_separate(user))
-        user.reset_email = "resets@z.test"
-        self.assertTrue(twofa.reset_email_is_separate(user))
+        self.assertEqual(twofa.reset_inbox_for(user), "codes@y.test")
+        self.assertEqual(twofa.bot_setup_remaining(user), [])
 
     def test_bot_setup_remaining(self):
         user = SimpleNamespace(
@@ -46,8 +52,8 @@ class TotpUnitTests(unittest.TestCase):
             extra_data=None,
             is_bot=True,
         )
-        self.assertEqual(twofa.bot_setup_remaining(user), ["twofa", "reset_email"])
-        user.reset_email = "resets@z.test"
+        self.assertEqual(twofa.bot_setup_remaining(user), ["twofa"])
+        user.reset_email = "bot@x.test"
         user.extra_data = {"twofa": {"method": "app", "secret": twofa.new_totp_secret()}}
         self.assertEqual(twofa.bot_setup_remaining(user), [])
         user.is_bot = False

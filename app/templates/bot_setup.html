@@ -4,20 +4,18 @@
 <section class="sheet">
   <div class="hero">
     <h1>This bot needs 2FA</h1>
-    <p class="lead">The record stays closed until two-factor sign-in is on and the password-reset inbox is a different email from login and from 2FA codes.</p>
+    <p class="lead">The record stays closed until two-factor sign-in is on. The 2FA address and the password-reset address can be the same, or they can be different. Leave reset blank to use the login email.</p>
   </div>
 
-  {% if 'reset_email' in gaps or not inbox %}
   <form method="post" action="/bot-setup" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="do" value="emails">
     <h2>Inboxes</h2>
-    <p class="hint">Login email{% if login_email %}: <strong>{{ login_email }}</strong>{% else %} is blank{% endif %}. Keep 2FA codes and password resets on two other addresses when you can.</p>
-    <label>2FA codes go to <span class="hint">blank uses the login email</span> <input type="email" name="security_email" value="{{ security_email }}" placeholder="codes@…"></label>
-    <label>Password resets go to <input type="email" name="reset_email" value="{{ reset_email }}" placeholder="resets@…" required></label>
+    <p class="hint">Login email{% if login_email %}: <strong>{{ login_email }}</strong>{% else %} is blank{% endif %}.</p>
+    <label>2FA codes go to <span class="hint">blank uses the login email</span> <input type="email" name="security_email" value="{{ security_email }}" placeholder="same or different"></label>
+    <label>Password resets go to <span class="hint">blank uses the login email</span> <input type="email" name="reset_email" value="{{ reset_email }}" placeholder="same or different"></label>
     <button type="submit">Save inboxes</button>
   </form>
-  {% endif %}
 
   {% if 'twofa' in gaps %}
   <div class="card stack">

@@ -340,7 +340,7 @@ def apply_invite_viewer(user, payload, source) -> dict:
     secret = f" Temporary password: {generated}." if generated else ""
     bot_note = ""
     if created.is_bot:
-        bot_note = " Marked as a bot: first sign-in must turn on 2FA, and the reset inbox should be a different email from login and 2FA."
+        bot_note = " Marked as a bot: first sign-in must turn on 2FA. The reset address can match the 2FA address, or it can be different."
     granted = []
     for grant in payload.get("_grants") or []:
         if not isinstance(grant, dict):
