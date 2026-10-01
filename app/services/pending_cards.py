@@ -256,7 +256,10 @@ def update_pending(user, pending_id: int, changes: dict) -> dict:
         candidate_city = str(changes.get("city") or payload.get("city") or "").strip()
         verdict = resolve_property(candidate_name, candidate_city, user=user) if candidate_name else {"state": "unknown"}
         resolved = verdict.get("property") if verdict.get("state") == "resolved" else None
-        if locked and resolved and resolved.id != locked.id:
+        if locked and (resolved is None or resolved.id != locked.id):
+            # With a confirmed site the applier files to the shift's property
+            # no matter what the card says, so an edit that does not land on
+            # that property is refused instead of silently snapping back.
             return {"ok": False, "reply": "This item is locked to the confirmed site. Start a new visit before changing properties."}
         if candidate_name and candidate_city and verdict.get("state") != "resolved":
             return {"ok": False, "reply": verdict.get("message") or "I can't match that property and city. Nothing was changed."}
@@ -264,9 +267,15 @@ def update_pending(user, pending_id: int, changes: dict) -> dict:
             payload.update({"property_id": locked.id, "property_name": locked.name, "city": locked.city.name if locked.city else "", "region": locked.city.region if locked.city else ""})
         elif resolved:
             payload.update({"property_id": resolved.id, "property_name": resolved.name, "city": resolved.city.name if resolved.city else "", "region": resolved.city.region if resolved.city else ""})
-        elif candidate_name and candidate_city:
+        elif candidate_name:
+            # The typed name is kept so the card shows what she wrote, but the
+            # old property id and region are dropped: keeping them would make
+            # the save file against the stale site instead of re-resolving
+            # (or asking) with the corrected name.
             payload["property_name"] = candidate_name
             payload["city"] = candidate_city
+            payload.pop("property_id", None)
+            payload.pop("region", None)
     if row.tool in {"plan_trip", "plan_day"} and (original.get("work_items") or original.get("stops")) and (changes.get("property_name") is not None or changes.get("city") is not None):
         if row.tool == "plan_trip":
             if resolved:

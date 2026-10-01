@@ -672,3 +672,125 @@ class AptTest06(AptTestBase):
         self.assertTrue(again.get("ok"), again)
         self.assertTrue(again.get("duplicate"))
         self.assertEqual(Job.query.filter_by(title="Fix tub").count(), 0)
+
+    def test_card_edit_moves_a_visit_to_the_property_on_the_card(self):
+        """The wrong property on a review card is fixed on the card: editing
+        the property field re-resolves, and the save click files there."""
+        from app.models import Job, UnitVisit
+        from app.services.pending import confirm_id, request_apply, update_pending
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        wrong = ensure_property("Brookview", "Odessa", "Texas", user.id)
+        right = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.commit()
+        staged = request_apply(
+            user,
+            "record_unit_visit",
+            {
+                "property_id": wrong.id,
+                "property_name": wrong.name,
+                "city": "Odessa",
+                "region": "Texas",
+                "unit_number": "26",
+                "title": "Wash and driver",
+                "status": "planned",
+            },
+            "ai",
+            "edit-card-property",
+        )
+        pending_id = staged["proposal"]["id"]
+        edited = update_pending(
+            user,
+            pending_id,
+            {"property_name": "Woodview", "city": "Odessa", "unit_number": "26", "title": "Wash and driver"},
+        )
+        self.assertTrue(edited.get("ok"), edited)
+        self.assertEqual(edited["proposal"]["payload"].get("property_id"), right.id)
+        saved = confirm_id(user, pending_id, "human")
+        self.assertTrue(saved.get("ok"), saved)
+        self.assertEqual(Job.query.filter_by(property_id=right.id, title="Wash and driver").count(), 1)
+        self.assertEqual(Job.query.filter_by(property_id=wrong.id).count(), 0)
+        visit = UnitVisit.query.order_by(UnitVisit.id.desc()).first()
+        self.assertEqual(visit.property_id, right.id)
+
+    def test_card_edit_with_an_unmatched_name_drops_the_old_site(self):
+        """A property name that does not resolve keeps the typed text on the
+        card but must not keep the old property id: otherwise the save would
+        quietly file against the site she just said was wrong."""
+        from app.models import Job, UnitVisit
+        from app.services.pending import confirm_id, request_apply, update_pending
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        wrong = ensure_property("Brookview", "Odessa", "Texas", user.id)
+        db.session.commit()
+        staged = request_apply(
+            user,
+            "record_unit_visit",
+            {
+                "property_id": wrong.id,
+                "property_name": wrong.name,
+                "unit_number": "26",
+                "title": "Wash and driver",
+                "status": "planned",
+            },
+            "ai",
+            "edit-card-unknown",
+        )
+        pending_id = staged["proposal"]["id"]
+        edited = update_pending(
+            user,
+            pending_id,
+            {"property_name": "Northgate Flats", "city": "", "unit_number": "26", "title": "Wash and driver"},
+        )
+        self.assertTrue(edited.get("ok"), edited)
+        payload = edited["proposal"]["payload"]
+        self.assertNotIn("property_id", payload)
+        self.assertEqual(payload.get("property_name"), "Northgate Flats")
+        asked = confirm_id(user, pending_id, "human")
+        # The save refuses with a real message instead of quietly filing
+        # against Brookview, and the card stays pending so she can fix the
+        # name on the card and try again.
+        self.assertFalse(asked.get("ok"))
+        self.assertTrue(asked.get("reply"))
+        row = PendingAction.query.filter_by(id=pending_id).first()
+        self.assertEqual(row.status, "pending")
+        self.assertEqual(Job.query.count(), 0)
+        self.assertEqual(UnitVisit.query.count(), 0)
+
+    def test_card_edit_while_onsite_stays_on_the_confirmed_site(self):
+        """With a confirmed visit the save files to the shift's property no
+        matter what the card says, so a property edit that does not land on
+        that site is refused instead of quietly snapped back."""
+        from app.models import Shift
+        from app.services.pending import request_apply, update_pending
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(Shift(user_id=user.id, property_id=prop.id, confirmed=True, started_at=utcnow()))
+        db.session.commit()
+        staged = request_apply(
+            user,
+            "record_unit_visit",
+            {
+                "property_id": prop.id,
+                "property_name": prop.name,
+                "city": "Odessa",
+                "region": "Texas",
+                "unit_number": "12",
+                "title": "Replace AC",
+                "status": "done",
+            },
+            "ai",
+            "edit-card-locked",
+        )
+        pending_id = staged["proposal"]["id"]
+        edited = update_pending(
+            user,
+            pending_id,
+            {"property_name": "Northgate Flats", "city": "", "unit_number": "12", "title": "Replace AC"},
+        )
+        self.assertFalse(edited.get("ok"), edited)
+        self.assertIn("locked to the confirmed site", edited.get("reply", ""))

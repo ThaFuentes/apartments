@@ -638,20 +638,21 @@ body.drive .composer button, body.drive .camera button { min-height: 64px; font-
   .restore-row { align-items: flex-start; }
 }
 
-/* Review cards make the exact proposed write visible before it is saved. */
+/* Review cards make the exact proposed write visible before it is saved.
+   Kept compact: they repeat for every staged change and hold little text. */
 .bubble.card {
   display: block;
   align-self: stretch;
   max-width: 100%;
   min-width: 0;
-  padding: 0.95rem;
+  padding: 0.55rem 0.7rem;
   overflow-wrap: anywhere;
   background: linear-gradient(145deg, #ffffff 0%, #f8fbfa 100%);
   border: 1px solid #dce8e5;
-  border-radius: 20px;
-  box-shadow: 0 12px 30px rgba(22, 48, 44, 0.09);
+  border-radius: 14px;
+  box-shadow: 0 4px 12px rgba(22, 48, 44, 0.07);
 }
-.approval-head { display: flex; align-items: flex-start; gap: 0.65rem; margin-bottom: 0.8rem; }
+.approval-head { display: flex; align-items: flex-start; gap: 0.45rem; margin-bottom: 0.35rem; }
 .approval-icon, .chat-agent-mark {
   display: grid;
   place-items: center;
@@ -663,23 +664,30 @@ body.drive .composer button, body.drive .camera button { min-height: 64px; font-
   color: var(--accent);
   font-weight: 850;
 }
-.approval-state { color: var(--accent); font-size: 0.72rem; line-height: 1.2; font-weight: 800; text-transform: uppercase; letter-spacing: 0.065em; }
+.approval-icon { flex-basis: 1.4rem; width: 1.4rem; height: 1.4rem; border-radius: 8px; font-size: 0.85rem; }
+.approval-state { color: var(--accent); font-size: 0.65rem; line-height: 1.2; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
 .approval-heading { min-width: 0; }
-.bubble.card .card-title { margin: 0.12rem 0 0; color: var(--ink); font-size: 1.05rem; line-height: 1.25; font-weight: 760; }
-.bubble.card .changes { list-style: none; display: grid; gap: 0; margin: 0; padding: 0.15rem 0; border-top: 1px solid #e7efed; border-bottom: 1px solid #e7efed; }
-.bubble.card .changes li { display: grid; grid-template-columns: minmax(5.4rem, 0.72fr) minmax(0, 1.5fr); align-items: start; gap: 0.55rem; padding: 0.55rem 0; border-bottom: 1px solid #edf2f1; font-size: 0.87rem; }
+.bubble.card .card-title { margin: 0.05rem 0 0; color: var(--ink); font-size: 0.95rem; line-height: 1.2; font-weight: 760; }
+.bubble.card .card-place { display: block; margin: 0.05rem 0 0; color: var(--accent); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.bubble.card .changes { list-style: none; display: grid; gap: 0; margin: 0; padding: 0.1rem 0; border-top: 1px solid #e7efed; border-bottom: 1px solid #e7efed; }
+.bubble.card .changes li { display: grid; grid-template-columns: minmax(5.4rem, 0.72fr) minmax(0, 1.5fr); align-items: start; gap: 0.55rem; padding: 0.32rem 0; border-bottom: 1px solid #edf2f1; font-size: 0.83rem; }
 .bubble.card .changes li:last-child { border-bottom: 0; }
 .bubble.card .changes .field { min-width: 0; color: var(--muted); font-weight: 650; }
 .bubble.card .changes .value { display: flex; flex-wrap: wrap; gap: 0.35rem; min-width: 0; }
 .bubble.card .changes s { color: #86918f; }
 .bubble.card .changes strong { color: #193b35; font-weight: 750; }
-.bubble.card .card-note { margin: 0.7rem 0; color: var(--muted); font-size: 0.85rem; }
-.bubble.card .actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.bubble.card .card-note { margin: 0.3rem 0; color: var(--muted); font-size: 0.76rem; }
+.bubble.card .actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .bubble.card .actions form { display: flex; flex: 1 1 auto; }
-.bubble.card .actions button { width: 100%; min-height: 44px; padding: 0.65rem 0.8rem; border-radius: 13px; font-size: 0.9rem; }
-.bubble.card .actions .approve-form button { background: var(--accent); color: #fff; box-shadow: 0 5px 14px rgba(47, 111, 98, 0.18); }
+.bubble.card .actions button { width: 100%; min-height: 38px; padding: 0.35rem 0.7rem; border-radius: 10px; font-size: 0.84rem; }
+.bubble.card .actions .approve-form button { background: var(--accent); color: #fff; box-shadow: 0 3px 8px rgba(47, 111, 98, 0.16); }
 .bubble.card .actions .discard-form { flex: 0 1 auto; }
 .bubble.card .actions .discard-form button { width: auto; }
+.bubble.card .card-edit { margin: 0.35rem 0 0.1rem; }
+.bubble.card .card-edit summary { font-size: 0.8rem; padding: 0.15rem 0; }
+.bubble.card .card-edit-form { display: grid; gap: 0.3rem; margin-top: 0.3rem; }
+.bubble.card .card-edit-form label { display: grid; gap: 0.15rem; font-size: 0.78rem; color: var(--muted); }
+.bubble.card .card-edit-form input { padding: 0.35rem 0.55rem; font-size: 0.9rem; }
 .bubble.card.needs_answer { background: linear-gradient(145deg, #f3f7ff 0%, #fff 100%); border-color: #dbe5f5; }
 .bubble.card.needs_answer .approval-icon { background: #e5edff; color: #365db0; }
 .bubble.card.needs_answer .approval-state { color: #365db0; }

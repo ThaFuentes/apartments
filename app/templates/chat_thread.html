@@ -77,6 +77,8 @@
         <label>Work <input name="purpose" value="{{ card.payload.get('purpose', '') }}"></label>
         <label>Date <input name="starts_on" value="{{ card.payload.get('starts_on', '') }}" placeholder="YYYY-MM-DD"></label>
         {% elif card.tool in ('record_unit_visit', 'log_work') %}
+        <label>Property <input name="property_name" value="{{ card.payload.get('property_name') or '' }}"></label>
+        <label>City <input name="city" value="{{ card.payload.get('city') or '' }}"></label>
         <label>Unit <input name="unit_number" value="{{ card.payload.get('unit_number', '') }}"></label>
         <label>Work <input name="title" value="{{ card.payload.get('title', '') }}"></label>
         {% elif card.tool == 'log_expense' %}

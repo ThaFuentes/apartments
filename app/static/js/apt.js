@@ -318,6 +318,13 @@
     title.className = "card-title";
     title.textContent = String(proposal.summary || proposal.tool || "Review change").split(/\r?\n/)[0];
     heading.append(state, title);
+    const place = [payload.property_name, payload.city].filter(Boolean).join(" \u00b7 ");
+    if (place) {
+      const placeLine = document.createElement("span");
+      placeLine.className = "card-place";
+      placeLine.textContent = place;
+      heading.appendChild(placeLine);
+    }
     head.append(icon, heading);
     card.appendChild(head);
 
@@ -412,7 +419,7 @@
         ? [["property_name", "Property"], ["city", "City"], ["purpose", "Work"], ["starts_on", "Date"]]
         : proposal.tool === "log_expense"
           ? [["kind", "Kind"], ["amount", "Amount"], ["merchant", "Where"], ["odometer", "Odometer"]]
-          : [["unit_number", "Unit"], ["title", "Work"]];
+          : [["property_name", "Property"], ["city", "City"], ["unit_number", "Unit"], ["title", "Work"]];
       fields.forEach(function (fieldInfo) {
         const label = document.createElement("label");
         label.textContent = fieldInfo[1];
