@@ -119,3 +119,11 @@ def send_text(address: str, subject: str, body: str) -> tuple[bool, str]:
     msg["To"] = inbox
     msg.set_content(body)
     return send_message(msg)
+
+
+def send_test(address: str) -> tuple[bool, str]:
+    return send_text(
+        address,
+        "Apt mail test",
+        "This is a test from Apt. If you got it, the mailbox in Settings is working.\n",
+    )

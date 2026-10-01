@@ -54,6 +54,17 @@
     </details>
     <button type="submit">Save settings</button>
   </form>
+  <details>
+    <summary>Send a test email</summary>
+    <form method="post" action="/settings/mail-test" class="card stack" style="margin-top:0.7rem">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <p class="lead">Save the mailbox above first. This sends one short message with those settings so you can see if it arrives.</p>
+      <label>Send a test to
+        <input name="to" type="email" required autocomplete="email" value="{{ current_user.email or profile.smtp_from or profile.smtp_user or '' }}" placeholder="you@yourdomain.com">
+      </label>
+      <button type="submit">Send test email</button>
+    </form>
+  </details>
   <h2>AI keys</h2>
   <p class="lead">Add the keys you already pay for or a free Gemini key. 1st is used first, then 2nd, then 3rd, if a key is out of quota. Only the last 4 characters are shown. You can also say “make Gemini 1st” in chat.</p>
   <p class="lead">Every key has a burst budget (tokens over a few minutes). When a key reaches it, that key rests and the next one answers, so a free key is never pushed into a lockout. Burst tokens of 0 turns the budget off. Max reply tokens caps one answer; 0 leaves the provider default.</p>

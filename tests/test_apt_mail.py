@@ -27,3 +27,17 @@ class MailPortTests(unittest.TestCase):
         msg = explain_smtp_failure(Exception("(-1, b'Dovecot ready.')"), 995)
         self.assertIn("465", msg)
         self.assertNotIn("Dovecot ready", msg)
+
+    def test_send_test_uses_the_saved_mailbox(self):
+        from unittest.mock import patch
+
+        from app.services.mail import send_test
+
+        with patch("app.services.mail.send_text", return_value=(True, "Sent to dana@example.com.")) as mocked:
+            ok, msg = send_test("dana@example.com")
+        self.assertTrue(ok)
+        self.assertIn("dana@example.com", msg)
+        mocked.assert_called_once()
+        args = mocked.call_args[0]
+        self.assertEqual(args[0], "dana@example.com")
+        self.assertEqual(args[1], "Apt mail test")

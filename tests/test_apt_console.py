@@ -111,6 +111,46 @@ class ConsoleTests(AptTestBase):
         self.assertEqual(feed.status_code, 200)
         self.assertTrue(feed.get_json().get("ok"))
 
+    def test_owner_can_send_a_test_email(self):
+        from unittest.mock import patch
+
+        owner = self.owner()
+        db.session.commit()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        page = client.get("/settings")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Send a test email", page.data)
+        self.assertIn(b'action="/settings/mail-test"', page.data)
+        self.assertIn(owner.email.encode(), page.data)
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        with patch("app.services.mail.send_text", return_value=(True, "Sent to dana@example.com.")) as mocked:
+            sent = client.post(
+                "/settings/mail-test",
+                data={"csrf_token": token, "to": "dana@example.com"},
+            )
+        self.assertEqual(sent.status_code, 302)
+        self.assertIn("/settings", sent.headers.get("Location") or "")
+        mocked.assert_called_once()
+        self.assertEqual(mocked.call_args[0][0], "dana@example.com")
+
+    def test_office_cannot_send_a_test_email(self):
+        owner = self.owner()
+        create_user(username="deskone", password="field-pass-9", display_name="Dana Desk", role="office", created_by=owner)
+        db.session.commit()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "deskone", "password": "field-pass-9"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        denied = client.post(
+            "/settings/mail-test",
+            data={"csrf_token": token, "to": "dana@example.com"},
+        )
+        self.assertEqual(denied.status_code, 403)
+
     def test_owner_reverses_a_deleted_unit(self):
         from app.services.appliers_reports import apply_soft_delete
         from app.services.reversals import reverse_audit

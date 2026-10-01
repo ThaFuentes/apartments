@@ -74,6 +74,25 @@ def settings():
     return render_template("settings.html", profile=profile, keys=keys, providers=providers, msg_key=_new_key())
 
 
+@bp.post("/settings/mail-test")
+@owner_required
+def settings_mail_test():
+    from app.services.mail import send_test
+    from app.services.people import clean_email
+
+    try:
+        to = clean_email(request.form.get("to"))
+    except ValueError as exc:
+        flash(str(exc), "warn")
+        return redirect("/settings")
+    if not to:
+        flash("Type the inbox that should receive the test.", "warn")
+        return redirect("/settings")
+    ok, msg = send_test(to)
+    flash(msg, "ok" if ok else "warn")
+    return redirect("/settings")
+
+
 @bp.post("/settings/key")
 @owner_required
 def settings_key():
