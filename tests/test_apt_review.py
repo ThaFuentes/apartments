@@ -548,3 +548,60 @@ class AptTest06(AptTestBase):
         carpet = UnitTask.query.filter_by(unit_id=unit.id, title="carpet cleaned").one()
         self.assertEqual(carpet.status, "done")
         self.assertEqual(carpet.done_by_id, user.id)
+
+    def test_confirm_and_discard_are_idempotent(self):
+        from app.models import Job
+        from app.services.pending import confirm_id, discard_id, request_apply
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        db.session.add(Shift(user_id=user.id, property_id=prop.id, confirmed=True, started_at=utcnow()))
+        db.session.commit()
+        staged = request_apply(
+            user,
+            "record_unit_visit",
+            {
+                "property_id": prop.id,
+                "property_name": prop.name,
+                "city": "Odessa",
+                "region": "Texas",
+                "unit_number": "12",
+                "title": "Replace AC",
+                "status": "done",
+            },
+            "ai",
+            "idem-confirm-ac",
+        )
+        self.assertTrue(staged.get("pending"), staged)
+        pending_id = staged["proposal"]["id"]
+        first = confirm_id(user, pending_id, "human")
+        self.assertTrue(first.get("ok"), first)
+        self.assertEqual(Job.query.filter_by(title="Replace AC").count(), 1)
+        second = confirm_id(user, pending_id, "human")
+        self.assertTrue(second.get("ok"), second)
+        self.assertTrue(second.get("duplicate"))
+        self.assertEqual(Job.query.filter_by(title="Replace AC").count(), 1)
+
+        extra = request_apply(
+            user,
+            "record_unit_visit",
+            {
+                "property_id": prop.id,
+                "property_name": prop.name,
+                "city": "Odessa",
+                "region": "Texas",
+                "unit_number": "26",
+                "title": "Fix tub",
+                "status": "done",
+            },
+            "ai",
+            "idem-discard-tub",
+        )
+        discard_id_value = extra["proposal"]["id"]
+        dropped = discard_id(user, discard_id_value)
+        self.assertTrue(dropped.get("ok"), dropped)
+        again = discard_id(user, discard_id_value)
+        self.assertTrue(again.get("ok"), again)
+        self.assertTrue(again.get("duplicate"))
+        self.assertEqual(Job.query.filter_by(title="Fix tub").count(), 0)

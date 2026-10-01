@@ -192,6 +192,29 @@ def check_password(user: User, password: str) -> bool:
     return check_password_hash(user.password_hash, password or "")
 
 
+def try_login(username: str, password: str) -> tuple[User | None, str]:
+    """Return the user on success, or (None, message) without extending a lock."""
+    user = find_user(username)
+    if not user:
+        return None, "That username and password did not match."
+    if not user.active:
+        return None, "That login is turned off. An owner or supervisor can turn it back on from People."
+    if user.locked_until and user.locked_until > utcnow():
+        return None, "That login is locked. An owner or supervisor can unlock it from People."
+    if not check_password_hash(user.password_hash, password or ""):
+        note_login(user, False)
+        if user.locked_until and user.locked_until > utcnow():
+            return None, "That login is locked after too many tries. An owner or supervisor can unlock it from People."
+        return None, "That username and password did not match."
+    return user, ""
+
+
+def unlock_login(person: User) -> None:
+    person.active = True
+    person.failed_login_attempts = 0
+    person.locked_until = None
+
+
 def note_login(user: User, ok: bool) -> None:
     if ok:
         user.failed_login_attempts = 0

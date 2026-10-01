@@ -104,11 +104,17 @@ def create_app() -> Flask:
         local = _local_moment(value)
         return local.strftime("%b %d, %Y · %I:%M %p").replace(" 0", " ").replace("· 0", "· ")
 
-    from app.guest_access import open_guest_paths, strip_body_csrf_meta
+    from app.guest_access import APT_CSP, open_guest_paths, strip_body_csrf_meta
 
     @app.after_request
-    def _strip_injected_csrf_meta(response):
-        return strip_body_csrf_meta(response)
+    def _apt_response_tweaks(response):
+        response = strip_body_csrf_meta(response)
+        ctype = (response.content_type or "").lower()
+        if "text/html" in ctype or "application/javascript" in ctype or "application/json" in ctype:
+            response.headers["Content-Security-Policy"] = APT_CSP
+        if request.path.startswith("/static/") and request.args.get("v") and response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
 
     open_guest_paths()
     try:
@@ -324,6 +330,8 @@ def create_app() -> Flask:
                 chat_lines = []
         import secrets as _secrets
 
+        from app.assets import ASSET_V
+
         chat_key = _secrets.token_hex(8)
         assistant_name = "Apt"
         try:
@@ -353,6 +361,7 @@ def create_app() -> Flask:
             "can_manage_regions": can_manage_regions,
             "assistant_name": assistant_name,
             "drive": bool(request.cookies.get("apt_drive") == "1"),
+            "asset_v": ASSET_V,
         }
 
     @app.route("/healthz")
@@ -383,7 +392,9 @@ def create_app() -> Flask:
         if getattr(current_user, "is_authenticated", False):
             return render_template("error.html", code=403, message="That action is not allowed for this login."), 403
         if request.endpoint and not is_guest_ok(request.path or ""):
-            return redirect(url_for("desk.login", next=request.path))
+            from app.auth import return_path
+
+            return redirect(url_for("desk.login", next=return_path()))
         return render_template("error.html", code=404, message="That page is not in the record."), 404
 
     @app.route("/sw.js")

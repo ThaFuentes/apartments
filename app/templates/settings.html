@@ -112,25 +112,7 @@
     <label>Base URL <input name="base_url" placeholder="Only for Other OpenAI-compatible"></label>
     <button type="submit">Check and save key</button>
   </form>
-  <script>
-    const providerInfo = {{ providers|tojson }};
-    const providerSelect = document.getElementById("provider");
-    const modelSelect = document.getElementById("model");
-    const hint = document.getElementById("provider-hint");
-    function fillModels() {
-      const current = providerInfo.find((item) => item.id === providerSelect.value) || providerInfo[0];
-      hint.textContent = current.hint || "";
-      modelSelect.innerHTML = "";
-      (current.models || []).forEach((name) => {
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        modelSelect.appendChild(option);
-      });
-    }
-    providerSelect.addEventListener("change", fillModels);
-    fillModels();
-  </script>
+  <template id="provider-info">{{ providers|tojson }}</template>
   {% else %}
   <p>API keys and people stay on the owner's login.</p>
   {% endif %}

@@ -69,14 +69,29 @@ def open_guest_paths() -> None:
         pass
 
 
-_BODY_CSRF_META = re.compile(
-    br'<meta name="csrf-token" content="[^"]*">(?=\s*<script>)',
-    re.IGNORECASE,
+_INJECTED_CSRF = re.compile(
+    br'<meta name="csrf-token" content="[^"]*"><script>\(function\(\)\{var t=.*?</script>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+APT_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob: https://tile.openstreetmap.org https://a.tile.openstreetmap.org https://b.tile.openstreetmap.org https://c.tile.openstreetmap.org; "
+    "font-src 'self' data:; "
+    "connect-src 'self'; "
+    "media-src 'self' blob:; "
+    "worker-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "frame-ancestors 'self';"
 )
 
 
 def strip_body_csrf_meta(response: Response) -> Response:
-    """Keep the head CSRF meta; drop the duplicate PoweredByTop injects into the body."""
+    """Keep the head CSRF meta; drop the inline PoweredByTop inject (meta + script)."""
     try:
         if getattr(response, "direct_passthrough", False):
             return response
@@ -84,9 +99,9 @@ def strip_body_csrf_meta(response: Response) -> Response:
         if "text/html" not in ctype:
             return response
         data = response.get_data()
-        if not data or b'name="csrf-token"' not in data.lower():
+        if not data:
             return response
-        new_data, n = _BODY_CSRF_META.subn(b"", data, count=1)
+        new_data, n = _INJECTED_CSRF.subn(b"", data, count=1)
         if n:
             response.set_data(new_data)
     except Exception:

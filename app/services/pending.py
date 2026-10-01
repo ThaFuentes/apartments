@@ -598,9 +598,10 @@ def _gate(user, row: PendingAction) -> dict | None:
 def confirm_one(user, row: PendingAction, source: str) -> dict:
     if row.tool == "set_default_property" and row.status == "needs_answer" and loads(row.payload_json).get("waiting_for") == "default_confirm":
         return {"ok": False, "reply": "Answer yes or no to the default-property question first."}
-    if row.status == "accepted" and row.result_json:
-        data = loads(row.result_json)
+    if row.status == "accepted":
+        data = loads(row.result_json) if row.result_json else {"ok": True, "reply": "Saved."}
         data["duplicate"] = True
+        data.setdefault("closed_ids", [row.id])
         return data
     if row.status != "pending":
         return {"ok": False, "reply": "That item is not waiting for a yes."}
@@ -705,6 +706,8 @@ def discard_id(user, pending_id: int) -> dict:
         return {"ok": False, "reply": "That item is gone."}
     if row.status == "accepted":
         return {"ok": False, "reply": "That one is already saved. You can soft-delete the record."}
+    if row.status == "discarded":
+        return {"ok": True, "reply": "Discarded.", "closed_ids": [row.id], "duplicate": True}
     row.status = "discarded"
     db.session.commit()
     return {"ok": True, "reply": "Discarded.", "closed_ids": [row.id]}

@@ -128,7 +128,9 @@
     grid-template-rows: auto 1fr;
     min-height: 100vh;
   }
-  body.ops:has(#chat-panel.is-open),
+  body.ops:has(#chat-panel.is-open) {
+    grid-template-columns: minmax(0, 1fr) 26rem;
+  }
   body.ops.chat-open {
     grid-template-columns: minmax(0, 1fr) 26rem;
   }

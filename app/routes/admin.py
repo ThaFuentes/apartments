@@ -382,12 +382,13 @@ def user_update(user_id):
     payload = {
         "username": person.username,
         "role": request.form.get("role") or person.role,
-        "can_see_reports": request.form.get("can_see_reports") == "1",
-        "can_see_history": request.form.get("can_see_history") == "1",
-        "can_see_live_map": request.form.get("can_see_live_map") == "1",
-        "active": request.form.get("active") == "1",
         "clear_email": request.form.get("clear_email") == "1",
     }
+    if request.form.get("has_flags"):
+        payload["can_see_reports"] = request.form.get("can_see_reports") == "1"
+        payload["can_see_history"] = request.form.get("can_see_history") == "1"
+        payload["can_see_live_map"] = request.form.get("can_see_live_map") == "1"
+        payload["active"] = request.form.get("active") == "1"
     if request.form.get("email"):
         payload["email"] = request.form.get("email")
     if request.form.get("security_email"):
@@ -468,6 +469,23 @@ def user_hat_delete(user_id, hat_id):
     except (PermissionError, ValueError) as exc:
         db.session.rollback()
         flash(str(exc), "warn")
+    return redirect("/users")
+
+
+@bp.post("/users/<int:user_id>/unlock")
+@people_admin
+def user_unlock(user_id):
+    from app.services.access import can_manage_user
+    from app.services.people import unlock_login
+
+    person = db.session.get(User, user_id)
+    if not person:
+        abort(404)
+    if current_user.role != "owner" and not can_manage_user(current_user, person):
+        abort(403)
+    unlock_login(person)
+    db.session.commit()
+    flash(f"{person.label()} can sign in again.", "ok")
     return redirect("/users")
 
 

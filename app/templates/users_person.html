@@ -11,8 +11,19 @@
         · {{ person.email or "No login email" }}
         {% if seats.get(person.id) %} · {{ seats[person.id]|join(", ") }}{% endif %}
       </p>
+      {% if not person.active %}
+      <p class="flash warn">This login is off. They cannot sign in.</p>
+      {% elif person.login_locked %}
+      <p class="flash warn">This login is locked after too many tries.</p>
+      {% endif %}
     </div>
   </header>
+  {% if not person.active or person.login_locked %}
+  <form method="post" action="/users/{{ person.id }}/unlock" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Unlock this login</button>
+  </form>
+  {% endif %}
 
   <form method="post" action="/users/{{ person.id }}" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -107,6 +118,7 @@
     <summary>Emails, bot, and permissions</summary>
     <form method="post" action="/users/{{ person.id }}" class="stack" style="margin-top:0.7rem">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="has_flags" value="1">
       <input type="hidden" name="role" value="{{ person.role }}">
       <label>2FA email <input name="security_email" value="{{ person.security_email or '' }}" placeholder="Codes go here — keep it different from reset"></label>
       <label>Password-reset email <input name="reset_email" value="{{ person.reset_email or '' }}" placeholder="Reset links go here — keep it different from 2FA"></label>

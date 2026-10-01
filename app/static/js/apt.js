@@ -14,6 +14,8 @@
     if (!seen) {
       intro.hidden = false;
       document.body.classList.add("intro-on");
+      const clip = introVideo.getAttribute("data-src") || "/static/intro/open.mp4?v=3";
+      if (!introVideo.getAttribute("src")) introVideo.setAttribute("src", clip);
       const giveUp = window.setTimeout(closeIntro, 9000);
       introVideo.addEventListener("ended", function () {
         window.clearTimeout(giveUp);
@@ -30,8 +32,44 @@
     }
   }
 
+  document.querySelectorAll(".property-switch select").forEach(function (sel) {
+    sel.addEventListener("change", function () {
+      if (sel.form) sel.form.submit();
+    });
+  });
+
   const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
   const SESSION_EXPIRED = "Session expired, sign in again";
+
+  document.querySelectorAll("form").forEach(function (form) {
+    if (form.method && form.method.toUpperCase() === "GET") return;
+    if (form.querySelector('input[name="csrf_token"]')) return;
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "csrf_token";
+    input.value = token;
+    form.appendChild(input);
+  });
+  const nativeFetch = window.fetch;
+  if (nativeFetch) {
+    window.fetch = function (url, opts) {
+      opts = opts || {};
+      opts.headers = opts.headers || {};
+      if (opts.headers instanceof Headers) {
+        if (!opts.headers.has("X-CSRF-Token")) opts.headers.set("X-CSRF-Token", token);
+      } else if (!opts.headers["X-CSRF-Token"] && !opts.headers["x-csrf-token"]) {
+        opts.headers["X-CSRF-Token"] = token;
+      }
+      return nativeFetch(url, opts);
+    };
+  }
+
+  function storeGet(key) {
+    try { return localStorage.getItem(key); } catch (err) { return null; }
+  }
+  function storeSet(key, value) {
+    try { localStorage.setItem(key, value); } catch (err) {}
+  }
 
   function isHtmlResponse(resp) {
     const ctype = ((resp && resp.headers && resp.headers.get("content-type")) || "").toLowerCase();
@@ -176,11 +214,11 @@
   }
 
   function drafts() {
-    try { return JSON.parse(localStorage.getItem("apt-drafts") || "[]"); }
+    try { return JSON.parse(storeGet("apt-drafts") || "[]"); }
     catch (err) { return []; }
   }
   function saveDrafts(rows) {
-    localStorage.setItem("apt-drafts", JSON.stringify(rows));
+    try { storeSet("apt-drafts", JSON.stringify(rows)); } catch (err) {}
   }
   const moneyTalk = /filled up|\$\s*\d|yes,\s*save it|^save it$|^save$/i;
 
@@ -210,12 +248,17 @@
       fetch("/chat/new", {
         method: "POST",
         headers: { "X-CSRF-Token": token, Accept: "application/json" }
-      }).catch(function () {});
-      const thread = document.getElementById("thread");
-      if (thread) {
-        thread.innerHTML = "";
-        addBubble("assistant", "New chat. Tell me what you're doing.");
-      }
+      })
+        .then(readJson)
+        .then(function (data) {
+          const threadEl = document.getElementById("thread");
+          if (!threadEl) return;
+          threadEl.innerHTML = "";
+          addBubble("assistant", (data && data.reply) || "New chat. Tell me what you're doing.");
+        })
+        .catch(function (err) {
+          addBubble("assistant", (err && err.code === "session") ? SESSION_EXPIRED : "Could not start a new chat.");
+        });
     });
   }
   try { setChat(sessionStorage.getItem("apt-chat-open") === "1"); }
@@ -536,6 +579,7 @@
     const rows = drafts();
     if (!rows.length || !token) return;
     const left = [];
+    let warned = false;
     for (const row of rows) {
       const body = new FormData();
       body.set("csrf_token", token);
@@ -543,7 +587,14 @@
       body.set("idempotency_key", row.idempotency_key);
       try {
         const resp = await fetch("/chat", { method: "POST", body: body, headers: { "X-CSRF-Token": token, Accept: "application/json" } });
-        if (!resp.ok) left.push(row);
+        if (!resp.ok || !isJsonResponse(resp) || sessionGone(resp)) {
+          left.push(row);
+          if (sessionGone(resp) && !warned) {
+            addBubble("assistant", SESSION_EXPIRED);
+            warned = true;
+          }
+          continue;
+        }
       } catch (err) {
         left.push(row);
       }
@@ -554,6 +605,7 @@
   flush();
 
   const sharing = document.body.getAttribute("data-share") === "1";
+  let pingWarned = false;
   async function ping() {
     if (!sharing || !navigator.onLine || !navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(function (pos) {
@@ -562,7 +614,10 @@
         headers: { "Content-Type": "application/json", "X-CSRF-Token": token, Accept: "application/json" },
         body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude })
       }).then(function (resp) {
-        if (sessionGone(resp)) addBubble("assistant", SESSION_EXPIRED);
+        if (sessionGone(resp) && !pingWarned) {
+          pingWarned = true;
+          addBubble("assistant", SESSION_EXPIRED);
+        }
       }).catch(function () {});
     });
   }
@@ -577,23 +632,23 @@
 
   const install = document.getElementById("apt-install");
   const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;      if (standalone) {
-        try { localStorage.setItem("apt-installed", "1"); } catch (err) {}
+        storeSet("apt-installed", "1");
       }
   window.addEventListener("appinstalled", function () {
-    localStorage.setItem("apt-installed", "1");
+    storeSet("apt-installed", "1");
     if (install) install.hidden = true;
   });
   function alreadyInstalled() {
-    return localStorage.getItem("apt-installed") === "1" || standalone;
+    return storeGet("apt-installed") === "1" || standalone;
   }
   let installEvent = null;
   window.addEventListener("beforeinstallprompt", function (event) {
     if (alreadyInstalled()) return;
     event.preventDefault();
     installEvent = event;
-    if (install && localStorage.getItem("apt-install-hide") !== "1") install.hidden = false;
+    if (install && storeGet("apt-install-hide") !== "1") install.hidden = false;
   });
-  if (install && !alreadyInstalled() && localStorage.getItem("apt-install-hide") !== "1") {
+  if (install && !alreadyInstalled() && storeGet("apt-install-hide") !== "1") {
     const ios = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
     if (ios) {
       install.querySelector("p").textContent = "Install Apt: tap Share, then Add to Home Screen.";
@@ -604,7 +659,7 @@
     if (navigator.getInstalledRelatedApps) {
       navigator.getInstalledRelatedApps().then(function (apps) {
         if (apps && apps.length) {
-          localStorage.setItem("apt-installed", "1");
+          storeSet("apt-installed", "1");
           install.hidden = true;
         }
       }).catch(function () {});
@@ -617,7 +672,7 @@
       if (!installEvent) return;
       installEvent.prompt();
       installEvent.userChoice.then(function (choice) {
-        if (choice && choice.outcome === "accepted") localStorage.setItem("apt-installed", "1");
+        if (choice && choice.outcome === "accepted") storeSet("apt-installed", "1");
         install.hidden = true;
         installEvent = null;
       });
@@ -625,8 +680,60 @@
   }
   if (installSkip) {
     installSkip.addEventListener("click", function () {
-      localStorage.setItem("apt-install-hide", "1");
+      storeSet("apt-install-hide", "1");
       install.hidden = true;
     });
+  }
+
+  const mapBox = document.getElementById("map");
+  const mapDataEl = document.getElementById("map-data");
+  if (mapBox && mapDataEl && window.L) {
+    let data = { pins: [], home: null };
+    try { data = JSON.parse(mapDataEl.textContent || "{}"); } catch (err) {}
+    if (L.Icon && L.Icon.Default) {
+      L.Icon.Default.imagePath = "/static/vendor/leaflet/images/";
+    }
+    const map = L.map("map");
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap" }).addTo(map);
+    const bounds = [];
+    (data.pins || []).forEach(function (pin) {
+      const marker = L.marker([pin.lat, pin.lng]).addTo(map);
+      const wrap = document.createElement("span");
+      const link = document.createElement("a");
+      link.setAttribute("href", pin.href || "#");
+      link.textContent = pin.name || "";
+      wrap.appendChild(link);
+      wrap.appendChild(document.createTextNode(" · " + (pin.city || "")));
+      marker.bindPopup(wrap);
+      bounds.push([pin.lat, pin.lng]);
+    });
+    if (data.home) {
+      L.circleMarker([data.home.lat, data.home.lng], { radius: 8 }).addTo(map).bindPopup(data.home.label || "");
+      bounds.push([data.home.lat, data.home.lng]);
+    }
+    if (bounds.length) map.fitBounds(bounds, { padding: [24, 24] });
+    else map.setView([31.85, -102.37], 6);
+  }
+
+  const providerInfoEl = document.getElementById("provider-info");
+  const providerSelect = document.getElementById("provider");
+  const modelSelect = document.getElementById("model");
+  const hint = document.getElementById("provider-hint");
+  if (providerInfoEl && providerSelect && modelSelect) {
+    let providerInfo = [];
+    try { providerInfo = JSON.parse(providerInfoEl.textContent || "[]"); } catch (err) { providerInfo = []; }
+    function fillModels() {
+      const current = providerInfo.find(function (item) { return item.id === providerSelect.value; }) || providerInfo[0] || {};
+      if (hint) hint.textContent = current.hint || "";
+      modelSelect.innerHTML = "";
+      (current.models || []).forEach(function (name) {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        modelSelect.appendChild(option);
+      });
+    }
+    providerSelect.addEventListener("change", fillModels);
+    fillModels();
   }
 })();

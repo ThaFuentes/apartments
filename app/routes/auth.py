@@ -5,7 +5,7 @@ from flask import flash, redirect, render_template, request
 from flask_login import current_user
 from werkzeug.security import generate_password_hash
 
-from app.auth import attempt, home_for, login_person, logout_person, needs_setup, safe_next
+from app.auth import home_for, login_person, logout_person, needs_setup, safe_next
 from app.builddb.builddb import db
 from app.models import User
 from app.routes.common import bp, login_required
@@ -36,9 +36,11 @@ def login():
             login_person(user)
             flash("You're in. In Settings you can add a Gemini, Groq, OpenAI, Grok, or other key when you want.", "ok")
             return redirect("/")
-        user = attempt(request.form.get("username") or "", request.form.get("password") or "")
+        from app.services.people import try_login
+
+        user, reason = try_login(request.form.get("username") or "", request.form.get("password") or "")
         if not user:
-            flash("That username and password did not match.", "warn")
+            flash(reason, "warn")
             return render_template("login.html", setup=False), 401
         from app.services import twofa as twofa_util
 
@@ -52,8 +54,8 @@ def login():
                     flash(msg, "warn")
                     return render_template("login.html", setup=False)
                 flash(msg, "ok")
-            nxt = request.values.get("next") or ""
-            if str(nxt).startswith("/") and not str(nxt).startswith("//"):
+            nxt = safe_next("")
+            if nxt:
                 from urllib.parse import urlencode
 
                 return redirect("/2fa?" + urlencode({"next": nxt}))

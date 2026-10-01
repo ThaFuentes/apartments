@@ -75,8 +75,10 @@ class ConsoleTests(AptTestBase):
         self.assertIn(b'id="chat-panel"', page.data)
         self.assertIn(b'id="chat-close"', page.data)
         self.assertIn(b'id="chat-open"', page.data)
-        self.assertIn(b"/static/css/apt-desk.css?v=4", page.data)
-        self.assertIn(b"/static/js/apt.js?v=23", page.data)
+        from app.assets import ASSET_V
+
+        self.assertIn(f"/static/css/apt-desk.css?v={ASSET_V}".encode(), page.data)
+        self.assertIn(f"/static/js/apt.js?v={ASSET_V}".encode(), page.data)
         skin = client.get("/static/css/apt-desk.css")
         self.assertEqual(skin.status_code, 200)
         self.assertNotIn(b".chat-panel[hidden]", skin.data)

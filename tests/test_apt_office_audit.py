@@ -327,3 +327,112 @@ class AptTest09(AptTestBase):
         reply = (heard.get("reply") or "").lower()
         self.assertIn("dana desk", reply)
         self.assertIn("phone", reply)
+
+    def test_people_save_keeps_the_login_on(self):
+        from app.services.people import create_user, find_user
+
+        owner = self.owner()
+        create_user(
+            username="deskone",
+            password="field-pass-9",
+            display_name="Dana Desk",
+            role="office",
+            created_by=owner,
+        )
+        db.session.commit()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        person = find_user("deskone")
+        saved = client.post(
+            f"/users/{person.id}",
+            data={
+                "csrf_token": token,
+                "role": "office",
+                "email": "dana@example.com",
+                "phone": "432-555-0100",
+            },
+        )
+        self.assertEqual(saved.status_code, 302)
+        db.session.refresh(person)
+        self.assertTrue(person.active)
+        self.assertEqual(person.email, "dana@example.com")
+        page = client.get("/users")
+        self.assertNotIn(b"This login is off", page.data)
+        self.assertNotIn(b"Unlock this login", page.data)
+
+    def test_owner_unlocks_a_turned_off_login(self):
+        from app.services.people import create_user, find_user, try_login
+
+        owner = self.owner()
+        create_user(
+            username="deskone",
+            password="field-pass-9",
+            display_name="Dana Desk",
+            role="office",
+            created_by=owner,
+        )
+        db.session.commit()
+        person = find_user("deskone")
+        person.active = False
+        db.session.commit()
+        user, reason = try_login("deskone", "field-pass-9")
+        self.assertIsNone(user)
+        self.assertIn("turned off", reason)
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        page = client.get("/users")
+        self.assertIn(b"Unlock this login", page.data)
+        unlocked = client.post(f"/users/{person.id}/unlock", data={"csrf_token": token})
+        self.assertEqual(unlocked.status_code, 302)
+        db.session.refresh(person)
+        self.assertTrue(person.active)
+        user, reason = try_login("deskone", "field-pass-9")
+        self.assertIsNotNone(user)
+        self.assertEqual(reason, "")
+
+    def test_login_lock_is_not_extended_and_can_be_cleared(self):
+        from datetime import timedelta
+        from unittest.mock import patch
+
+        from app.services.clock import utcnow as real_now
+        from app.services.people import create_user, find_user, try_login
+
+        owner = self.owner()
+        create_user(
+            username="deskone",
+            password="field-pass-9",
+            display_name="Dana Desk",
+            role="office",
+            created_by=owner,
+        )
+        db.session.commit()
+        first = real_now()
+        with patch("app.services.people.utcnow", return_value=first):
+            for _ in range(8):
+                user, reason = try_login("deskone", "wrong-password")
+                self.assertIsNone(user)
+        person = find_user("deskone")
+        locked_until = person.locked_until
+        self.assertIsNotNone(locked_until)
+        later = first + timedelta(minutes=1)
+        with patch("app.services.people.utcnow", return_value=later):
+            user, reason = try_login("deskone", "field-pass-9")
+            self.assertIsNone(user)
+            self.assertIn("locked", reason.lower())
+        db.session.refresh(person)
+        self.assertEqual(person.locked_until, locked_until)
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        client.post(f"/users/{person.id}/unlock", data={"csrf_token": token})
+        user, reason = try_login("deskone", "field-pass-9")
+        self.assertIsNotNone(user)
+        self.assertEqual(reason, "")

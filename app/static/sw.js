@@ -1,9 +1,10 @@
-const CACHE = "apt-shell-5";
+const ASSET_V = "26";
+const CACHE = "apt-shell-" + ASSET_V;
 const SHELL = [
   "/static/offline.html",
-  "/static/css/apt.css?v=25",
-  "/static/css/apt-desk.css?v=4",
-  "/static/js/apt.js?v=23"
+  "/static/css/apt.css?v=" + ASSET_V,
+  "/static/css/apt-desk.css?v=" + ASSET_V,
+  "/static/js/apt.js?v=" + ASSET_V
 ];
 
 self.addEventListener("install", function (event) {
@@ -26,7 +27,7 @@ self.addEventListener("fetch", function (event) {
   if (url.pathname.startsWith("/api/ping") || url.pathname.startsWith("/api/expense")) return;
   event.respondWith(
     fetch(req).then(function (resp) {
-      if (url.pathname.startsWith("/api/pack/") || url.pathname.startsWith("/static/")) {
+      if (resp.ok && resp.status === 200 && (url.pathname.startsWith("/api/pack/") || url.pathname.startsWith("/static/"))) {
         const copy = resp.clone();
         caches.open(CACHE).then(function (cache) { cache.put(req, copy); });
       }

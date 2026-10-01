@@ -47,6 +47,10 @@ class User(UserMixin, db.Model):
         return bool(self.active)
 
     @property
+    def login_locked(self):
+        return bool(self.locked_until and self.locked_until > utcnow())
+
+    @property
     def is_owner(self):
         return self.role == "owner"
 
