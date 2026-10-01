@@ -260,35 +260,17 @@ def apply_send_report(user, payload, source) -> dict:
 
 
 def _mail_config() -> tuple[str, int, str, str, str]:
-    import os
+    from app.services.mail import mail_config
 
-    profile = site_profile()
-    host = ((getattr(profile, "smtp_host", None) or "") or os.getenv("SMTP_HOST") or "").strip()
-    try:
-        port = int(getattr(profile, "smtp_port", None) or os.getenv("SMTP_PORT") or 587)
-    except (TypeError, ValueError):
-        port = 587
-    user_name = ((getattr(profile, "smtp_user", None) or "") or os.getenv("SMTP_USER") or "").strip()
-    sender = ((getattr(profile, "smtp_from", None) or "") or os.getenv("SMTP_FROM") or user_name or "apt@poweredby.top").strip()
-    password = ""
-    cipher = getattr(profile, "smtp_password_ciphertext", None) if profile else None
-    if cipher:
-        from app.services.crypto import decrypt_text
-
-        try:
-            password = decrypt_text(cipher)
-        except Exception:
-            password = ""
-    if not password:
-        password = os.getenv("SMTP_PASSWORD") or ""
-    return host, port, user_name, password, sender
+    return mail_config()
 
 
 def _email_report(address: str, report: Report, link: str) -> bool:
-    import smtplib
     from email.message import EmailMessage
 
-    host, port, user_name, password, sender = _mail_config()
+    from app.services.mail import send_message
+
+    host, _port, _user_name, _password, sender = _mail_config()
     if not host or not address:
         return False
     from app.services.reports import load_snapshot, render_markdown, render_pdf
@@ -304,15 +286,8 @@ def _email_report(address: str, report: Report, link: str) -> bool:
         msg.add_attachment(pdf, maintype="application", subtype="pdf", filename=f"apt-report-{report.id}.pdf")
     except Exception:
         pass
-    try:
-        with smtplib.SMTP(host, port, timeout=15) as smtp:
-            smtp.starttls()
-            if user_name:
-                smtp.login(user_name, password)
-            smtp.send_message(msg)
-        return True
-    except Exception:
-        return False
+    ok, _note = send_message(msg)
+    return ok
 
 
 def apply_invite_viewer(user, payload, source) -> dict:

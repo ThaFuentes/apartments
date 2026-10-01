@@ -44,10 +44,10 @@
     <details>
       <summary>Email for reports</summary>
       <div class="card stack">
-        <p class="lead">The mailbox that sends a report. The password is saved encrypted. Leave it blank to keep the one already stored.</p>
-        <label>Mail server <input name="smtp_host" value="{{ profile.smtp_host if profile else '' }}" placeholder="smtp.gmail.com" autocomplete="off"></label>
-        <label>Port <input name="smtp_port" value="{{ profile.smtp_port if profile and profile.smtp_port else 587 }}" inputmode="numeric"></label>
-        <label>Username <input name="smtp_user" value="{{ profile.smtp_user if profile else '' }}" autocomplete="off"></label>
+        <p class="lead">This mailbox sends reports, 2FA codes, and password-reset links. On this host use smtp.hostinger.com port 465, username the full email, and the mailbox password. Gmail from this server often times out. Leave the password blank to keep the one already stored.</p>
+        <label>Mail server <input name="smtp_host" value="{{ profile.smtp_host if profile else '' }}" placeholder="smtp.hostinger.com" autocomplete="off"></label>
+        <label>Port <input name="smtp_port" value="{{ profile.smtp_port if profile and profile.smtp_port else 465 }}" inputmode="numeric"></label>
+        <label>Username <input name="smtp_user" value="{{ profile.smtp_user if profile else '' }}" placeholder="you@yourdomain.com" autocomplete="off"></label>
         <label>Password <input name="smtp_password" type="password" autocomplete="new-password" placeholder="{% if profile and profile.smtp_password_ciphertext %}Saved. Type a new one to replace it{% else %}Mailbox password{% endif %}"></label>
         <label>From address <input name="smtp_from" value="{{ profile.smtp_from if profile else '' }}" placeholder="reports@yourcompany.com" autocomplete="off"></label>
       </div>

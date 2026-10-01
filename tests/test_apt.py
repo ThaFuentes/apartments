@@ -24,6 +24,7 @@ def load_tests(loader, tests, pattern):
         "tests.test_apt_twofa",
         "tests.test_apt_console",
         "tests.test_apt_budget",
+        "tests.test_apt_mail",
         "tests.test_access_policy",
     ):
         module = importlib.import_module(name)
