@@ -1,5 +1,10 @@
-const CACHE = "apt-shell-4";
-const SHELL = ["/static/offline.html", "/static/css/apt.css", "/static/js/apt.js"];
+const CACHE = "apt-shell-5";
+const SHELL = [
+  "/static/offline.html",
+  "/static/css/apt.css?v=25",
+  "/static/css/apt-desk.css?v=4",
+  "/static/js/apt.js?v=23"
+];
 
 self.addEventListener("install", function (event) {
   event.waitUntil(caches.open(CACHE).then(function (cache) { return cache.addAll(SHELL); }));

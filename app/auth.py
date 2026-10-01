@@ -12,6 +12,13 @@ login_manager.login_view = "desk.login"
 login_manager.session_protection = "basic"
 
 
+@login_manager.unauthorized_handler
+def _login_needed():
+    from flask import url_for
+
+    return redirect(url_for("desk.login", next=request.path))
+
+
 @login_manager.user_loader
 def load_user(user_id):
     try:

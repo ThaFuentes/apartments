@@ -85,6 +85,61 @@ class ReadyContractorTests(AptTestBase):
         self.assertIn(b"Trashout", unit_page.data)
         self.assertIn(b"Call them to this unit", unit_page.data)
 
+    def test_ready_list_has_target_date_overdue_and_checklist(self):
+        from datetime import timedelta
+
+        from app.services.board import add_units
+        from app.services.clock import local_today
+        from app.services.ready import add_ready_job, days_overdue, ready_cards, set_ready_by, set_ready_job_done
+
+        owner = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        add_units(owner, prop, "210", "human")
+        db.session.commit()
+        unit = Unit.query.filter_by(property_id=prop.id, unit_number="210").one()
+        add_ready_job(owner, unit, "trashout", "human")
+        past = local_today() - timedelta(days=3)
+        dated = set_ready_by(owner, unit, past.isoformat())
+        db.session.commit()
+        self.assertTrue(dated["ok"], dated)
+        self.assertEqual(unit.ready_by, past)
+        self.assertEqual(days_overdue(unit.ready_by), 3)
+        cards = ready_cards(owner)
+        self.assertEqual(cards[0]["ready_by"], past.isoformat())
+        self.assertEqual(cards[0]["days_overdue"], 3)
+        checks = {row["slug"]: row for row in cards[0]["checklist"]}
+        self.assertTrue(checks["trashout"]["open"])
+        self.assertFalse(checks["trashout"]["done"])
+        self.assertIn("paint", checks)
+
+        finished = set_ready_job_done(owner, unit, "trashout", True)
+        db.session.commit()
+        self.assertTrue(finished["ok"], finished)
+        cards = ready_cards(owner)
+        checks = {row["slug"]: row for row in cards[0]["checklist"]}
+        self.assertTrue(checks["trashout"]["done"])
+        self.assertFalse(checks["trashout"]["open"])
+
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        board = client.get("/ready")
+        self.assertEqual(board.status_code, 200)
+        self.assertIn(b"Target ready", board.data)
+        self.assertIn(b"days overdue", board.data)
+        self.assertIn(b"ready-check", board.data)
+        marked = client.post(
+            f"/units/{unit.id}/ready-check",
+            data={"csrf_token": token, "job": "paint", "done": "1", "next": "/ready"},
+            follow_redirects=False,
+        )
+        self.assertEqual(marked.status_code, 302)
+        paint = UnitTask.query.filter_by(unit_id=unit.id, title="Paint").one()
+        self.assertEqual(paint.status, "done")
+
     def test_chat_saves_contractor_and_calls_them(self):
         from app.services.board import add_units
 

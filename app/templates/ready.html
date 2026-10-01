@@ -21,6 +21,8 @@
         {% if card.unit.building %} · Building {{ card.unit.building }}{% endif %}
         {% if card.open_count %} · {{ card.open_count }} open{% endif %}
         {% if card.done_count %} · {{ card.done_count }} done{% endif %}
+        {% if card.ready_by %} · Target {{ card.ready_by }}{% endif %}
+        {% if card.days_overdue %} · <span class="overdue">{{ card.days_overdue }} day{% if card.days_overdue != 1 %}s{% endif %} overdue</span>{% endif %}
       </span>
       {% if card.jobs %}
       <span class="unit-gear">{% for job in card.jobs %}{{ job }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
@@ -29,10 +31,30 @@
       <span class="hint">Called: {{ card.vendors|join(', ') }}</span>
       {% endif %}
       {% if editable %}
+      <form method="post" action="/units/{{ card.unit.id }}/ready-by" class="ready-date">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/ready">
+        <label>Target ready <input type="date" name="ready_by" value="{{ card.ready_by }}"></label>
+        <button type="submit" class="quiet">Save date</button>
+      </form>
+      <ul class="ready-check">
+        {% for item in card.checklist %}
+        <li>
+          <form method="post" action="/units/{{ card.unit.id }}/ready-check">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="next" value="/ready">
+            <input type="hidden" name="job" value="{{ item.slug }}">
+            <input type="hidden" name="done" value="{{ '0' if item.done else '1' }}">
+            <button type="submit" class="{% if item.done %}is-done{% elif item.open %}is-open{% endif %}">{{ item.label }}{% if item.done %} · done{% elif item.open %} · needed{% endif %}{% if item.vendor %} · {{ item.vendor }}{% endif %}</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
       <div class="chips ready-jobs">
         {% for slug, label in jobs %}
         <form method="post" action="/units/{{ card.unit.id }}/ready">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="/ready">
           <input type="hidden" name="job" value="{{ slug }}">
           <button type="submit">{{ label }}</button>
         </form>

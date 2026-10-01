@@ -323,6 +323,33 @@ button.lived { background: #2f6fed; }
 .ready-jobs { flex-wrap: wrap; overflow: visible; }
 .call-card { margin: 0.7rem 0 1rem; }
 .ready-list .inline { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: end; }
+.ready-date {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: end;
+  margin-top: 0.45rem;
+}
+.ready-check {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.ready-check button {
+  min-height: 36px;
+  border-radius: 10px;
+  font-weight: 650;
+}
+.ready-check .is-done {
+  background: #e5f6ea;
+  color: #157a32;
+  text-decoration: line-through;
+}
+.ready-check .is-open { background: #fff6e5; color: #8a4b12; }
+.overdue { color: #9b1c2c; font-weight: 800; }
 .chips button {
   background: white;
   color: var(--ink);

@@ -104,6 +104,13 @@ def create_app() -> Flask:
         local = _local_moment(value)
         return local.strftime("%b %d, %Y · %I:%M %p").replace(" 0", " ").replace("· 0", "· ")
 
+    from app.guest_access import open_guest_paths, strip_body_csrf_meta
+
+    @app.after_request
+    def _strip_injected_csrf_meta(response):
+        return strip_body_csrf_meta(response)
+
+    open_guest_paths()
     try:
         from poweredbytop import init_security
 
@@ -355,6 +362,12 @@ def create_app() -> Flask:
         db.session.execute(text("SELECT 1"))
         return {"ok": True, "site": "apt", "db": "mariadb"}, 200
 
+    @app.route("/robots.txt")
+    def robots():
+        from flask import Response
+
+        return Response("User-agent: *\nDisallow: /\n", mimetype="text/plain")
+
     @app.errorhandler(404)
     def _missing(_e):
         from flask import render_template
@@ -365,7 +378,13 @@ def create_app() -> Flask:
     def _denied(_e):
         from flask import render_template
 
-        return render_template("error.html", code=403, message="That action is not allowed for this login."), 403
+        from app.guest_access import is_guest_ok
+
+        if getattr(current_user, "is_authenticated", False):
+            return render_template("error.html", code=403, message="That action is not allowed for this login."), 403
+        if request.endpoint and not is_guest_ok(request.path or ""):
+            return redirect(url_for("desk.login", next=request.path))
+        return render_template("error.html", code=404, message="That page is not in the record."), 404
 
     @app.route("/sw.js")
     def sw():

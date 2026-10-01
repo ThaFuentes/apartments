@@ -12,6 +12,7 @@
   {% endif %}
   <form method="post" action="/login" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">
     {% if setup %}
     <label>Your name <input name="display_name" autocomplete="name" placeholder="Owner" required></label>
     {% endif %}

@@ -10,18 +10,21 @@
   {% endif %}
   <form method="post" action="/2fa" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">
     <label>Code <input name="code" inputmode="numeric" maxlength="7" autocomplete="one-time-code" placeholder="123456" required autofocus></label>
     <button type="submit">Continue</button>
   </form>
   {% if method == 'email' %}
   <form method="post" action="/2fa" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">
     <input type="hidden" name="do" value="resend">
     <button class="quiet" type="submit">Send a new code</button>
   </form>
   {% endif %}
   <form method="post" action="/2fa">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">
     <input type="hidden" name="do" value="cancel">
     <button class="ghost" type="submit">Back to sign in</button>
   </form>

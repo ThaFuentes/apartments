@@ -31,6 +31,36 @@
   }
 
   const token = (document.querySelector('meta[name="csrf-token"]') || {}).content || "";
+  const SESSION_EXPIRED = "Session expired, sign in again";
+
+  function isHtmlResponse(resp) {
+    const ctype = ((resp && resp.headers && resp.headers.get("content-type")) || "").toLowerCase();
+    return ctype.indexOf("text/html") !== -1;
+  }
+
+  function isJsonResponse(resp) {
+    const ctype = ((resp && resp.headers && resp.headers.get("content-type")) || "").toLowerCase();
+    return ctype.indexOf("application/json") !== -1;
+  }
+
+  function sessionGone(resp) {
+    return !resp || resp.status === 401 || resp.status === 403 || isHtmlResponse(resp);
+  }
+
+  function readJson(resp) {
+    if (sessionGone(resp)) {
+      const err = new Error(SESSION_EXPIRED);
+      err.code = "session";
+      return Promise.reject(err);
+    }
+    if (!resp.ok || !isJsonResponse(resp)) {
+      const err = new Error("bad-response");
+      err.code = "bad";
+      return Promise.reject(err);
+    }
+    return resp.json();
+  }
+
   document.querySelectorAll("[data-place-search]").forEach(function (root) {
     const input = root.querySelector("[data-search]");
     const results = root.querySelector("[data-results]");
@@ -49,7 +79,7 @@
       }
       timer = window.setTimeout(function () {
         fetch("/api/places?q=" + encodeURIComponent(q), { headers: { Accept: "application/json" } })
-          .then(function (resp) { return resp.json(); })
+          .then(readJson)
           .then(function (rows) {
             results.innerHTML = "";
             if (!rows.length) {
@@ -96,6 +126,13 @@
               });
               results.appendChild(button);
             });
+          })
+          .catch(function (err) {
+            results.innerHTML = "";
+            const emptyMessage = document.createElement("p");
+            emptyMessage.className = "lead";
+            emptyMessage.textContent = (err && err.code === "session") ? SESSION_EXPIRED : "Could not search places.";
+            results.appendChild(emptyMessage);
           });
       }, 200);
     });
@@ -155,6 +192,7 @@
     if (!panel || !openChat) return;
     panel.hidden = !open;
     panel.classList.toggle("is-open", !!open);
+    document.body.classList.toggle("chat-open", !!open);
     openChat.hidden = !!open;
     openChat.setAttribute("aria-expanded", open ? "true" : "false");
     if (open) {
@@ -389,14 +427,30 @@
         body: body,
         headers: { Accept: "application/json", "X-CSRF-Token": token }
       })
-        .then(function (resp) { return resp.json(); })
+        .then(function (resp) {
+          if (!resp.ok || !isJsonResponse(resp)) {
+            const err = new Error(sessionGone(resp) ? "session" : "bad");
+            err.code = sessionGone(resp) ? "session" : "bad";
+            err.resp = resp;
+            return Promise.reject(err);
+          }
+          return resp.json();
+        })
         .then(function (data) {
           const closed = (data && data.closed_ids) || (card && card.dataset.pendingId ? [card.dataset.pendingId] : []);
           dropCards(closed);
           if (card && card.parentNode) card.remove();
           addBubble("assistant", (data && data.reply) || (form.classList.contains("discard-form") ? "Discarded." : "Saved."));
         })
-        .catch(function () {
+        .catch(function (err) {
+          if (err && err.code === "session") {
+            addBubble("assistant", SESSION_EXPIRED);
+            return;
+          }
+          if (err && err.code === "bad") {
+            addBubble("assistant", "That didn't save. Try again.");
+            return;
+          }
           form.submit();
         });
     });
@@ -460,7 +514,7 @@
         body: body,
         headers: { Accept: "application/json", "X-CSRF-Token": token }
       })
-        .then(function (resp) { return resp.json(); })
+        .then(readJson)
         .then(function (data) {
           addBubble("assistant", (data && data.reply) || "Got it.");
 
@@ -470,8 +524,8 @@
           const key = composer.querySelector('[name="idempotency_key"]');
           if (key) key.value = Math.random().toString(16).slice(2) + Date.now().toString(16);
         })
-        .catch(function () {
-          addBubble("assistant", "That didn't send. Try again.");
+        .catch(function (err) {
+          addBubble("assistant", (err && err.code === "session") ? SESSION_EXPIRED : "That didn't send. Try again.");
         });
 
     });
@@ -507,7 +561,9 @@
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": token, Accept: "application/json" },
         body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-      });
+      }).then(function (resp) {
+        if (sessionGone(resp)) addBubble("assistant", SESSION_EXPIRED);
+      }).catch(function () {});
     });
   }
   if (sharing) {

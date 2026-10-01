@@ -16,7 +16,7 @@ from app.services.people import create_user
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     if getattr(current_user, "is_authenticated", False):
-        return redirect(home_for(current_user))
+        return redirect(safe_next(home_for(current_user)))
     setup = needs_setup()
     if request.method == "POST":
         if setup:
@@ -52,6 +52,11 @@ def login():
                     flash(msg, "warn")
                     return render_template("login.html", setup=False)
                 flash(msg, "ok")
+            nxt = request.values.get("next") or ""
+            if str(nxt).startswith("/") and not str(nxt).startswith("//"):
+                from urllib.parse import urlencode
+
+                return redirect("/2fa?" + urlencode({"next": nxt}))
             return redirect("/2fa")
         login_person(user)
         return redirect(safe_next(home_for(user)))

@@ -1,8 +1,11 @@
 """Make-ready jobs: trashout, paint, carpet, and the rest of the turn."""
 from __future__ import annotations
 
+from datetime import date
+
 from app.builddb.builddb import db
 from app.models import Property, Unit, UnitTask
+from app.services.clock import local_today, utcnow
 from app.services.people import person_label
 
 READY_JOBS = (
@@ -82,6 +85,112 @@ def add_ready_job(user, unit: Unit, job: str, source: str, vendor: str = "") -> 
     return {"ok": True, "reply": reply, "unit_id": unit.id}
 
 
+def days_overdue(ready_by, today=None) -> int:
+    if not ready_by:
+        return 0
+    day = today or local_today()
+    delta = (day - ready_by).days
+    return delta if delta > 0 else 0
+
+
+def set_ready_by(user, unit: Unit, raw: str) -> dict:
+    text = (raw or "").strip()
+    if not text:
+        unit.ready_by = None
+        return {
+            "ok": True,
+            "reply": f"Cleared the target-ready date on unit {unit.unit_number}.",
+            "unit_id": unit.id,
+        }
+    try:
+        day = date.fromisoformat(text)
+    except ValueError:
+        return {"ok": False, "reply": "Use a date like 2026-10-15."}
+    unit.ready_by = day
+    who = person_label(getattr(user, "id", None))
+    reply = f"Unit {unit.unit_number} target ready {day.isoformat()}."
+    if who:
+        reply += f" Saved by {who}."
+    overdue = days_overdue(day)
+    if overdue:
+        reply += f" {overdue} day{'s' if overdue != 1 else ''} overdue."
+    return {"ok": True, "reply": reply, "unit_id": unit.id}
+
+
+def _task_for_title(tasks, title: str) -> UnitTask | None:
+    want = (title or "").strip().lower()
+    for row in tasks:
+        if (row.title or "").strip().lower() == want:
+            return row
+    return None
+
+
+def set_ready_job_done(user, unit: Unit, job: str, done: bool) -> dict:
+    slug = match_job(job) or ""
+    title = job_label(slug) if slug else (job or "").strip()[:200]
+    if not title:
+        return {"ok": False, "reply": "Which make-ready job?"}
+    if (unit.occupancy or "") != "make_ready":
+        from app.services.board import set_occupancy
+
+        set_occupancy(user, unit, "make_ready", "human")
+    tasks = (
+        UnitTask.query.filter_by(unit_id=unit.id)
+        .filter(UnitTask.deleted_at.is_(None))
+        .order_by(UnitTask.id.asc())
+        .all()
+    )
+    row = _task_for_title(tasks, title)
+    if done:
+        if row is None:
+            added = add_ready_job(user, unit, slug or title, "human")
+            if not added.get("ok"):
+                return added
+            tasks = (
+                UnitTask.query.filter_by(unit_id=unit.id)
+                .filter(UnitTask.deleted_at.is_(None))
+                .order_by(UnitTask.id.asc())
+                .all()
+            )
+            row = _task_for_title(tasks, title)
+        if row is None:
+            return {"ok": False, "reply": f"Could not file {title}."}
+        if row.status != "done":
+            row.status = "done"
+            row.done_by_id = getattr(user, "id", None)
+            row.done_at = utcnow()
+        return {"ok": True, "reply": f"{title} is done on unit {unit.unit_number}.", "unit_id": unit.id}
+    if row is None:
+        return add_ready_job(user, unit, slug or title, "human")
+    if row.status == "done":
+        row.status = "vendored" if (row.kind or "") == "vendor" or (row.vendor or "").strip() else "needed"
+        row.done_by_id = None
+        row.done_at = None
+    return {"ok": True, "reply": f"{title} is open again on unit {unit.unit_number}.", "unit_id": unit.id}
+
+
+def ready_checklist(tasks) -> list[dict]:
+    by_title = {}
+    for row in tasks:
+        key = (row.title or "").strip().lower()
+        if key and key not in by_title:
+            by_title[key] = row
+    checks = []
+    for slug, label in READY_JOBS:
+        row = by_title.get(label.lower())
+        checks.append(
+            {
+                "slug": slug,
+                "label": label,
+                "done": bool(row and row.status == "done"),
+                "open": bool(row and row.status in ("needed", "vendored")),
+                "task_id": row.id if row else None,
+                "vendor": ((row.vendor or "").strip() if row else ""),
+            }
+        )
+    return checks
+
+
 def ready_cards(user) -> list[dict]:
     from app.services.parse import property_catalog
 
@@ -110,6 +219,7 @@ def ready_cards(user) -> list[dict]:
             if name and name.lower() not in seen:
                 seen.add(name.lower())
                 vendors.append(name)
+        ready_day = unit.ready_by
         cards.append(
             {
                 "unit": unit,
@@ -118,6 +228,9 @@ def ready_cards(user) -> list[dict]:
                 "vendors": vendors,
                 "open_count": len(open_rows),
                 "done_count": sum(1 for row in tasks if row.status == "done"),
+                "ready_by": ready_day.isoformat() if ready_day else "",
+                "days_overdue": days_overdue(ready_day),
+                "checklist": ready_checklist(tasks),
             }
         )
     return cards

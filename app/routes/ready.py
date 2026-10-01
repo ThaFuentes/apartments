@@ -37,7 +37,32 @@ def unit_ready_job(unit_id):
     result = add_ready_job(current_user, unit, job, "human", vendor=request.form.get("vendor") or "")
     db.session.commit()
     flash(result.get("reply") or "Saved.", "ok" if result.get("ok") else "warn")
-    return redirect(f"/units/{unit.id}")
+    return redirect(request.form.get("next") or f"/units/{unit.id}")
+
+
+@bp.post("/units/<int:unit_id>/ready-by")
+@login_required
+def unit_ready_by(unit_id):
+    from app.services.ready import set_ready_by
+
+    unit = _editable_unit(unit_id)
+    result = set_ready_by(current_user, unit, request.form.get("ready_by") or "")
+    db.session.commit()
+    flash(result.get("reply") or "Saved.", "ok" if result.get("ok") else "warn")
+    return redirect(request.form.get("next") or "/ready")
+
+
+@bp.post("/units/<int:unit_id>/ready-check")
+@login_required
+def unit_ready_check(unit_id):
+    from app.services.ready import set_ready_job_done
+
+    unit = _editable_unit(unit_id)
+    done = (request.form.get("done") or "").strip() in ("1", "true", "on", "yes")
+    result = set_ready_job_done(current_user, unit, request.form.get("job") or "", done)
+    db.session.commit()
+    flash(result.get("reply") or "Saved.", "ok" if result.get("ok") else "warn")
+    return redirect(request.form.get("next") or "/ready")
 
 
 @bp.post("/units/<int:unit_id>/call")
