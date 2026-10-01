@@ -52,6 +52,34 @@ class ConsoleTests(AptTestBase):
         self.assertIn(b"Unit 204", page.data)
         self.assertNotIn(b">Operations<", page.data)
 
+    def test_desktop_chat_close_is_not_forced_open(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        desk = (root / "app/static/css/apt-desk.css").read_text()
+        js = (root / "app/static/js/apt.js").read_text()
+        self.assertNotIn(".chat-panel[hidden]", desk)
+        self.assertNotIn("chat-fab { display: none !important; }", desk)
+        self.assertIn("body.ops .chat-panel.is-open", desk)
+        self.assertIn("body.ops:has(#chat-panel.is-open)", desk)
+        self.assertIn('getElementById("chat-close")', js)
+        self.assertIn("setChat(false)", js)
+        self.owner()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        page = client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'id="chat-panel"', page.data)
+        self.assertIn(b'id="chat-close"', page.data)
+        self.assertIn(b'id="chat-open"', page.data)
+        self.assertIn(b"/static/css/apt-desk.css?v=3", page.data)
+        self.assertIn(b"/static/js/apt.js?v=22", page.data)
+        skin = client.get("/static/css/apt-desk.css")
+        self.assertEqual(skin.status_code, 200)
+        self.assertNotIn(b".chat-panel[hidden]", skin.data)
+        self.assertNotIn(b"display: flex !important", skin.data)
+
     def test_owner_opens_security_console_and_staff_cannot(self):
         owner = self.owner()
         office, _ = create_user(username="ivy", password="field-pass-9", role="office", created_by=owner)

@@ -163,6 +163,7 @@
       const thread = document.getElementById("thread");
       if (thread) thread.scrollTop = thread.scrollHeight;
     }
+    try { sessionStorage.setItem("apt-chat-open", open ? "1" : "0"); } catch (err) {}
   }
   if (openChat) openChat.addEventListener("click", function () { setChat(true); });
   if (closeChat) closeChat.addEventListener("click", function () { setChat(false); });
@@ -179,7 +180,8 @@
       }
     });
   }
-  setChat(false);
+  try { setChat(sessionStorage.getItem("apt-chat-open") === "1"); }
+  catch (err) { setChat(false); }
 
   function addBubble(role, text) {
     const thread = document.getElementById("thread");

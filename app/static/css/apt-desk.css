@@ -124,20 +124,29 @@
 @media (min-width: 1180px) {
   body.ops {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 26rem;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto 1fr;
     min-height: 100vh;
+  }
+  body.ops:has(#chat-panel.is-open) {
+    grid-template-columns: minmax(0, 1fr) 26rem;
   }
   body.ops .top { grid-column: 1 / -1; }
   body.ops main {
     max-width: none;
     padding: 1.1rem 1.3rem 2rem;
+    grid-column: 1;
+    grid-row: 2;
   }
   body.ops .nav { display: none; }
-  body.ops .chat-fab { display: none !important; }
-  body.ops .chat-panel,
-  body.ops .chat-panel[hidden] {
-    display: flex !important;
+  body.ops .chat-fab {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: end;
+    align-self: end;
+  }
+  body.ops .chat-panel.is-open {
+    display: flex;
     position: sticky;
     top: 0.6rem;
     left: auto;
@@ -147,6 +156,8 @@
     margin: 0.6rem 0.7rem 0.6rem 0;
     bottom: auto;
     z-index: 8;
+    grid-column: 2;
+    grid-row: 2;
   }
 }
 
