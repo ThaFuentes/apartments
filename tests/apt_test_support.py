@@ -57,6 +57,7 @@ TABLES = [
     "trip_properties",
     "trips",
     "unit_tasks",
+    "contractors",
     "units",
     "property_access",
     "properties",

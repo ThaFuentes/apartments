@@ -311,3 +311,240 @@ class AptTest06(AptTestBase):
         self.assertEqual(user.default_property_id, prop.id)
         self.assertTrue(user.default_property_confirmed)
         self.assertEqual(PendingAction.query.filter_by(tool="set_default_property", status="accepted").count(), 1)
+    def test_same_unit_work_reuses_one_review_card(self):
+        from app.services.pending import request_apply
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Madison Sq", "Lubbock", "Texas", user.id)
+        db.session.commit()
+        payload = {
+            "property_id": prop.id,
+            "property_name": prop.name,
+            "city": "Lubbock",
+            "region": "Texas",
+            "unit_number": "750",
+            "title": "Thermostat batteries",
+            "status": "done",
+        }
+        first = request_apply(user, "record_unit_visit", payload, "ai", "batteries-1")
+        second = request_apply(user, "record_unit_visit", payload, "ai", "batteries-2")
+        self.assertTrue(first.get("pending"))
+        self.assertTrue(second.get("pending"))
+        self.assertTrue(second.get("duplicate"))
+        rows = PendingAction.query.filter(
+            PendingAction.user_id == user.id,
+            PendingAction.status.in_(("pending", "needs_answer")),
+        ).all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].id, first["proposal"]["id"])
+        self.assertEqual(second["proposal"]["id"], first["proposal"]["id"])
+    def test_already_logged_unit_work_is_not_proposed_again(self):
+        from app.models import Job, Unit
+        from app.services.pending import request_apply
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Madison Sq", "Lubbock", "Texas", user.id)
+        unit = Unit(property_id=prop.id, unit_number="750", created_by_id=user.id, created_at=utcnow())
+        db.session.add(unit)
+        db.session.flush()
+        db.session.add(
+            Job(
+                property_id=prop.id,
+                unit_id=unit.id,
+                title="Thermostat batteries",
+                status="done",
+                source="human",
+                created_by_id=user.id,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        heard = request_apply(
+            user,
+            "record_unit_visit",
+            {
+                "property_id": prop.id,
+                "property_name": prop.name,
+                "city": "Lubbock",
+                "region": "Texas",
+                "unit_number": "750",
+                "title": "thermostat batteries",
+                "status": "done",
+            },
+            "ai",
+            "already-batteries",
+        )
+        self.assertTrue(heard.get("already"))
+        self.assertFalse(heard.get("pending"))
+        self.assertIn("Already on unit 750", heard.get("reply") or "")
+        self.assertEqual(PendingAction.query.filter_by(user_id=user.id, status="pending").count(), 0)
+    def test_confirm_json_closes_matching_cards_and_leaves_the_page(self):
+        from app.models import Job, Shift
+        from app.services.pending import request_apply
+        from app.services.records import dumps, ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Madison Sq", "Lubbock", "Texas", user.id)
+        db.session.add(Shift(user_id=user.id, property_id=prop.id, confirmed=True, started_at=utcnow()))
+        db.session.commit()
+        payload = {
+            "property_id": prop.id,
+            "property_name": prop.name,
+            "city": "Lubbock",
+            "region": "Texas",
+            "unit_number": "750",
+            "title": "Thermostat batteries",
+            "status": "done",
+        }
+        first = request_apply(user, "record_unit_visit", payload, "ai", "json-batteries")
+        leftover = PendingAction(
+            user_id=user.id,
+            batch_key="dup-batteries",
+            idempotency_key="dup-batteries",
+            tool="log_work",
+            payload_json=dumps(
+                {
+                    "property_id": prop.id,
+                    "property_name": prop.name,
+                    "unit_number": "750",
+                    "title": "Thermostat batteries",
+                }
+            ),
+            summary="Unit 750 — Thermostat batteries\nNothing changes until you save it.",
+            risk="material",
+            status="pending",
+            created_at=utcnow(),
+        )
+        db.session.add(leftover)
+        db.session.commit()
+        pending_id = first["proposal"]["id"]
+        leftover_id = leftover.id
+        self.assertEqual(PendingAction.query.filter_by(user_id=user.id, status="pending").count(), 2)
+
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        saved = client.post(
+            f"/pending/{pending_id}/confirm",
+            data={"csrf_token": token, "next": "/"},
+            headers={"Accept": "application/json", "X-CSRF-Token": token},
+        )
+        self.assertEqual(saved.status_code, 200)
+        body = saved.get_json()
+        self.assertTrue(body.get("ok"), body)
+        closed = [int(x) for x in (body.get("closed_ids") or [])]
+        self.assertIn(pending_id, closed)
+        self.assertIn(leftover_id, closed)
+        self.assertEqual(Job.query.filter_by(title="Thermostat batteries").count(), 1)
+        self.assertEqual(PendingAction.query.filter_by(user_id=user.id, status="pending").count(), 0)
+
+        page = client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn(b"Review before saving", page.data)
+    def test_sweep_drops_cards_for_work_already_on_the_unit(self):
+        from app.models import ChatMessage, Job, Unit
+        from app.services.pending_cards import sweep_finished_cards
+        from app.services.records import dumps, ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        unit = Unit(property_id=prop.id, unit_number="26", created_by_id=user.id, created_at=utcnow())
+        db.session.add(unit)
+        db.session.flush()
+        db.session.add(
+            Job(
+                property_id=prop.id,
+                unit_id=unit.id,
+                title="Wash/driver",
+                status="done",
+                source="human",
+                created_by_id=user.id,
+                created_at=utcnow(),
+            )
+        )
+        leftover = PendingAction(
+            user_id=user.id,
+            batch_key="stale-wash",
+            idempotency_key="stale-wash",
+            tool="record_unit_visit",
+            payload_json=dumps(
+                {
+                    "property_id": prop.id,
+                    "property_name": prop.name,
+                    "unit_number": "26",
+                    "title": "Wash/driver",
+                    "status": "done",
+                }
+            ),
+            summary="Unit 26 — Wash/driver\nNothing changes until you save it.",
+            risk="material",
+            status="pending",
+            created_at=utcnow(),
+        )
+        db.session.add(leftover)
+        db.session.add(
+            ChatMessage(
+                user_id=user.id,
+                role="assistant",
+                body="Unit 26 — Wash/driver. Not saved yet.",
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        closed = sweep_finished_cards(user)
+        self.assertIn(leftover.id, closed)
+        db.session.refresh(leftover)
+        self.assertEqual(leftover.status, "accepted")
+
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        page = client.get("/")
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn(b"Review before saving", page.data)
+        self.assertNotIn(b"Not saved yet", page.data)
+    def test_finishing_a_needed_task_is_not_treated_as_already_saved(self):
+        from app.models import Unit, UnitTask
+        from app.services.pending import request_apply
+        from app.services.records import ensure_property
+
+        user = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        unit = Unit(property_id=prop.id, unit_number="804", occupancy="make_ready", created_by_id=user.id, created_at=utcnow())
+        db.session.add(unit)
+        db.session.flush()
+        db.session.add(
+            UnitTask(
+                property_id=prop.id,
+                unit_id=unit.id,
+                kind="task",
+                title="carpet cleaned",
+                status="needed",
+                created_by_id=user.id,
+                created_at=utcnow(),
+            )
+        )
+        db.session.commit()
+        heard = request_apply(
+            user,
+            "unit_board",
+            {
+                "action": "done",
+                "property_id": prop.id,
+                "property_name": prop.name,
+                "unit_number": "804",
+                "title": "carpet",
+            },
+            "ai",
+            "carpet-done-card",
+        )
+        self.assertTrue(heard.get("pending"), heard)
+        self.assertFalse(heard.get("already"))
+        self.save(user)
+        carpet = UnitTask.query.filter_by(unit_id=unit.id, title="carpet cleaned").one()
+        self.assertEqual(carpet.status, "done")
+        self.assertEqual(carpet.done_by_id, user.id)

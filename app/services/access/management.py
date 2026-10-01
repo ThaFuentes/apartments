@@ -69,7 +69,7 @@ def can_create_user(actor, role: str) -> bool:
 
     role = normalize_role(role)
     actor_role = role_of(actor)
-    if not actor or role == "owner" or not known_role(role):
+    if not actor or not known_role(role):
         return False
     if actor_role == "owner":
         return True

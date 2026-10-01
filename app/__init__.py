@@ -246,6 +246,9 @@ def create_app() -> Flask:
                 from app.models import ChatMessage
                 from app.services.records import loads as _loads
 
+                from app.services.pending_cards import sweep_finished_cards
+
+                sweep_finished_cards(current_user)
                 chat_lines = (
                     ChatMessage.query.filter_by(user_id=current_user.id)
                     .order_by(ChatMessage.id.desc())
@@ -261,6 +264,20 @@ def create_app() -> Flask:
                     .all()
                 )
                 cards.reverse()
+                open_heads = {
+                    (row.summary or "").splitlines()[0].strip()
+                    for row in cards
+                    if (row.summary or "").strip()
+                }
+                chat_lines = [
+                    msg
+                    for msg in chat_lines
+                    if not (
+                        msg.role == "assistant"
+                        and "Not saved yet" in (msg.body or "")
+                        and not any(head and head in (msg.body or "") for head in open_heads)
+                    )
+                ]
                 for row in cards:
                     payload = _loads(row.payload_json)
                     parts = [line.strip() for line in (row.summary or "").splitlines() if line.strip()]

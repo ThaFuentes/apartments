@@ -21,6 +21,7 @@ class RoleChainTests(AptTestBase):
         tech, _ = create_user(username="ted", password="field-pass-9", role="maintenance_person", created_by=supervisor)
         db.session.commit()
         self.assertTrue(can_create_user(owner, "admin"))
+        self.assertTrue(can_create_user(owner, "owner"))
         self.assertTrue(can_create_user(admin, "regional_manager"))
         self.assertFalse(can_create_user(admin, "owner"))
         self.assertFalse(can_create_user(admin, "admin"))
@@ -76,6 +77,47 @@ class RoleChainTests(AptTestBase):
 
         self.assertTrue(has_capability(agent, "write_maintenance"))
         self.assertFalse(has_capability(agent, "manage_users"))
+
+    def test_owner_can_create_another_owner(self):
+        owner = self.owner()
+        other, generated = create_user(
+            username="pat.owner",
+            password="field-pass-9",
+            display_name="Pat Owner",
+            role="owner",
+            email="pat@example.com",
+            created_by=owner,
+        )
+        db.session.commit()
+        self.assertEqual(other.role, "owner")
+        self.assertEqual(other.email, "pat@example.com")
+        self.assertEqual(other.created_by_id, owner.id)
+        self.assertFalse(generated)
+
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        page = client.get("/users")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"value=\"owner\"", page.data)
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        hired = client.post(
+            "/users",
+            data={
+                "csrf_token": token,
+                "display_name": "Sam Owner",
+                "role": "owner",
+                "email": "sam@example.com",
+            },
+        )
+        self.assertEqual(hired.status_code, 302)
+        from app.services.people import find_user
+
+        sam = find_user("sam.owner")
+        self.assertIsNotNone(sam)
+        self.assertEqual(sam.role, "owner")
+        self.assertEqual(sam.email, "sam@example.com")
 
     def test_people_page_opens_for_property_managers(self):
         owner = self.owner()

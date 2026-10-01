@@ -204,8 +204,10 @@ def unit_detail(unit_id):
     for job in jobs:
         events[job.id] = JobEvent.query.filter_by(job_id=job.id).order_by(JobEvent.id.asc()).all()
     from app.services.board import task_groups, unit_history
+    from app.services.contractors import list_contractors
     from app.services.equipment import kind_choices, kind_label
     from app.services.people import person_label
+    from app.services.ready import job_choices
 
     last = jobs[0].created_at if jobs else (visits[0].started_at if visits else None)
     unit_changes = unit_history(unit.id, limit=120)
@@ -222,6 +224,8 @@ def unit_detail(unit_id):
         gear_kinds=kind_choices(),
         kind_label=kind_label,
         tasks=task_groups(unit.id),
+        contractors=list_contractors(),
+        ready_jobs=job_choices(),
         unit_changes=unit_changes,
         deleted_tasks=deleted_tasks,
         deleted_gear=deleted_gear,
@@ -323,6 +327,10 @@ def task_edit(task_id):
     row.status = status if status in {"needed", "done", "vendored", "blocked"} else row.status
     row.vendor = (request.form.get("vendor") or "").strip()[:160]
     row.notes = (request.form.get("notes") or "")[:2000]
+    if row.vendor:
+        from app.services.contractors import remember_contractor
+
+        remember_contractor(current_user, row.vendor)
     audit(current_user.id, "human", "update", "unit_task", row.id, before, {"title": row.title, "kind": row.kind, "status": row.status, "vendor": row.vendor, "notes": row.notes, "unit_id": row.unit_id, "property_id": row.property_id})
     db.session.commit()
     flash("Unit item updated and recorded in history.", "ok")

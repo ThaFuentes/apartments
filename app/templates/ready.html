@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Make ready{% endblock %}
+{% block body_class %}ready-desk{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <p class="kicker">Turn</p>
+    <h1>Make ready</h1>
+    <p class="lead">Units that still need trashout, paint, carpet, and the rest. Call a saved contractor onto another unit from here.</p>
+    <p><a href="/contractors">Contractor list</a></p>
+  </div>
+  {% if not cards %}
+  <p class="empty">No make-ready units in your properties right now. Mark a unit make ready, then tap trashout, paint, or carpet.</p>
+  {% endif %}
+  <div class="stack ready-list">
+    {% for card in cards %}
+    <article class="unit-card make-ready">
+      <a href="/units/{{ card.unit.id }}"><strong>Unit {{ card.unit.unit_number }}</strong></a>
+      <span class="unit-meta">
+        {% if card.property %}<a href="/properties/{{ card.property.id }}?show=make_ready">{{ card.property.name }}</a>{% endif %}
+        {% if card.unit.building %} · Building {{ card.unit.building }}{% endif %}
+        {% if card.open_count %} · {{ card.open_count }} open{% endif %}
+        {% if card.done_count %} · {{ card.done_count }} done{% endif %}
+      </span>
+      {% if card.jobs %}
+      <span class="unit-gear">{% for job in card.jobs %}{{ job }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
+      {% endif %}
+      {% if card.vendors %}
+      <span class="hint">Called: {{ card.vendors|join(', ') }}</span>
+      {% endif %}
+      {% if editable %}
+      <div class="chips ready-jobs">
+        {% for slug, label in jobs %}
+        <form method="post" action="/units/{{ card.unit.id }}/ready">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="job" value="{{ slug }}">
+          <button type="submit">{{ label }}</button>
+        </form>
+        {% endfor %}
+      </div>
+      {% if contractors %}
+      <form method="post" action="/units/{{ card.unit.id }}/call" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Call
+          <select name="contractor_id">
+            {% for person in contractors %}
+            <option value="{{ person.id }}">{{ person.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>For
+          <select name="title">
+            <option value="">Usual work</option>
+            {% for slug, label in jobs %}
+            <option value="{{ slug }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit" class="quiet">Call to this unit</button>
+      </form>
+      {% endif %}
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

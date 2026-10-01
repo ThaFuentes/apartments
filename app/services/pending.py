@@ -533,6 +533,11 @@ def propose(user, tool, payload, summary, risk, key, batch_key, source="ai") -> 
     if prior:
         prior["reply"] = prior.get("reply") or summary
         return prior
+    from app.services.pending_cards import reuse_or_skip
+
+    reused = reuse_or_skip(user, tool, payload, summary)
+    if reused:
+        return reused
     row = PendingAction.query.filter_by(user_id=user.id, idempotency_key=key).first()
     if row:
         return _card(row, duplicate=True)
@@ -607,11 +612,14 @@ def confirm_one(user, row: PendingAction, source: str) -> dict:
     if blocked:
         db.session.rollback()
         return blocked
+    from app.services.pending_cards import close_matching
+
     prior = _prior(user.id, row.idempotency_key)
     if prior:
         row.status = "accepted"
         row.result_json = dumps(prior)
         db.session.commit()
+        prior["closed_ids"] = [row.id] + close_matching(user, row.tool, payload, keep_id=row.id)
         return prior
     payload.pop("_changes", None)
     payload["fields_confirmed"] = True
@@ -644,7 +652,10 @@ def confirm_one(user, row: PendingAction, source: str) -> dict:
             fresh.status = "accepted"
             fresh.result_json = dumps(prior)
             db.session.commit()
+        prior["closed_ids"] = [row.id] + close_matching(user, row.tool, payload, keep_id=row.id)
         return prior
+    closed = close_matching(user, row.tool, payload, keep_id=row.id)
+    result["closed_ids"] = [row.id] + closed
     return result
 
 
@@ -696,7 +707,7 @@ def discard_id(user, pending_id: int) -> dict:
         return {"ok": False, "reply": "That one is already saved. You can soft-delete the record."}
     row.status = "discarded"
     db.session.commit()
-    return {"ok": True, "reply": "Discarded."}
+    return {"ok": True, "reply": "Discarded.", "closed_ids": [row.id]}
 
 
 def latest_batch(user):
@@ -747,74 +758,6 @@ def confirm_property(user, source: str = "human", *, finish_waiting: bool = True
 
 
 def update_pending(user, pending_id: int, changes: dict) -> dict:
-    row = PendingAction.query.filter_by(id=pending_id, user_id=user.id).first()
-    if not row or row.status != "pending":
-        return {"ok": False, "reply": "That item is not ready to edit."}
-    payload = loads(row.payload_json)
-    original = loads(row.payload_json)
-    if changes.get("property_name") is not None or changes.get("city") is not None:
-        from app.services.context import current_property
-        from app.services.parse import resolve_property
+    from app.services.pending_cards import update_pending as _update
 
-        locked = current_property(user)
-        candidate_name = str(changes.get("property_name") or payload.get("property_name") or "").strip()
-        candidate_city = str(changes.get("city") or payload.get("city") or "").strip()
-        verdict = resolve_property(candidate_name, candidate_city, user=user) if candidate_name else {"state": "unknown"}
-        resolved = verdict.get("property") if verdict.get("state") == "resolved" else None
-        if locked and resolved and resolved.id != locked.id:
-            return {"ok": False, "reply": "This item is locked to the confirmed site. Start a new visit before changing properties."}
-        if candidate_name and candidate_city and verdict.get("state") != "resolved":
-            return {"ok": False, "reply": verdict.get("message") or "I can't match that property and city. Nothing was changed."}
-        if locked:
-            payload.update({"property_id": locked.id, "property_name": locked.name, "city": locked.city.name if locked.city else "", "region": locked.city.region if locked.city else ""})
-        elif resolved:
-            payload.update({"property_id": resolved.id, "property_name": resolved.name, "city": resolved.city.name if resolved.city else "", "region": resolved.city.region if resolved.city else ""})
-        elif candidate_name and candidate_city:
-            payload["property_name"] = candidate_name
-            payload["city"] = candidate_city
-    if row.tool in {"plan_trip", "plan_day"} and (original.get("work_items") or original.get("stops")) and (changes.get("property_name") is not None or changes.get("city") is not None):
-        if row.tool == "plan_trip":
-            if resolved:
-                payload.update({"property_id": resolved.id, "property_name": resolved.name, "city": resolved.city.name if resolved.city else "", "region": resolved.city.region if resolved.city else ""})
-            else:
-                payload["property_name"] = str(changes.get("property_name") or payload.get("property_name") or "")
-                payload["city"] = str(changes.get("city") or payload.get("city") or "")
-        else:
-            for stop in payload.get("stops") or []:
-                if not isinstance(stop, dict):
-                    continue
-                if resolved:
-                    stop.update({"property_id": resolved.id, "property_name": resolved.name, "city": resolved.city.name if resolved.city else "", "region": resolved.city.region if resolved.city else ""})
-                else:
-                    stop["property_name"] = str(changes.get("property_name") or stop.get("property_name") or "")
-                    stop["city"] = str(changes.get("city") or stop.get("city") or "")
-    if row.tool in {"plan_trip", "plan_day"} and (original.get("work_items") or original.get("stops")) and changes.get("purpose") is not None:
-        payload["purpose"] = str(changes["purpose"])
-        if row.tool == "plan_trip" and payload.get("work_items"):
-            payload["work_items"][0]["title"] = str(changes["purpose"])
-        elif row.tool == "plan_day":
-            for stop in payload.get("stops") or []:
-                for item in stop.get("items") or []:
-                    if isinstance(item, dict):
-                        item["title"] = str(changes["purpose"])
-    for key, value in (changes or {}).items():
-        if value is None or value == "":
-            continue
-        if key in {"property_name", "city"} and row.tool in {"plan_trip", "plan_day"} and (original.get("work_items") or original.get("stops")):
-            continue
-        if key == "purpose" and row.tool in {"plan_trip", "plan_day"} and (original.get("work_items") or original.get("stops")):
-            continue
-        payload[key] = value
-    payload.pop("needs_answer", None)
-    payload.pop("waiting_for", None)
-    from app.services.changes import describe_change, headline, changes_text
-    from app.services.pending import _with_site_details
-    payload["_changes"] = _with_site_details(user, row.tool, payload, describe_change(row.tool, payload, user))
-    row.payload_json = dumps(payload)
-    row.status = "pending"
-    row.summary = headline(row.tool, payload, payload["_changes"])
-    if payload["_changes"]:
-        row.summary += "\n" + changes_text(payload["_changes"])
-    row.summary += "\nNothing changes until you save this item."
-    db.session.commit()
-    return {"ok": True, "reply": "Updated. Say yes, save it when it looks right.", "proposal": _card(row, False)["proposal"]}
+    return _update(user, pending_id, changes)

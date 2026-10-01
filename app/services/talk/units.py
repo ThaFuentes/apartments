@@ -193,6 +193,19 @@ def _board_payload(text: str) -> dict | None:
             "unit_number": vendor.group(3),
             "vendor": _clean_slot(vendor.group(4) or ""),
         }
+    called = re.search(
+        r"\b(?:call in|call|send)\s+(.+?)\s+to\s+(?:(?:unit|apt|apartment)\s*)?#?\s*([0-9]{1,6}[a-z]?)(?:\s+(?:at|in)\s+([a-z][a-z0-9']{3,40}))?(?:\s+(?:for|to do)\s+(.+))?$",
+        raw,
+        re.I,
+    )
+    if called:
+        return {
+            "action": "call_contractor",
+            "vendor": _clean_slot(called.group(1)),
+            "unit_number": called.group(2),
+            "property_hint": called.group(3) or "",
+            "title": _clean_slot(called.group(4) or ""),
+        }
     order = re.search(
         r"\bwork\s+order\s*(?::|\s+(?:for|on)\s+)?(?:a\s+)?(.+?)\s+in\s+(?:unit\s*)?#?\s*([0-9]{1,6}[a-z]?)(?:\s+(?:at|in)\s+([a-z][a-z0-9']{3,40}))?",
         raw,
@@ -306,6 +319,9 @@ def _board_payload(text: str) -> dict | None:
     }
     if work:
         payload["work_title"] = _clean_slot(work.group(1))
+    jobs = re.search(r"\bwith\s+(.+)$", raw, re.I)
+    if jobs and (payload.get("occupancy") or "") == "make_ready":
+        payload["titles"] = _clean_slot(jobs.group(1))
     return payload
 
 
@@ -629,21 +645,35 @@ def _file_unit_gear(user, text: str, key: str, source: str):
 
 
 def _vendor_sentence(user, text: str, key: str, source: str) -> dict | None:
-    """Vendors are vendors: named on work, never a property of their own."""
+    """Save a contractor on the roster, or call one already on it."""
     raw = (text or "").strip()
     if not raw or raw.endswith("?"):
         return None
     match = re.match(
-        r"^(?:(?:can|could|please|just)\s+)?(?:add|save|create|register|put)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?vendor\s*[:=]?\s*(?:named\s+|called\s+)?(.+?)\s*(?:\((.*)\)|$)",
+        r"^(?:(?:can|could|please|just)\s+)?(?:add|save|create|register|put)\s+(?:a\s+|an\s+|the\s+)?(?:new\s+)?(?:vendor|contractor)\s*[:=]?\s*(?:named\s+|called\s+)?(.+)$",
         raw,
         re.I,
     )
     if not match:
         return None
-    name = _tidy_place(match.group(1))
-    note = (match.group(2) or "").strip()
+    blob = match.group(1).strip()
+    note = ""
+    paren = re.search(r"\((.*)\)\s*$", blob)
+    if paren:
+        note = paren.group(1).strip()
+        blob = blob[: paren.start()].strip()
+    from app.services.contractors import describe_contractor, parse_contractor_blob, remember_contractor
+
+    parsed = parse_contractor_blob(blob)
+    name = parsed.get("name") or _tidy_place(blob)
     if not name or name.lower() in {"a", "an", "the", "it", "one"}:
         return None
     _close_questions(user)
-    summary = f"Vendor {name} noted" + (f" — {note}" if note else "") + ". Vendors live on the work, not in the property list: say, ‘vendor out the roof leak at Woodview unit 210 to Ace Plumbing’."
-    return {"ok": True, "reply": summary}
+    row = remember_contractor(user, name, phone=parsed.get("phone") or "", trade=parsed.get("trade") or "", notes=note)
+    db.session.commit()
+    label = describe_contractor(row) if row else name
+    return {
+        "ok": True,
+        "reply": f"Saved {label} on the contractor list. Call them to another unit: “call {name} to unit 210 at Woodview for trashout.”",
+        "contractor_id": row.id if row else None,
+    }

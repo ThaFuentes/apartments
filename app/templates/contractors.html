@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Contractors{% endblock %}
+{% block body_class %}ready-desk{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <p class="kicker">Vendors</p>
+    <h1>Contractors</h1>
+    <p class="lead">Save the names you call. Next time you need trashout or AC on another unit, pick them here instead of typing a new name.</p>
+    <p><a href="/ready">Make-ready board</a></p>
+  </div>
+
+  <form method="post" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h2>Save a name</h2>
+    <label>Name <input name="name" required placeholder="Ace Plumbing"></label>
+    <label>Phone <input name="phone" inputmode="tel" placeholder="432-555-0100"></label>
+    <label>Usual work
+      <input name="trade" list="ready-job-names" placeholder="trashout, carpet, HVAC">
+    </label>
+    <label>Note <textarea name="notes"></textarea></label>
+    <button type="submit">Save contractor</button>
+  </form>
+  <datalist id="ready-job-names">
+    {% for slug, label in jobs %}
+    <option value="{{ label }}"></option>
+    {% endfor %}
+  </datalist>
+
+  {% if not contractors %}
+  <p class="empty">No contractors saved yet. Add Ace Plumbing here, then call them onto unit 210.</p>
+  {% endif %}
+  {% for person in contractors %}
+  <article class="card stack">
+    <h3>{{ person.name }}</h3>
+    <p class="hint">{% if person.phone %}{{ person.phone }}{% else %}No phone yet{% endif %}{% if person.trade %} · {{ person.trade }}{% endif %}</p>
+    {% if person.notes %}<p>{{ person.notes }}</p>{% endif %}
+    <form method="post" action="/contractors/{{ person.id }}/call" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h4>Call to another unit</h4>
+      {% if properties %}
+      <label>Property
+        <select name="property_id">
+          {% for prop in properties %}
+          <option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label>Unit <input name="unit_number" required placeholder="210"></label>
+      <label>For
+        <select name="title">
+          <option value="">{{ person.trade or "Their usual work" }}</option>
+          {% for slug, label in jobs %}
+          <option value="{{ slug }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Call them there</button>
+    </form>
+    <details>
+      <summary>Edit this name</summary>
+      <form method="post" action="/contractors/{{ person.id }}" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Name <input name="name" value="{{ person.name }}" required></label>
+        <label>Phone <input name="phone" value="{{ person.phone }}" inputmode="tel"></label>
+        <label>Usual work <input name="trade" value="{{ person.trade }}" list="ready-job-names"></label>
+        <label>Note <textarea name="notes">{{ person.notes }}</textarea></label>
+        <button type="submit">Save name</button>
+      </form>
+    </details>
+    <form method="post" action="/contractors/{{ person.id }}/delete" onsubmit="return confirm('Take {{ person.name }} off the contractor list?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="ghost">Remove from the list</button>
+    </form>
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

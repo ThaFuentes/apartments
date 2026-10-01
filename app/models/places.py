@@ -94,3 +94,18 @@ class UnitChange(db.Model):
 
     unit = db.relationship("Unit")
     actor = db.relationship("User")
+class Contractor(db.Model):
+    """A named vendor we can call back to another unit."""
+
+    __tablename__ = "contractors"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(160), nullable=False, default="")
+    phone = db.Column(db.String(40), nullable=False, default="")
+    trade = db.Column(db.String(80), nullable=False, default="")
+    notes = db.Column(db.Text, nullable=False, default="")
+    last_used_at = db.Column(db.DateTime, nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)

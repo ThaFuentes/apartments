@@ -37,7 +37,7 @@ ROLE_LABELS = {
 }
 
 ROLE_HINTS = {
-    "owner": "Full control, including security and API keys. Can also wear an operational hat at a property.",
+    "owner": "Full control, including security and API keys. Can create other owner logins and wear an operational hat at a property.",
     "admin": "Runs the company records. Cannot touch ownership, API keys, or other security controls.",
     "regional_manager": "Covers assigned regions and can make regional property managers and property managers.",
     "regional_property_manager": "Just below regional manager. Makes property managers in the assigned region.",
@@ -213,7 +213,7 @@ def creatable_roles_for(actor) -> set[str]:
 
     actor_role = role_of(actor)
     if actor_role == "owner":
-        allowed = set(BUILTIN_ROLES) - {"owner"}
+        allowed = set(BUILTIN_ROLES)
         allowed.update(row.slug for row in custom_roles())
         return allowed
     allowed = set(CREATION_TREE.get(actor_role, set()))

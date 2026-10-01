@@ -287,6 +287,10 @@ def add_needed(user, unit: Unit, titles: list[str], source: str, kind: str = "",
             {"title": row.title, "kind": row.kind, "unit_id": unit.id, "property_id": unit.property_id},
         )
         rows.append(row)
+        if row.vendor:
+            from app.services.contractors import remember_contractor
+
+            remember_contractor(user, row.vendor)
     if rows:
         from app.services.access import announce
 
@@ -408,6 +412,19 @@ def apply_unit_board(user, payload, source) -> dict:
             )
             if logged.get("reply"):
                 reply += " " + logged["reply"]
+        jobs = payload.get("titles") or []
+        if isinstance(jobs, str):
+            jobs = split_needs(jobs)
+        if occupancy == "make_ready" and jobs:
+            from app.services.ready import add_ready_job
+
+            names = []
+            for title in jobs:
+                added = add_ready_job(user, unit, title, source, vendor=payload.get("vendor") or "")
+                if added.get("ok"):
+                    names.append(title)
+            if names:
+                reply += " Needs " + ", ".join(names) + "."
         if who:
             reply += f" Saved by {who}."
         return {"ok": True, "reply": reply, "unit_id": unit.id, "property_id": prop.id}
@@ -452,6 +469,16 @@ def apply_unit_board(user, payload, source) -> dict:
         if who:
             reply += f" Saved by {who}."
         return {"ok": True, "reply": reply, "unit_id": unit.id}
+    if action == "call_contractor":
+        from app.services.contractors import call_to_unit, match_contractor, remember_contractor
+
+        hint = (payload.get("vendor") or payload.get("contractor") or "").strip()
+        if not hint:
+            return {"ok": False, "reply": "Which contractor?"}
+        row = match_contractor(hint) or remember_contractor(user, hint, phone=payload.get("phone") or "", trade=payload.get("title") or "")
+        if not row:
+            return {"ok": False, "reply": "Give the contractor a name."}
+        return call_to_unit(user, row, unit, title=payload.get("title") or "", source=source)
     return {"ok": False, "reply": "Tell me the unit and what changed."}
 
 

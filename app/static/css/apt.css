@@ -320,6 +320,9 @@ button.lived { background: #2f6fed; }
 .pill.closed_by_other { background: #eef2f6; color: #3d4c59; }
 .pill.not_needed { background: #f4f4f5; color: #71717a; }
 .chips { display: flex; gap: 0.45rem; overflow-x: auto; padding-bottom: 0.15rem; }
+.ready-jobs { flex-wrap: wrap; overflow: visible; }
+.call-card { margin: 0.7rem 0 1rem; }
+.ready-list .inline { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: end; }
 .chips button {
   background: white;
   color: var(--ink);

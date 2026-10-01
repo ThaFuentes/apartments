@@ -221,8 +221,15 @@ def answer_record(user, text: str) -> dict | None:
         if not lines:
             return {"ok": True, "reply": f"No audit changes are filed for unit {unit.unit_number} at {prop.name if prop else 'that property'} yet."}
         return {"ok": True, "reply": f"Unit {unit.unit_number} change history:\n" + "\n".join(lines[:30])}
+    if re.search(r"\b(contractors?|vendor list|who (?:are|do we(?: have)?) (?:our |the )?(?:contractors|vendors))\b", low):
+        from app.services.contractors import roster_lines
+
+        lines = roster_lines()
+        if not lines:
+            return {"ok": True, "reply": "No contractors saved yet. Say “save contractor Ace Plumbing 432-555-0100 trashout.”"}
+        return {"ok": True, "reply": "Contractors:\n" + "\n".join(lines)}
     if re.search(r"\b(make[- ]ready|units? (?:are|is) ready|ready units?)\b", low):
-        from app.models import Unit
+        from app.models import Unit, UnitTask
 
         ready_query = Unit.query.filter(Unit.deleted_at.is_(None), Unit.occupancy == "make_ready")
         if allowed is not None:
@@ -235,7 +242,14 @@ def answer_record(user, text: str) -> dict | None:
             prop = db.session.get(Property, unit.property_id)
             place = f" at {prop.name}" if prop else ""
             city = f", {prop.city.name}" if prop and prop.city else ""
-            lines.append(f"Unit {unit.unit_number}{place}{city}")
+            jobs = [
+                row.title
+                for row in UnitTask.query.filter_by(unit_id=unit.id)
+                .filter(UnitTask.deleted_at.is_(None), UnitTask.status.in_(("needed", "vendored")))
+                .all()
+            ]
+            extra_jobs = f" — {', '.join(jobs)}" if jobs else ""
+            lines.append(f"Unit {unit.unit_number}{place}{city}{extra_jobs}")
         extra = "\nShowing the first 100." if len(rows) == 100 else ""
         return {"ok": True, "reply": "Make-ready units:\n" + "\n".join(lines) + extra}
     if re.search(r"\b(my plan|the plan|on my plan|what.?s planned|today.?s plan|what do i have planned)\b", low):

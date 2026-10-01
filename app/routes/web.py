@@ -9,6 +9,7 @@ from app.routes import location as location
 from app.routes import audit as audit
 from app.routes import regions as regions
 from app.routes import security as security
+from app.routes import ready as ready
 
 # Preserve imports some local tools may use while routes live in focused modules.
 from app.routes.fieldwork import home, add_site, plan_day, chat, trips

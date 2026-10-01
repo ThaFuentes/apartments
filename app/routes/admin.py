@@ -14,8 +14,10 @@ from app.services.roles import operational_choices, role_choices as catalog_role
 
 def _assignable_roles(actor):
     from app.services.access import can_create_user
+    from app.services.access.core import role_of
 
-    return [(value, label) for value, label in catalog_role_choices() if can_create_user(actor, value)]
+    include_owner = role_of(actor) == "owner"
+    return [(value, label) for value, label in catalog_role_choices(include_owner=include_owner) if can_create_user(actor, value)]
 
 
 @bp.route("/settings", methods=["GET", "POST"])

@@ -13,7 +13,7 @@
   <title>{% block title %}Apt{% endblock %}</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=23">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v=24">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/apt-desk.css') }}?v=2">
 </head>
 <body class="ops warm {% if drive %}drive{% endif %} {% block body_class %}{% endblock %}" data-share="{{ '1' if share.on else '0' }}">
@@ -34,6 +34,7 @@
       <a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Home</a>
       <a href="/trips" {% if request.path.startswith('/trips') %}aria-current="page"{% endif %}>Plan</a>
       <a href="/places" {% if request.path.startswith('/places') or request.path.startswith('/properties') %}aria-current="page"{% endif %}>Properties</a>
+      <a href="/ready" {% if request.path.startswith('/ready') or request.path.startswith('/contractors') %}aria-current="page"{% endif %}>Make ready</a>
       {% if can_manage_people %}
       <a href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>People</a>
       {% endif %}
@@ -120,6 +121,6 @@
     {% endif %}
   </nav>
   {% endif %}
-  <script src="{{ url_for('static', filename='js/apt.js') }}?v=20"></script>
+  <script src="{{ url_for('static', filename='js/apt.js') }}?v=21"></script>
 </body>
 </html>

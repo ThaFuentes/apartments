@@ -357,6 +357,15 @@
     thread.scrollTop = thread.scrollHeight;
   }
 
+  function dropCards(ids) {
+    const threadEl = document.getElementById("thread");
+    if (!threadEl || !ids) return;
+    ids.forEach(function (id) {
+      const card = threadEl.querySelector('[data-pending-id="' + String(id) + '"]');
+      if (card) card.remove();
+    });
+  }
+
   const thread = document.getElementById("thread");
   if (thread) {
     thread.addEventListener("click", function (event) {
@@ -366,6 +375,28 @@
       answerBox.value = answer.dataset.answer || "";
       if (composer.requestSubmit) composer.requestSubmit();
       else composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    thread.addEventListener("submit", function (event) {
+      const form = event.target.closest(".approve-form, .discard-form");
+      if (!form) return;
+      event.preventDefault();
+      const card = form.closest("[data-pending-id]");
+      const body = new FormData(form);
+      fetch(form.action, {
+        method: "POST",
+        body: body,
+        headers: { Accept: "application/json", "X-CSRF-Token": token }
+      })
+        .then(function (resp) { return resp.json(); })
+        .then(function (data) {
+          const closed = (data && data.closed_ids) || (card && card.dataset.pendingId ? [card.dataset.pendingId] : []);
+          dropCards(closed);
+          if (card && card.parentNode) card.remove();
+          addBubble("assistant", (data && data.reply) || (form.classList.contains("discard-form") ? "Discarded." : "Saved."));
+        })
+        .catch(function () {
+          form.submit();
+        });
     });
   }
 

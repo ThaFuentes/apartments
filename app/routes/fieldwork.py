@@ -217,23 +217,26 @@ def review():
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
     return redirect(request.form.get("next") or "/")
 
+def _pending_response(result, *, ok_flash=True):
+    if request.is_json or request.headers.get("Accept") == "application/json":
+        return jsonify(result)
+    flash(result.get("reply") or "", "ok" if (result.get("ok") if ok_flash else True) else "warn")
+    return redirect(request.form.get("next") or request.referrer or "/")
+
+
 @bp.post("/pending/<int:pending_id>/confirm")
 @login_required
 def confirm(pending_id):
     if current_user.is_viewer:
         abort(403)
-    result = confirm_id(current_user, pending_id, "human")
-    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return redirect(request.form.get("next") or request.referrer or "/")
+    return _pending_response(confirm_id(current_user, pending_id, "human"))
 
 @bp.post("/pending/<int:pending_id>/discard")
 @login_required
 def discard(pending_id):
     if current_user.is_viewer:
         abort(403)
-    result = discard_id(current_user, pending_id)
-    flash(result.get("reply") or "", "ok")
-    return redirect(request.form.get("next") or request.referrer or "/")
+    return _pending_response(discard_id(current_user, pending_id), ok_flash=False)
 
 @bp.post("/pending/<int:pending_id>/edit")
 @login_required
