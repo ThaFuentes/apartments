@@ -1,3 +1,3 @@
 """Single cache-busting version for CSS, JS, and the service-worker shell."""
 
-ASSET_V = "29"
+ASSET_V = "31"

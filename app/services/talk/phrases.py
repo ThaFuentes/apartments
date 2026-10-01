@@ -166,6 +166,46 @@ WORK_VERB = re.compile(
 
 ITS_AT = re.compile(r"^(?:it(?:'s| is)|its)\s+at\s+(.+)$", re.I)
 
+CONTRACTOR_IN = re.compile(
+    r"^(?P<who>[A-Za-z][A-Za-z0-9 .'&/-]{1,60}?)\s+(?:got\s+into|went\s+into|checked\s+into|checked\s+in)\s+(?:unit\s*)?#?(?P<num>[0-9]{1,6}[a-z]?)\b(?P<rest>.*)$",
+    re.I,
+)
+
+CONTRACTOR_OUT = re.compile(
+    r"^(?P<who>[A-Za-z][A-Za-z0-9 .'&/-]{1,60}?)\s+(?:left|checked\s+out\s+of|checked\s+out|is\s+out\s+of|out\s+of|done\s+in|finished\s+(?:up\s+)?in)\s+(?:unit\s*)?#?(?P<num>[0-9]{1,6}[a-z]?)\b(?P<rest>.*)$",
+    re.I,
+)
+
+CLOCK_TIME = re.compile(r"(?P<time>\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)\s*$", re.I)
+
+EST_HOURS = re.compile(r"\b(?:should\s+(?:take|be)|estimate[d]?|est\.?|about|around|for)\s+(?P<est>\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h\b)", re.I)
+
+READY_BY = re.compile(
+    r"^(?:set\s+|make\s+)?(?:unit\s*#?(?P<num1>[0-9]{1,6}[a-z]?)\s+)?(?:target\s+ready(?:\s+(?:date|by|on))?|ready\s+by|ready\s+(?:date|day)|due\s+(?:by|on))\s+(?:for\s+|on\s+|by\s+|to\s+)?(?P<day>\d{4}-\d{2}-\d{2}|today|tomorrow)(?:\s+(?:for|on|at)\s+(?:unit\s*#?)?(?P<num2>[0-9]{1,6}[a-z]?))?$",
+    re.I,
+)
+
+READY_DONE = re.compile(
+    r"^(?:mark\s+|the\s+)?(?:(?:unit\s*#?(?P<num1>[0-9]{1,6}[a-z]?)\s+)?(?P<job1>trash[- ]?out|paint|carpet|clean(?:ing)?|punch(?:\s*list)?|appliances?|keys)|(?P<job2>trash[- ]?out|paint|carpet|clean(?:ing)?|punch(?:\s*list)?|appliances?|keys)\s+(?:is\s+|are\s+|was\s+)?)\s*(?:is\s+|are\s+|was\s+)?(?P<neg>not\s+|isn'?t\s+|still\s+)?done\s+(?:on|at|in|for)\s+(?:unit\s*#?)?(?P<num2>[0-9]{1,6}[a-z]?)(?:\s+(?:at|in)\s+(?P<place>[a-z][a-z0-9 .',&/-]{2,60}))?$",
+    re.I,
+)
+
+PM_REMINDER = re.compile(
+    r"^(?:remind me to\s+|reminder[:\s]+|set\s+(?:a\s+)?(?:pm\s+|maintenance\s+)?reminder[:\s]+)?(?P<task>[a-z][a-z0-9 .'/-]{2,60}?)\s+(?:every|each)\s+(?P<days>\d{1,4})\s+days?\s*(?:on\s+)?(?:the\s+|my\s+)?(?P<gear>[a-z0-9 .'/-]{1,60}?)(?:\s+(?:in|at)\s+(?:unit\s*#?)?(?P<num>[0-9]{1,6}[a-z]?)(?:\s+(?:at|in)\s+(?P<place>[a-z][a-z0-9 .',&/-]{2,60}))?)?$",
+    re.I,
+)
+
+PARTS_USED = re.compile(
+    r"^(?:used|parts(?:\s+used)?(?:\s+were)?|filed\s+parts)\s*[:\s]+(?P<parts>.+?)\s+on\s+(?:the\s+)?(?:unit\s*#?(?P<num>[0-9]{1,6}[a-z]?)\b)(?P<rest>.*)$",
+    re.I,
+)
+
+PM_DUE_ASK = re.compile(r"\b(?:pm|preventive|reminders?)\b.*\b(due|upcoming|needed|next)\b|\b(?:what|which)\s+(?:pm\s+|maintenance\s+)?reminders?\b|\breminders?\s+due\b", re.I)
+
+ON_SITE_ASK = re.compile(r"\b(who'?s?\s+(?:is\s+)?(?:in|on\s+site|on\s+site\s+now|working)|anyone\s+(?:in|on\s+site)|who\s+is\s+in\s+(?:a\s+)?unit|contractors?\s+(?:on\s+site|now|here))\b", re.I)
+
+OVER_ESTIMATE_ASK = re.compile(r"\b(over\s+(?:their\s+)?estimate|past\s+(?:their\s+)?estimate|running\s+long|taking\s+too\s+long)\b", re.I)
+
 _MONTHS = {
     "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
     "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,

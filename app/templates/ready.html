@@ -12,6 +12,19 @@
   {% if not cards %}
   <p class="empty">No make-ready units in your properties right now. Mark a unit make ready, then tap trashout, paint, or carpet.</p>
   {% endif %}
+  {% if on_site %}
+  <div class="card stack">
+    <h2>On site now</h2>
+    <ul class="list">
+      {% for row in on_site %}
+      <li><strong>{{ row.contractor }}</strong>{% if row.company %} ({{ row.company }}){% endif %} — unit {{ row.unit }} at {{ row.property }} · {{ row.minutes // 60 }}h {{ '%02d'|format(row.minutes % 60) }}m on site{% if row.estimated_hours %} · est {{ row.estimated_hours }}h{% endif %}{% if row.over %} · <span class="overdue">over estimate</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% if over_estimate %}
+    <p class="hint">Over estimate today: {% for row in over_estimate %}{{ row.contractor }} unit {{ row.unit }} ({{ row.minutes // 60 }}h {{ row.minutes % 60 }}m against {{ row.estimated_hours }}h){% if not loop.last %}; {% endif %}{% endfor %}</p>
+    {% endif %}
+  </div>
+  {% endif %}
   <div class="stack ready-list">
     {% for card in cards %}
     <article class="unit-card make-ready">
@@ -50,16 +63,6 @@
         </li>
         {% endfor %}
       </ul>
-      <div class="chips ready-jobs">
-        {% for slug, label in jobs %}
-        <form method="post" action="/units/{{ card.unit.id }}/ready">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="next" value="/ready">
-          <input type="hidden" name="job" value="{{ slug }}">
-          <button type="submit">{{ label }}</button>
-        </form>
-        {% endfor %}
-      </div>
       {% if contractors %}
       <form method="post" action="/units/{{ card.unit.id }}/call" class="inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

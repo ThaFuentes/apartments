@@ -24,6 +24,11 @@ LABELS = {
     "report_voice": "Report voice", "default_city": "Default city", "default_region": "Default state",
     "home_label": "Home base", "equipment": "Appliance", "work_items": "Unit jobs",
     "task": "Task", "tasks": "Tasks",
+    "ready_by": "Target ready", "job": "Trade", "check_in": "Check-in", "check_out": "Check-out",
+    "estimated_hours": "Estimated hours", "contractor": "Contractor", "vendor": "Vendor",
+    "every_days": "Every", "next_due": "Next due", "done_on": "Done on",
+    "install_date": "Install date", "filter_size": "Filter size", "tonnage": "Tonnage",
+    "seer": "SEER", "refrigerant": "Refrigerant", "parts": "Parts used",
 }
 def _show(value) -> str:
     if value is None:
@@ -78,7 +83,8 @@ def headline(tool: str, payload: dict, changes: list[dict]) -> str:
     say = (payload or {}).get("_say")
     if say:
         return str(say).strip()
-    labels = {"plan_trip": "Plan a trip", "plan_day": "Plan the day", "plan_outcome": "Update planned work", "record_unit_visit": "Log unit work", "log_work": "Log work", "unit_board": "Update the unit board", "upsert_property": "Add or update a property", "update_property": "Update a property", "delete_property": "Remove a property", "set_default_property": "Remember the default property", "soft_delete": "Remove a record", "restore": "Restore a record", "log_job_event": "Update a job", "add_plan_card": "Add a work card"}
+    labels = {"plan_trip": "Plan a trip", "plan_day": "Plan the day", "plan_outcome": "Update planned work",    "record_unit_visit": "Log unit work", "log_work": "Log work",
+    "set_ready_by": "Set the target-ready date", "ready_check": "Check off a trade", "contractor_in": "Contractor in", "contractor_out": "Contractor out", "pm_save": "Save a maintenance reminder", "pm_done": "Log a reminder as done", "parts_used": "File parts used", "unit_board": "Update the unit board", "upsert_property": "Add or update a property", "update_property": "Update a property", "delete_property": "Remove a property", "set_default_property": "Remember the default property", "soft_delete": "Remove a record", "restore": "Restore a record", "log_job_event": "Update a job", "add_plan_card": "Add a work card"}
     label = labels.get(tool, (tool or "Save change").replace("_", " ").capitalize())
     first = next((row for row in changes or [] if row.get("field") in ("Property", "Work", "Appliance", "Login") and row.get("after") not in (None, "", "—")), None)
     return f"{label}: {first['after']}" if first else label

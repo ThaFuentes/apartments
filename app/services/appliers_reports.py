@@ -145,7 +145,7 @@ def apply_draft_report(user, payload, source) -> dict:
         audit(user.id, source, "update", "report", existing.id, before, {"title": existing.title})
         return {
             "ok": True,
-            "reply": f"{existing.title}\n\n{chat_excerpt(body)}\n\nBosses with a login can open it. Email is only used when they have one.",
+            "reply": f"{existing.title}\n\n{chat_excerpt(body)}\n\nBosses with a login can open it. Email is only used when they have one.\nCSV: /reports/{existing.id}/csv",
             "report_id": existing.id,
         }
     report = Report(
@@ -166,7 +166,7 @@ def apply_draft_report(user, payload, source) -> dict:
     audit(user.id, source, "create", "report", report.id, {}, {"kind": kind, "title": report.title})
     bosses = User.query.filter_by(role="viewer", active=True, can_see_reports=True).count()
     who = f"{bosses} boss login(s) can read it now." if bosses else "Add a boss whenever you want — they do not need an email."
-    return {"ok": True, "reply": f"{report.title}\n\n{chat_excerpt(body)}\n\n{who}", "report_id": report.id}
+    return {"ok": True, "reply": f"{report.title}\n\n{chat_excerpt(body)}\n\n{who}\nCSV: /reports/{report.id}/csv", "report_id": report.id}
 
 
 def apply_send_report(user, payload, source) -> dict:

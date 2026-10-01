@@ -141,6 +141,49 @@ def _regional_city_is_assigned(user, city_name: str) -> bool:
     return bool(db.session.query(RegionCity.id).join(City, City.id == RegionCity.city_id).join(RegionAccess, RegionAccess.region_id == RegionCity.region_id).filter(RegionAccess.user_id == user.id, db.func.lower(City.name) == city_name.strip().lower()).first())
 
 
+def _field_tool_place(user, tool: str, payload: dict) -> tuple[set[int], str]:
+    """Scope for the make-ready / contractor / PM tools: the property named in the payload."""
+    from app.services.parse import resolve_property
+
+    ids: set[int] = set()
+    if tool in {"pm_save", "pm_done", "parts_used"} and payload.get("job_id") not in (None, ""):
+        from app.models import Job
+
+        try:
+            job = db.session.get(Job, int(payload["job_id"]))
+        except (TypeError, ValueError):
+            job = None
+        if job and not job.deleted_at:
+            ids.add(job.property_id)
+    if tool in {"pm_save", "pm_done"} and payload.get("equipment_id") not in (None, ""):
+        from app.models import Equipment
+
+        try:
+            gear = db.session.get(Equipment, int(payload["equipment_id"]))
+        except (TypeError, ValueError):
+            gear = None
+        if gear and not gear.deleted_at and gear.property_id:
+            ids.add(gear.property_id)
+    if payload.get("property_id") not in (None, ""):
+        try:
+            prop = db.session.get(Property, int(payload["property_id"]))
+        except (TypeError, ValueError):
+            prop = None
+        if prop and not prop.deleted_at:
+            ids.add(prop.id)
+            return ids, ""
+    name = (payload.get("property_name") or "").strip()
+    if name:
+        verdict = resolve_property(name, payload.get("city") or "", payload.get("region") or "", user=user)
+        if verdict.get("state") == "resolved":
+            ids.add(verdict["property"].id)
+            return ids, ""
+        if verdict.get("state") == "ambiguous":
+            return set(), verdict.get("message") or "Which property?"
+        return set(), verdict.get("message") or f"I couldn't find {name}."
+    return ids, ""
+
+
 def _resource_property_ids(user, tool: str, payload: dict) -> tuple[set[int], str]:
     from app.models import Equipment, Expense, Job, PlanItem, Trip, TripProperty, Unit, UnitTask
     ids: set[int] = set()
@@ -310,6 +353,8 @@ def _resource_property_ids(user, tool: str, payload: dict) -> tuple[set[int], st
         shift = open_shift(user)
         if shift:
             ids.add(shift.property_id)
+    if tool in {"set_ready_by", "ready_check", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used"}:
+        return _field_tool_place(user, tool, payload)
     return ids, ""
 
 

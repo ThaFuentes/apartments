@@ -152,12 +152,13 @@ def _split_plan_actions(tool: str, payload: dict) -> list[dict]:
     if payload.get("needs_answer"):
         return []
     if tool == "plan_trip":
+        # An explicit list of jobs becomes one card each, so she can save one
+        # unit and leave the other waiting. A single purpose stays one trip;
+        # Save files each unit on that trip.
         work = payload.get("work_items") or []
-        if not work and payload.get("purpose"):
-            from app.services.plan import cards_for_trip
-            work = cards_for_trip(payload)
         if isinstance(work, str):
             from app.services.plan import work_cards
+
             work = work_cards(work)
         if not isinstance(work, list) or len(work) <= 1:
             return []
@@ -598,7 +599,7 @@ def _gate(user, row: PendingAction) -> dict | None:
 def confirm_one(user, row: PendingAction, source: str) -> dict:
     if row.tool == "set_default_property" and row.status == "needs_answer" and loads(row.payload_json).get("waiting_for") == "default_confirm":
         return {"ok": False, "reply": "Answer yes or no to the default-property question first."}
-    if row.status == "accepted":
+    if row.status in ("accepted", "saving"):
         data = loads(row.result_json) if row.result_json else {"ok": True, "reply": "Saved."}
         data["duplicate"] = True
         data.setdefault("closed_ids", [row.id])
@@ -608,10 +609,31 @@ def confirm_one(user, row: PendingAction, source: str) -> dict:
     blocked = _gate(user, row)
     if blocked:
         return blocked
+    pending_id = row.id
+    user_id = user.id
+    claimed = PendingAction.query.filter_by(id=pending_id, user_id=user_id, status="pending").update(
+        {"status": "saving"}, synchronize_session=False
+    )
+    db.session.commit()
+    if not claimed:
+        fresh = PendingAction.query.filter_by(id=pending_id, user_id=user_id).first()
+        if fresh and fresh.status in ("accepted", "saving"):
+            data = loads(fresh.result_json) if fresh.result_json else {"ok": True, "reply": "Saved."}
+            data["duplicate"] = True
+            data.setdefault("closed_ids", [pending_id])
+            return data
+        return {"ok": False, "reply": "That item is not waiting for a yes."}
+    row = PendingAction.query.filter_by(id=pending_id, user_id=user_id).first()
+    if row is None:
+        return {"ok": False, "reply": "That item is gone."}
     payload = loads(row.payload_json)
     blocked = _authorized(user, row.tool, payload)
     if blocked:
         db.session.rollback()
+        fresh = PendingAction.query.filter_by(id=pending_id, user_id=user_id).first()
+        if fresh and fresh.status == "saving":
+            fresh.status = "pending"
+            db.session.commit()
         return blocked
     from app.services.pending_cards import close_matching
 
@@ -627,6 +649,10 @@ def confirm_one(user, row: PendingAction, source: str) -> dict:
     result = apply_tool(user, row.tool, payload, source)
     if not result.get("ok"):
         db.session.rollback()
+        fresh = PendingAction.query.filter_by(id=pending_id, user_id=user_id).first()
+        if fresh and fresh.status == "saving":
+            fresh.status = "pending"
+            db.session.commit()
         return result
     row.status = "accepted"
     row.result_json = dumps(result)

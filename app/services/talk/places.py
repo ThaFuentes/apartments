@@ -579,6 +579,12 @@ def _merge_address_into_pending(user, name: str, city: str, address: str) -> dic
 
 def _file_edit(user, text: str, key: str, source: str):
     """Edit a named record or property without guessing the target."""
+    from app.services.talk.field_chat import field_sentence
+
+    # "filter change every 90 days" is a reminder, not a property edit.
+    staged = field_sentence(user, text, key, source)
+    if staged:
+        return staged
     board_action = _board_payload(text)
     if board_action and board_action.get("action") in {"edit_record", "set_building", "set_unit_number"}:
         return _file_unit_board(user, text, key, source)

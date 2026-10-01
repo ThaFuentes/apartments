@@ -1,4 +1,39 @@
 (function () {
+  // Confirm dialogs and the double-submit guard live here so no template needs
+  // an inline handler (CSP blocks inline script) and no button can save twice.
+  document.addEventListener("submit", function (event) {
+    const form = event.target;
+    if (!form || form.nodeType !== 1) return;
+    if (form.dataset && form.dataset.confirm) {
+      if (!window.confirm(form.dataset.confirm)) {
+        event.preventDefault();
+        return;
+      }
+    }
+    if (form.dataset && form.dataset.aptBusy === "1") {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    form.dataset.aptBusy = "1";
+    const cardSave = form.classList.contains("approve-form") || form.classList.contains("discard-form");
+    form.querySelectorAll("button").forEach(function (button) {
+      if (cardSave || button.type === "submit" || !button.type) button.disabled = true;
+    });
+    if (!cardSave) {
+      window.setTimeout(function () {
+        if (form.isConnected) releaseForm(form);
+      }, 8000);
+    }
+  }, true);
+
+  function releaseForm(form) {
+    if (!form) return;
+    delete form.dataset.aptBusy;
+    delete form.dataset.aptSending;
+    form.querySelectorAll("button").forEach(function (button) { button.disabled = false; });
+  }
+
   const intro = document.getElementById("apt-intro");
   const introVideo = document.getElementById("apt-intro-video");
   const introSkip = document.getElementById("apt-intro-skip");
@@ -470,6 +505,8 @@
       const form = event.target.closest(".approve-form, .discard-form");
       if (!form) return;
       event.preventDefault();
+      if (form.dataset.aptSending === "1") return;
+      form.dataset.aptSending = "1";
       const card = form.closest("[data-pending-id]");
       const body = new FormData(form);
       fetch(form.action, {
@@ -490,6 +527,7 @@
           if (data && data.ok === false && !data.duplicate) {
             // The click did not save. Keep the card on the screen so what she
             // sees matches the record, and show what the app is asking.
+            releaseForm(form);
             addBubble("assistant", (data && data.reply) || "That did not save yet.");
             return;
           }
@@ -500,10 +538,12 @@
         })
         .catch(function (err) {
           if (err && err.code === "session") {
+            releaseForm(form);
             addBubble("assistant", SESSION_EXPIRED);
             return;
           }
           if (err && err.code === "bad") {
+            releaseForm(form);
             addBubble("assistant", "That didn't save. Try again.");
             return;
           }

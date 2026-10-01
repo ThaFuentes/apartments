@@ -264,6 +264,56 @@ def resolve_unit(prop: Property, number: str) -> dict:
 
 _NUM = (int, float)
 _FIELDS = {
+    "set_ready_by": {
+        "unit_number": (str, ("name",)),
+        "property_name": (str, ("name",)),
+        "city": (str, ("name",)),
+        "ready_by": (str, ("date",)),
+    },
+    "ready_check": {
+        "unit_number": (str, ("name",)),
+        "property_name": (str, ("name",)),
+        "city": (str, ("name",)),
+        "job": (str, ("text",)),
+        "done": (str, ("text",)),
+    },
+    "contractor_in": {
+        "contractor": (str, ("name",)),
+        "unit_number": (str, ("name",)),
+        "property_name": (str, ("name",)),
+        "city": (str, ("name",)),
+        "check_in": (str, ("text",)),
+        "estimated_hours": _NUM,
+        "title": (str, ("text",)),
+    },
+    "contractor_out": {
+        "contractor": (str, ("name",)),
+        "unit_number": (str, ("name",)),
+        "property_name": (str, ("name",)),
+        "city": (str, ("name",)),
+        "check_out": (str, ("text",)),
+    },
+    "pm_save": {
+        "equipment_id": _NUM,
+        "unit_number": (str, ("name",)),
+        "property_name": (str, ("name",)),
+        "city": (str, ("name",)),
+        "task": (str, ("text",)),
+        "every_days": _NUM,
+    },
+    "pm_done": {
+        "pm_id": _NUM,
+        "equipment_id": _NUM,
+        "task": (str, ("text",)),
+        "done_on": (str, ("date",)),
+    },
+    "parts_used": {
+        "job_id": _NUM,
+        "unit_number": (str, ("name",)),
+        "property_name": (str, ("name",)),
+        "city": (str, ("name",)),
+        "part": (str, ("text",)),
+    },
     "plan_trip": {
         "property_name": (str, ("name",)),
         "city": (str, ("name",)),
@@ -302,6 +352,11 @@ _FIELDS = {
         "note": (str, ("text",)),
         "status": (str, ("status",)),
         "property_name": (str, ("name",)),
+        "install_date": (str, ("date",)),
+        "filter_size": (str, ("text",)),
+        "tonnage": (str, ("text",)),
+        "seer": (str, ("text",)),
+        "refrigerant": (str, ("text",)),
     },
     "log_job_event": {"body": (str, ("text",))},
     "attach_media": {"caption": (str, ("text",))},

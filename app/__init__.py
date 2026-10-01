@@ -112,6 +112,11 @@ def create_app() -> Flask:
         ctype = (response.content_type or "").lower()
         if "text/html" in ctype or "application/javascript" in ctype or "application/json" in ctype:
             response.headers["Content-Security-Policy"] = APT_CSP
+        if "text/html" in ctype:
+            # no-transform stops Cloudflare from injecting the Insights beacon.
+            cc = response.headers.get("Cache-Control") or "private"
+            if "no-transform" not in cc.lower():
+                response.headers["Cache-Control"] = cc.rstrip(", ") + ", no-transform"
         if request.path.startswith("/static/") and request.args.get("v") and response.status_code == 200:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response

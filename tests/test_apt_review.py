@@ -102,7 +102,9 @@ class AptTest06(AptTestBase):
                 "worked on the ac at unit 12 / next work card fix the tub clog at unit 26",
                 idempotency_key="model-cards",
             )
-        self.assertIn("Separate records", heard["reply"])
+        self.assertTrue(heard.get("pending") or heard.get("proposal") or heard.get("proposals"), heard)
+        saved = self.save(user)
+        self.assertIn("Separate records", saved)
         cards = [(row.unit_number, row.title.lower()) for row in PlanItem.query.order_by(PlanItem.id.asc()).all()]
         self.assertEqual(cards, [("12", "worked on the ac"), ("26", "fix the tub clog")])
         self.assertEqual(UnitTask.query.filter_by(kind="work_order").count(), 2)

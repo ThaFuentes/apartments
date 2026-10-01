@@ -154,6 +154,12 @@ class Equipment(db.Model):
     style = db.Column(db.String(80), nullable=False, default="")
     color = db.Column(db.String(40), nullable=False, default="")
     notes = db.Column(db.Text, nullable=False, default="")
+    # Nameplate details: install date and HVAC specs.
+    install_date = db.Column(db.Date, nullable=True)
+    filter_size = db.Column(db.String(40), nullable=False, default="")
+    tonnage = db.Column(db.String(40), nullable=False, default="")
+    seer = db.Column(db.String(40), nullable=False, default="")
+    refrigerant = db.Column(db.String(40), nullable=False, default="")
     # Contact and sourcing info
     phone = db.Column(db.String(40), nullable=False, default="")
     vendor = db.Column(db.String(120), nullable=False, default="")
@@ -233,6 +239,64 @@ class EquipmentMove(db.Model):
     from_property = db.relationship("Property", foreign_keys=[from_property_id])
     to_property = db.relationship("Property", foreign_keys=[to_property_id])
     moved_by = db.relationship("User")
+
+class JobPart(db.Model):
+    """One part or supply used on a work entry, filed with the work itself."""
+
+    __tablename__ = "job_parts"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    job_id = db.Column(db.Integer, db.ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    name = db.Column(db.String(200), nullable=False, default="")
+    qty = db.Column(db.Float, nullable=True)
+    note = db.Column(db.String(300), nullable=False, default="")
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    job = db.relationship("Job")
+
+
+class ContractorVisit(db.Model):
+    """A contractor on a unit: when they went in, when they came out, the estimate."""
+
+    __tablename__ = "contractor_visits"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    contractor_id = db.Column(db.Integer, db.ForeignKey("contractors.id", ondelete="CASCADE"), nullable=False)
+    property_id = db.Column(db.Integer, db.ForeignKey("properties.id", ondelete="CASCADE"), nullable=False)
+    unit_id = db.Column(db.Integer, db.ForeignKey("units.id", ondelete="CASCADE"), nullable=False)
+    task_id = db.Column(db.Integer, db.ForeignKey("unit_tasks.id", ondelete="SET NULL"), nullable=True)
+    check_in = db.Column(db.DateTime, nullable=True)
+    check_out = db.Column(db.DateTime, nullable=True)
+    estimated_hours = db.Column(db.Float, nullable=True)
+    note = db.Column(db.String(300), nullable=False, default="")
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    contractor = db.relationship("Contractor")
+    unit = db.relationship("Unit")
+    property = db.relationship("Property")
+
+
+class EquipmentPM(db.Model):
+    """One recurring preventive-maintenance reminder on a piece of equipment."""
+
+    __tablename__ = "equipment_pm"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    equipment_id = db.Column(db.Integer, db.ForeignKey("equipment.id", ondelete="CASCADE"), nullable=False)
+    task = db.Column(db.String(160), nullable=False, default="")
+    every_days = db.Column(db.Integer, nullable=False, default=90)
+    last_done = db.Column(db.Date, nullable=True)
+    next_due = db.Column(db.Date, nullable=True)
+    active = db.Column(db.Boolean, nullable=False, default=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
+
+    equipment = db.relationship("Equipment")
+
 
 class OdometerReading(db.Model):
     __tablename__ = "odometer_readings"

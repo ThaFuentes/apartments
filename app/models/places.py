@@ -103,6 +103,7 @@ class Contractor(db.Model):
 
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
     name = db.Column(db.String(160), nullable=False, default="")
+    company = db.Column(db.String(160), nullable=False, default="")
     phone = db.Column(db.String(40), nullable=False, default="")
     trade = db.Column(db.String(80), nullable=False, default="")
     notes = db.Column(db.Text, nullable=False, default="")

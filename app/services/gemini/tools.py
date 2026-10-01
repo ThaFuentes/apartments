@@ -52,6 +52,11 @@ GEAR_PROPS = {
     "warranty_expires": {"type": "string", "description": "YYYY-MM-DD"},
     "repair_notes": {"type": "string"},
     "parts_link": {"type": "string", "description": "HTTP or HTTPS URL"},
+    "install_date": {"type": "string", "description": "YYYY-MM-DD"},
+    "filter_size": {"type": "string", "description": "like 20x20x1"},
+    "tonnage": {"type": "string", "description": "like 2.5 ton"},
+    "seer": {"type": "string"},
+    "refrigerant": {"type": "string", "description": "like R-410A"},
     "template_id": {"type": "integer"},
 }
 
@@ -400,6 +405,111 @@ TOOL_DECLS = [
         },
     },
     {
+        "name": "set_ready_by",
+        "description": "Set or clear the target-ready date for a make-ready unit. Use when she says ready by, target ready, or due on, with the unit number.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "ready_by": {"type": "string", "description": "YYYY-MM-DD, or empty to clear"},
+            },
+            "required": ["unit_number", "ready_by"],
+        },
+    },
+    {
+        "name": "ready_check",
+        "description": "Check one make-ready trade done or open on a unit: trashout, paint, carpet, clean, punch, appliances, keys.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "job": {"type": "string", "enum": ["trashout", "paint", "carpet", "clean", "punch", "appliances", "keys"]},
+                "done": {"type": "boolean", "description": "true marks it done, false opens it again"},
+            },
+            "required": ["unit_number", "job", "done"],
+        },
+    },
+    {
+        "name": "contractor_in",
+        "description": "A contractor went into a unit. Check-in time is stated or now, with an optional hour estimate. Example: ABC Paint got into 204 at 8:10, should take 6 hours.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "contractor": {"type": "string", "description": "The saved contractor name"},
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "check_in": {"type": "string", "description": "HH:MM or 8:10 am; empty means now"},
+                "estimated_hours": {"type": "number"},
+                "title": {"type": "string"},
+            },
+            "required": ["contractor", "unit_number"],
+        },
+    },
+    {
+        "name": "contractor_out",
+        "description": "A contractor left the unit. Example: ABC left 204 at 3:45.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "contractor": {"type": "string"},
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "check_out": {"type": "string", "description": "HH:MM or 3:45 pm; empty means now"},
+            },
+            "required": ["contractor", "unit_number"],
+        },
+    },
+    {
+        "name": "pm_save",
+        "description": "A recurring preventive-maintenance reminder on one piece of equipment, like a filter change every 90 days.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "equipment_id": {"type": "integer"},
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "task": {"type": "string", "description": "like filter change"},
+                "every_days": {"type": "integer"},
+            },
+            "required": ["task", "every_days"],
+        },
+    },
+    {
+        "name": "pm_done",
+        "description": "Log a reminder as done today and roll the next due date forward.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pm_id": {"type": "integer"},
+                "equipment_id": {"type": "integer"},
+                "task": {"type": "string"},
+                "done_on": {"type": "string", "description": "YYYY-MM-DD; empty means today"},
+            },
+        },
+    },
+    {
+        "name": "parts_used",
+        "description": "Parts or supplies used on a work entry, filed with the work. Example: used capacitor, contactor 2x on unit 204.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "integer"},
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "parts": {"type": "array", "items": {"type": "string"}, "description": "One string each, like 2x capacitor or 20x20x1 filter"},
+            },
+            "required": ["parts"],
+        },
+    },
+    {
         "name": "set_default_property",
         "description": "Remember the property she is always at, so unit work with no property name lands there. Use when she says remember I'm always at, my default property is, or set the default property.",
         "parameters": {
@@ -432,6 +542,9 @@ CHAT_RULES = (
     "The Where she is block tells you the property she is checked into and her remembered default property. "
     "When she names a unit, gear, or job with no property, pass that property's exact name and city instead of asking again. "
     "When she says remember I'm always at, my default property is, or set the default property, call set_default_property. "
+    "A contractor going into or leaving a unit is contractor_in or contractor_out with the unit number and the stated time. "
+    "Ready-by dates are set_ready_by; a trade marked done is ready_check with one of trashout, paint, carpet, clean, punch, appliances, keys. "
+    "A recurring reminder like a filter change every 90 days is pm_save. Parts she used are parts_used. "
     "When the apartment name and the city are both in the thread, call upsert_property once and include any street she already typed. "
     "Do not say there is no matching job unless she asked about a job."
 )

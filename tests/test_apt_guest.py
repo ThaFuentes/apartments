@@ -55,6 +55,8 @@ class GuestAccessTests(AptTestBase):
         )
         self.assertEqual(signed.status_code, 302)
         self.assertIn("places", signed.headers.get("Location") or "")
+        cookies = " ".join(signed.headers.getlist("Set-Cookie"))
+        self.assertIn("SameSite=Strict", cookies)
 
     def test_one_csrf_meta_and_robots_txt(self):
         client = _guest_client()

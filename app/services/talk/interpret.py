@@ -13,6 +13,7 @@ from app.services.changes.details import describe_change
 from app.services.pending import _with_site_details
 
 from app.services.talk.outings import _answer_here, _answer_trip, _bare_day, _close_questions, _miles_numbers, parse_outing
+from app.services.talk.field_chat import field_sentence as _field_sentence
 from app.services.talk.phrases import ADD_SITE, ADD_USER, AMOUNT, ARRIVE, DELETE, DROVE, END_DAY, END_VISIT, GIVE_BOSS, GOING, HERE, ODO, ODO_ONLY, QUESTION, REPORT, RESTORE, SEND, SETTINGS, SKIP, UNIT_JOB, WORK_VERB
 from app.services.talk.places import _ask_remove, _named_place, _place_payload, _property_delete, _property_rename, _site_to_add
 from app.services.talk.plans import _plan_delete, _plan_from_phrase
@@ -46,6 +47,11 @@ def interpret(user, text: str, key: str, source: str) -> dict:
         profile.default_city if profile else "",
         profile.default_region if profile else "",
     )
+    # Before record questions. "filter change ... unit 204" is a reminder,
+    # and "change" plus a unit number is not a history question.
+    field = _field_sentence(user, text, key, source)
+    if field:
+        return field
     heard = answer_record(user, text)
     if heard:
         return heard
@@ -61,6 +67,17 @@ def interpret(user, text: str, key: str, source: str) -> dict:
     going = GOING.search(text.strip())
     if going:
         return _plan_from_phrase(user, going, key, source)
+    if re.search(r"\b(?:csv|spreadsheet)\b", text, re.I) and not UNIT_JOB.search(text):
+        from app.models import Report
+
+        latest = (
+            Report.query.filter(Report.deleted_at.is_(None), Report.status.in_(("ready", "sent")))
+            .order_by(Report.id.desc())
+            .first()
+        )
+        if latest:
+            return {"ok": True, "reply": f"CSV for {latest.title}: /reports/{latest.id}/csv"}
+        return {"ok": True, "reply": "No saved report yet. This week is at /reports/preview.csv"}
     arrive = ARRIVE.search(text.strip())
     if arrive:
         from app.services.pending import commit_apply

@@ -356,6 +356,40 @@ def build_snapshot(
     return snapshot
 
 
+def render_csv(snapshot: dict) -> bytes:
+    """The same packet as flat CSV: properties and their jobs, expenses, miles."""
+    import csv
+    import io
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    period = snapshot.get("period") or {}
+    writer.writerow(["Report", snapshot.get("title") or ""])
+    writer.writerow(["Period", f"{period.get('start', '')} through {period.get('end', '')}"])
+    writer.writerow([])
+    writer.writerow(["Property", "City", "Unit", "Work", "Status", "Notes"])
+    for prop in snapshot.get("properties") or []:
+        jobs = prop.get("jobs") or []
+        if not jobs:
+            writer.writerow([prop.get("name", ""), prop.get("city", ""), "", "", "", ""])
+            continue
+        for job in jobs:
+            writer.writerow([prop.get("name", ""), prop.get("city", ""), job.get("unit", ""), job.get("title", ""), job.get("status", ""), job.get("notes", "")])
+    writer.writerow([])
+    writer.writerow(["Expense kind", "Amount", "Where", "Day"])
+    for row in snapshot.get("expenses", {}).get("lines") or []:
+        writer.writerow([row.get("kind", ""), money(row.get("amount_cents")), row.get("merchant", ""), row.get("when", "")])
+    writer.writerow([])
+    writer.writerow(["Miles", snapshot.get("miles", {}).get("traveled") or 0])
+    for row in snapshot.get("miles", {}).get("log") or []:
+        writer.writerow(["", row.get("miles", ""), row.get("note", ""), ""])
+    writer.writerow([])
+    writer.writerow(["Follow-up", "Unit", "Property", "Status"])
+    for row in snapshot.get("followups") or []:
+        writer.writerow([row.get("title", ""), row.get("unit", ""), " ".join(x for x in (row.get("property"), row.get("city")) if x), row.get("status", "")])
+    return buf.getvalue().encode("utf-8-sig")
+
+
 def chat_excerpt(markdown: str, limit: int = 1800) -> str:
     """Plain report text for the chat thread."""
     import re

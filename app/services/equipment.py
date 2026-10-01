@@ -69,6 +69,10 @@ MODEL = re.compile(
     re.I,
 )
 TON = re.compile(r"\b(\d(?:\.\d)?)\s*[- ]?\s*tons?\b", re.I)
+SEER_PAT = re.compile(r"\bseer\s*[:#]?\s*(\d{1,2}(?:\.\d)?)", re.I)
+REFRIGERANT_PAT = re.compile(r"\b(r-?\s?\d{3}[a-z]?)\b", re.I)
+FILTER_PAT = re.compile(r"\bfilter\s*[:#]?\s*(\d{1,3}\s*[xX]\s*\d{1,3}(?:\s*[xX]\s*\d{1,3})?)", re.I)
+INSTALL_PAT = re.compile(r"\binstall(?:ed|\s+date)?\s+(?:on\s+|in\s+)?(\d{4}-\d{2}-\d{2})", re.I)
 CONFIDENCE_FLOOR = 0.75
 
 
@@ -86,6 +90,11 @@ def empty() -> dict:
         "purchase_date": "",
         "purchase_price": "",
         "warranty_expires": "",
+        "install_date": "",
+        "filter_size": "",
+        "tonnage": "",
+        "seer": "",
+        "refrigerant": "",
         "confidence": 0.0,
         "missing": [],
         "conflict": "",
@@ -170,8 +179,18 @@ def parse_equipment(text: str) -> dict:
     ton = TON.search(raw)
     if ton:
         row["size"] = f"{ton.group(1)} ton"
+        row["tonnage"] = f"{ton.group(1)} ton"
         if not row["kind"]:
             row["kind"] = "air conditioner"
+    for key, pattern in (
+        ("seer", SEER_PAT),
+        ("refrigerant", REFRIGERANT_PAT),
+        ("filter_size", FILTER_PAT),
+        ("install_date", INSTALL_PAT),
+    ):
+        found = pattern.search(raw)
+        if found:
+            row[key] = found.group(1).strip().upper() if key == "refrigerant" else found.group(1).strip()[:40]
     for key, pattern in (
         ("phone", r"\bphone\s*[:=]\s*([^,;]+)"),
         ("vendor", r"\bvendor\s*[:=]\s*([^,;]+)"),
@@ -203,7 +222,7 @@ def merge_equipment(typed: dict | None, seen: dict | None) -> dict:
     base = empty()
     typed = typed or empty()
     seen = seen or empty()
-    for key in ("kind", "brand", "model", "serial", "size", "phone", "vendor", "parts_link", "repair_notes", "purchase_date", "purchase_price", "warranty_expires"):
+    for key in ("kind", "brand", "model", "serial", "size", "phone", "vendor", "parts_link", "repair_notes", "purchase_date", "purchase_price", "warranty_expires", "install_date", "filter_size", "tonnage", "seer", "refrigerant"):
         if (typed.get(key) or "").strip():
             base[key] = str(typed[key]).strip()
         elif (seen.get(key) or "").strip():

@@ -36,17 +36,19 @@ def match_contractor(hint: str) -> Contractor | None:
     return exact[0] if exact else None
 
 
-def remember_contractor(user, name: str, *, phone: str = "", trade: str = "", notes: str = "") -> Contractor | None:
+def remember_contractor(user, name: str, *, phone: str = "", trade: str = "", notes: str = "", company: str = "") -> Contractor | None:
     label = clean_name(name)
     if not label:
         return None
     digits = clean_phone(phone) if phone else ""
     trade_label = re.sub(r"\s+", " ", (trade or "").strip())[:80]
+    company_label = re.sub(r"\s+", " ", (company or "").strip())[:160]
     note = (notes or "").strip()[:2000]
     row = match_contractor(label)
     if row is None:
         row = Contractor(
             name=label,
+            company=company_label,
             phone=digits,
             trade=trade_label,
             notes=note,
@@ -63,27 +65,29 @@ def remember_contractor(user, name: str, *, phone: str = "", trade: str = "", no
             "contractor",
             row.id,
             {},
-            {"name": row.name, "phone": row.phone, "trade": row.trade},
+            {"name": row.name, "company": row.company, "phone": row.phone, "trade": row.trade},
         )
         return row
-    before = {"name": row.name, "phone": row.phone, "trade": row.trade, "notes": row.notes}
+    before = {"name": row.name, "company": row.company, "phone": row.phone, "trade": row.trade, "notes": row.notes}
     if digits and not row.phone:
         row.phone = digits
     if trade_label and not row.trade:
         row.trade = trade_label
+    if company_label and not row.company:
+        row.company = company_label
     if note and not row.notes:
         row.notes = note
     if label and label.lower() != (row.name or "").lower():
         row.name = label
     row.last_used_at = utcnow()
-    after = {"name": row.name, "phone": row.phone, "trade": row.trade, "notes": row.notes}
+    after = {"name": row.name, "company": row.company, "phone": row.phone, "trade": row.trade, "notes": row.notes}
     if before != after:
         audit(getattr(user, "id", None), "human", "update", "contractor", row.id, before, after)
     return row
 
 
 def parse_contractor_blob(text: str) -> dict:
-    """Split 'Ace Plumbing 432-555-0100 trashout' into name, phone, trade."""
+    """Split 'Jane with Ace Paint 432-555-0100 trashout' into name, company, phone, trade."""
     raw = re.sub(r"\s+", " ", (text or "").strip(" .,"))
     phone = ""
     found = re.search(r"(\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})", raw)
@@ -102,11 +106,20 @@ def parse_contractor_blob(text: str) -> dict:
     if not leftover:
         leftover = raw
         trade = ""
-    return {"name": clean_name(leftover), "phone": phone, "trade": trade}
+    company = ""
+    who = re.match(r"^(?P<who>[A-Za-z][A-Za-z.'-]{1,30})\s+(?:with|at|from)\s+(?P<co>[A-Za-z0-9][A-Za-z0-9 .'&/-]{1,60})$", leftover)
+    if who:
+        name = who.group("who")
+        company = who.group("co").strip()
+    else:
+        name = leftover
+    return {"name": clean_name(name), "company": clean_name(company), "phone": phone, "trade": trade}
 
 
 def describe_contractor(row: Contractor) -> str:
     bits = [row.name]
+    if getattr(row, "company", ""):
+        bits.append(row.company)
     if row.phone:
         bits.append(row.phone)
     if row.trade:

@@ -18,12 +18,12 @@
   {% endif %}
   <ul class="list">
     {% for report in saved %}
-    <li><a href="/reports/{{ report.id }}">{{ report.title }}</a> · {{ report.status }}</li>
+    <li><a href="/reports/{{ report.id }}">{{ report.title }}</a> · {{ report.status }} · <a href="/reports/{{ report.id }}/csv">CSV</a></li>
     {% endfor %}
   </ul>
   {% if preview %}
   <h2>This week, not saved yet</h2>
-  <p>{{ preview.period.start }} – {{ preview.period.end }}</p>
+  <p>{{ preview.period.start }} – {{ preview.period.end }} · <a href="/reports/preview.csv">Download CSV</a></p>
   <ul>
     <li>Went {{ preview.totals.jobs_went }}, completed {{ preview.totals.jobs_done }}, units {{ preview.totals.units }}</li>
     <li>Gas {{ money(preview.expenses.gas) }} · food {{ money(preview.expenses.food) }} · other {{ money(preview.expenses.other) }}</li>

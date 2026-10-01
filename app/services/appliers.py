@@ -39,6 +39,15 @@ from app.services.appliers_trips import (
     apply_update_trip,
     apply_upsert_property,
 )
+from app.services.appliers_field import (
+    apply_contractor_in,
+    apply_contractor_out,
+    apply_parts_used,
+    apply_pm_done,
+    apply_pm_save,
+    apply_ready_check,
+    apply_set_ready_by,
+)
 from app.services.appliers_units import (
     apply_attach_media,
     apply_log_expense,
@@ -97,6 +106,13 @@ APPLIERS = {
     "restore": apply_restore,
     "update_settings": apply_update_settings,
     "set_default_property": _apply_set_default_property,
+    "set_ready_by": apply_set_ready_by,
+    "ready_check": apply_ready_check,
+    "contractor_in": apply_contractor_in,
+    "contractor_out": apply_contractor_out,
+    "pm_save": apply_pm_save,
+    "pm_done": apply_pm_done,
+    "parts_used": apply_parts_used,
 }
 
 VISIT_TOOLS = {"record_unit_visit", "log_job_event"}

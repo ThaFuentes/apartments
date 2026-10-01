@@ -101,6 +101,7 @@ _PIECE_KEYS = (
     "kind", "brand", "model", "serial", "size", "style", "color", "notes", "note",
     "phone", "vendor", "purchase_date", "purchase_price", "warranty_expires",
     "repair_notes", "parts_link", "template_id",
+    "install_date", "filter_size", "tonnage", "seer", "refrigerant",
 )
 
 
@@ -195,6 +196,11 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
     warranty_expires = _equipment_date(eq.get("warranty_expires"))
     purchase_price = _equipment_price(eq.get("purchase_price"))
     template_id = _equipment_template_id(eq.get("template_id"), property_id)
+    install_date = _equipment_date(eq.get("install_date"))
+    filter_size = _clip(eq.get("filter_size"), 40)
+    tonnage = _clip(eq.get("tonnage") or (size if "ton" in size else ""), 40)
+    seer = _clip(eq.get("seer"), 40)
+    refrigerant = _clip(eq.get("refrigerant"), 40)
     if serial:
         existing_serial = Equipment.query.filter(
             Equipment.deleted_at.is_(None), Equipment.property_id == property_id,
@@ -306,6 +312,11 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
             warranty_expires=warranty_expires,
             repair_notes=repair_notes,
             parts_link=parts_link,
+            install_date=install_date,
+            filter_size=filter_size,
+            tonnage=tonnage,
+            seer=seer,
+            refrigerant=refrigerant,
             confidence=float(eq["confidence"]) if eq.get("confidence") not in (None, "") else None,
             source=source,
             created_by_id=user.id,
@@ -344,6 +355,16 @@ def file_piece(user, piece, unit, job, property_id, source, *, force_new: bool =
             row.warranty_expires = warranty_expires
         if repair_notes:
             row.repair_notes = repair_notes
+        if install_date:
+            row.install_date = install_date
+        if filter_size:
+            row.filter_size = filter_size
+        if tonnage:
+            row.tonnage = tonnage
+        if seer:
+            row.seer = seer
+        if refrigerant:
+            row.refrigerant = refrigerant
         if template_id and not row.template_id:
             row.template_id = template_id
         if job and not row.job_id:

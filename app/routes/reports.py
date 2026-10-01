@@ -10,7 +10,7 @@ from app.builddb.builddb import db
 from app.models import Expense, Report, User
 from app.services.clock import money
 from app.services.records import audit
-from app.services.reports import build_snapshot, load_snapshot, render_pdf, signature_ok
+from app.services.reports import build_snapshot, load_snapshot, render_csv, render_pdf, signature_ok
 from app.services.files import send_bytes
 from app.services.pending import commit_apply
 from app.routes.common import bp, login_required, _reports_ok, _key, _new_key
@@ -134,6 +134,27 @@ def report_pdf(report_id):
     data = render_pdf(load_snapshot(report))
     name = f"apt-report-{report.id}.pdf"
     return send_bytes(data, "application/pdf", name, as_attachment=request.args.get("dl") == "1")
+
+@bp.get("/reports/preview.csv")
+@login_required
+def report_preview_csv():
+    if not _reports_ok() or current_user.is_viewer:
+        abort(403)
+    snapshot = build_snapshot(kind=request.args.get("kind") or "weekly", author=current_user.label())
+    return send_bytes(render_csv(snapshot), "text/csv", "apt-report-this-week.csv", as_attachment=True)
+
+@bp.get("/reports/<int:report_id>/csv")
+@login_required
+def report_csv(report_id):
+    if not _reports_ok():
+        abort(403)
+    report = db.session.get(Report, report_id)
+    if not report or report.deleted_at:
+        abort(404)
+    from app.services.reports import render_csv
+
+    data = render_csv(load_snapshot(report))
+    return send_bytes(data, "text/csv", f"apt-report-{report.id}.csv", as_attachment=True)
 
 @bp.post("/reports/<int:report_id>/send")
 @login_required

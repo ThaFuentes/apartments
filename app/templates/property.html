@@ -74,7 +74,7 @@
         <label>Building <input name="building" value="{{ card.unit.building }}" aria-label="Building" placeholder="Unassigned"></label>
         <button type="submit" class="quiet">Save unit</button>
       </form>
-      <form method="post" action="/units/{{ card.unit.id }}/delete" onsubmit="return confirm('Move unit {{ card.unit.unit_number }} and its records to the restore bin?');">
+      <form method="post" action="/units/{{ card.unit.id }}/delete" data-confirm="Move unit {{ card.unit.unit_number }} and its records to the restore bin?">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit" class="ghost">Remove unit</button>
       </form>
@@ -126,7 +126,7 @@
     <label>Address <input name="address" value="{{ prop.address }}"></label>
     <button type="submit">Save</button>
   </form>
-  <form method="post" action="/properties/{{ prop.id }}/delete" onsubmit="return confirm('Delete {{ prop.name }}?');">
+  <form method="post" action="/properties/{{ prop.id }}/delete" data-confirm="Delete {{ prop.name }}?">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="del-{{ msg_key }}">
     <button type="submit" class="ghost">Delete this property</button>

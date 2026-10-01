@@ -67,7 +67,49 @@ def init_db(app):
         _evolve_roles_and_scope()
         _evolve_users()
         _evolve_bots_hats_and_roles()
+        _evolve_field_log()
         _say("[apt] MariaDB schema ready")
+
+
+def _evolve_field_log():
+    """Work-log, contractor-visit, equipment-spec, and PM columns on older installs."""
+    from sqlalchemy import inspect, text
+
+    try:
+        names = set(inspect(db.engine).get_table_names())
+    except Exception:
+        return
+    statements = []
+    additions = {
+        "equipment": {
+            "install_date": "DATE NULL",
+            "filter_size": "VARCHAR(40) NOT NULL DEFAULT ''",
+            "tonnage": "VARCHAR(40) NOT NULL DEFAULT ''",
+            "seer": "VARCHAR(40) NOT NULL DEFAULT ''",
+            "refrigerant": "VARCHAR(40) NOT NULL DEFAULT ''",
+        },
+        "contractors": {
+            "company": "VARCHAR(160) NOT NULL DEFAULT ''",
+        },
+    }
+    for table, columns in additions.items():
+        if table not in names:
+            continue
+        have = {col["name"] for col in inspect(db.engine).get_columns(table)}
+        for name, sql_type in columns.items():
+            if name not in have:
+                statements.append(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+    if statements:
+        with db.engine.begin() as conn:
+            for sql in statements:
+                try:
+                    conn.execute(text(sql))
+                except Exception:
+                    pass
+    # New tables (job_parts, contractor_visits, equipment_pm) came in with create_all.
+    from app.models import ContractorVisit, EquipmentPM, JobPart  # noqa: F401
+
+    db.create_all()
 
 
 def _evolve_credentials():

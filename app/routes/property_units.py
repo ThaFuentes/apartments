@@ -190,7 +190,7 @@ def unit_detail(unit_id):
     if not unit or unit.deleted_at:
         abort(404)
     require_see(current_user, unit.property)
-    from app.models import AuditLog, Equipment, UnitChange, UnitTask
+    from app.models import AuditLog, ContractorVisit, Equipment, EquipmentPM, JobPart, Media, UnitChange, UnitTask
 
     visits = UnitVisit.query.filter_by(unit_id=unit.id).order_by(UnitVisit.id.desc()).all()
     gear = (
@@ -201,8 +201,26 @@ def unit_detail(unit_id):
     )
     jobs = Job.query.filter_by(unit_id=unit.id).filter(Job.deleted_at.is_(None)).order_by(Job.id.desc()).all()
     events = {}
+    parts = {}
     for job in jobs:
         events[job.id] = JobEvent.query.filter_by(job_id=job.id).order_by(JobEvent.id.asc()).all()
+        parts[job.id] = JobPart.query.filter_by(job_id=job.id).order_by(JobPart.id.asc()).all()
+    photos = {}
+    job_ids = [job.id for job in jobs]
+    if job_ids:
+        for media in Media.query.filter(Media.job_id.in_(job_ids)).order_by(Media.id.asc()).all():
+            photos.setdefault(media.job_id, []).append(media)
+    reminders = {}
+    gear_ids = [item.id for item in gear]
+    if gear_ids:
+        for row in EquipmentPM.query.filter(EquipmentPM.equipment_id.in_(gear_ids), EquipmentPM.active.is_(True)).order_by(EquipmentPM.next_due.asc()).all():
+            reminders.setdefault(row.equipment_id, []).append(row)
+    contractor_visits = (
+        ContractorVisit.query.filter_by(unit_id=unit.id)
+        .order_by(ContractorVisit.id.desc())
+        .limit(40)
+        .all()
+    )
     from app.services.board import task_groups, unit_history
     from app.services.contractors import list_contractors
     from app.services.equipment import kind_choices, kind_label
@@ -220,6 +238,10 @@ def unit_detail(unit_id):
         visits=visits,
         jobs=jobs,
         events=events,
+        parts=parts,
+        photos=photos,
+        reminders=reminders,
+        contractor_visits=contractor_visits,
         gear=gear,
         gear_kinds=kind_choices(),
         kind_label=kind_label,
@@ -390,6 +412,11 @@ def _equipment_form() -> dict:
         "warranty_expires": (request.form.get("warranty_expires") or "").strip(),
         "repair_notes": (request.form.get("repair_notes") or "").strip(),
         "parts_link": (request.form.get("parts_link") or "").strip(),
+        "install_date": (request.form.get("install_date") or "").strip(),
+        "filter_size": (request.form.get("filter_size") or "").strip(),
+        "tonnage": (request.form.get("tonnage") or "").strip(),
+        "seer": (request.form.get("seer") or "").strip(),
+        "refrigerant": (request.form.get("refrigerant") or "").strip(),
     }
 
 
@@ -417,6 +444,11 @@ def equipment_update(gear_id):
         "purchase_date": row.purchase_date.isoformat() if row.purchase_date else None,
         "purchase_price": row.purchase_price,
         "warranty_expires": row.warranty_expires.isoformat() if row.warranty_expires else None,
+        "install_date": row.install_date.isoformat() if row.install_date else None,
+        "filter_size": row.filter_size,
+        "tonnage": row.tonnage,
+        "seer": row.seer,
+        "refrigerant": row.refrigerant,
         "repair_notes": row.repair_notes, "parts_link": row.parts_link,
         "unit_id": row.unit_id,
     }
@@ -427,6 +459,7 @@ def equipment_update(gear_id):
         purchase_date = date.fromisoformat(piece["purchase_date"]) if piece["purchase_date"] else None
         warranty_expires = date.fromisoformat(piece["warranty_expires"]) if piece["warranty_expires"] else None
         purchase_price = float(piece["purchase_price"]) if piece["purchase_price"] else None
+        install_date = date.fromisoformat(piece["install_date"]) if piece["install_date"] else None
     except ValueError:
         flash("Purchase dates must be valid dates and price must be a number.", "warn")
         return redirect(f"/units/{row.unit_id}")
@@ -446,11 +479,16 @@ def equipment_update(gear_id):
     row.purchase_date = purchase_date
     row.purchase_price = purchase_price
     row.warranty_expires = warranty_expires
+    row.install_date = install_date
+    row.filter_size = piece["filter_size"][:40]
+    row.tonnage = piece["tonnage"][:40]
+    row.seer = piece["seer"][:40]
+    row.refrigerant = piece["refrigerant"][:40]
     row.repair_notes = piece["repair_notes"][:4000]
     parts = piece["parts_link"][:500]
     parsed = urlsplit(parts) if parts else None
     row.parts_link = parts if not parsed or parsed.scheme.lower() in {"http", "https"} else ""
-    audit(current_user.id, "human", "update", "equipment", row.id, before, {"kind": row.kind, "brand": row.brand, "style": row.style, "model": row.model_number, "serial": row.serial_number, "size": row.size_label, "color": row.color, "notes": row.notes, "phone": row.phone, "vendor": row.vendor, "purchase_date": row.purchase_date.isoformat() if row.purchase_date else None, "purchase_price": row.purchase_price, "warranty_expires": row.warranty_expires.isoformat() if row.warranty_expires else None, "repair_notes": row.repair_notes, "parts_link": row.parts_link, "unit_id": row.unit_id, "property_id": row.property_id})
+    audit(current_user.id, "human", "update", "equipment", row.id, before, {"kind": row.kind, "brand": row.brand, "style": row.style, "model": row.model_number, "serial": row.serial_number, "size": row.size_label, "color": row.color, "notes": row.notes, "phone": row.phone, "vendor": row.vendor, "purchase_date": row.purchase_date.isoformat() if row.purchase_date else None, "purchase_price": row.purchase_price, "warranty_expires": row.warranty_expires.isoformat() if row.warranty_expires else None, "repair_notes": row.repair_notes, "parts_link": row.parts_link, "install_date": row.install_date.isoformat() if row.install_date else None, "filter_size": row.filter_size, "tonnage": row.tonnage, "seer": row.seer, "refrigerant": row.refrigerant, "unit_id": row.unit_id, "property_id": row.property_id})
     db.session.commit()
     flash(f"Updated this {kind_label(row.kind) or 'item'}.", "ok")
     return redirect(f"/units/{row.unit_id}")

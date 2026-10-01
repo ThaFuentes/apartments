@@ -669,7 +669,7 @@ def _vendor_sentence(user, text: str, key: str, source: str) -> dict | None:
     if not name or name.lower() in {"a", "an", "the", "it", "one"}:
         return None
     _close_questions(user)
-    row = remember_contractor(user, name, phone=parsed.get("phone") or "", trade=parsed.get("trade") or "", notes=note)
+    row = remember_contractor(user, name, phone=parsed.get("phone") or "", trade=parsed.get("trade") or "", notes=note, company=parsed.get("company") or "")
     db.session.commit()
     label = describe_contractor(row) if row else name
     return {

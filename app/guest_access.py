@@ -73,6 +73,10 @@ _INJECTED_CSRF = re.compile(
     br'<meta name="csrf-token" content="[^"]*"><script>\(function\(\)\{var t=.*?</script>',
     re.IGNORECASE | re.DOTALL,
 )
+_INSIGHTS = re.compile(
+    br"<script\b[^>]*(?:cloudflareinsights\.com|cdn-cgi/rum|data-cf-beacon)[^>]*>\s*</script>",
+    re.IGNORECASE,
+)
 
 APT_CSP = (
     "default-src 'self'; "
@@ -102,8 +106,9 @@ def strip_body_csrf_meta(response: Response) -> Response:
         if not data:
             return response
         new_data, n = _INJECTED_CSRF.subn(b"", data, count=1)
-        if n:
-            response.set_data(new_data)
+        cleaned, dropped = _INSIGHTS.subn(b"", new_data)
+        if n or dropped:
+            response.set_data(cleaned)
     except Exception:
         return response
     return response

@@ -81,7 +81,7 @@
     <li>Spend {{ money(snapshot.totals.spend_cents) }} this week, {{ money(snapshot.prior.spend_cents) }} last week.</li>
     <li>Miles {{ snapshot.miles.estimate or 0 }} this week, {{ snapshot.prior.miles or 0 }} last week.</li>
   </ul>
-  <p><a href="/reports/{{ report.id }}/pdf?dl=1">Download PDF</a></p>
+  <p><a href="/reports/{{ report.id }}/pdf?dl=1">Download PDF</a> · <a href="/reports/{{ report.id }}/csv">Download CSV</a></p>
   {% if current_user.is_authenticated and current_user.role == 'owner' and report.status != 'sent' %}
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

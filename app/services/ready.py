@@ -118,9 +118,16 @@ def set_ready_by(user, unit: Unit, raw: str) -> dict:
 
 
 def _task_for_title(tasks, title: str) -> UnitTask | None:
+    """Exact title, or a task that starts with the trade ("carpet" closes "carpet cleaned")."""
     want = (title or "").strip().lower()
+    if not want:
+        return None
     for row in tasks:
         if (row.title or "").strip().lower() == want:
+            return row
+    for row in tasks:
+        have = (row.title or "").strip().lower()
+        if have.startswith(want + " ") or have.startswith(want + "-"):
             return row
     return None
 
@@ -178,6 +185,10 @@ def ready_checklist(tasks) -> list[dict]:
     checks = []
     for slug, label in READY_JOBS:
         row = by_title.get(label.lower())
+        if row is None:
+            prefix = label.lower() + " "
+            dashed = label.lower() + "-"
+            row = next((candidate for key, candidate in by_title.items() if key.startswith(prefix) or key.startswith(dashed)), None)
         checks.append(
             {
                 "slug": slug,

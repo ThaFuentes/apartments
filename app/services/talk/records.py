@@ -170,7 +170,7 @@ def answer_record(user, text: str) -> dict | None:
             lines.append(f"{prop.name}" + (f" — {place}" if place else ""))
         extra = f"\nAnd {len(rows) - 40} more." if len(rows) > 40 else ""
         return {"ok": True, "reply": "Your sites:\n" + "\n".join(lines) + extra}
-    history_match = re.search(r"\b(?:audit|history|changes?)\b.*?\bunit\s*#?([a-z0-9-]+)", low)
+    history_match = re.search(r"\b(?:audit|history|changes)\b.*?\bunit\s*#?([a-z0-9-]+)", low)
     if not history_match:
         history_match = re.search(r"\bwho (?:changed|edited)\b.*?\bunit\s*#?([a-z0-9-]+)", low)
     if history_match:
@@ -221,6 +221,27 @@ def answer_record(user, text: str) -> dict | None:
         if not lines:
             return {"ok": True, "reply": f"No audit changes are filed for unit {unit.unit_number} at {prop.name if prop else 'that property'} yet."}
         return {"ok": True, "reply": f"Unit {unit.unit_number} change history:\n" + "\n".join(lines[:30])}
+    if re.search(r"\b(who'?s? (?:in|on site|working)|anyone (?:in|on site)|who is in (?:a )?unit|contractors? (?:on site|now|here))\b", low):
+        from app.services.appliers_field import contractor_board
+
+        board = contractor_board(user)
+        if not board["on_site"]:
+            return {"ok": True, "reply": "No contractors are checked into a unit right now."}
+        lines = []
+        for row in board["on_site"]:
+            minutes = row["minutes"]
+            spent = f"{minutes // 60}h {minutes % 60:02d}m" if minutes else "just arrived"
+            est = f", est {row['estimated_hours']:g}h" if row["estimated_hours"] else ""
+            flag = " — OVER ESTIMATE" if row["over"] else ""
+            lines.append(f"{row['contractor']} in unit {row['unit']} at {row['property']} — {spent}{est}{flag}")
+        return {"ok": True, "reply": "On site now:\n" + "\n".join(lines)}
+    if re.search(r"\b(reminders? (?:due|upcoming)|pm (?:due|upcoming)|preventive (?:maintenance|reminders?)|due (?:reminders|this week))\b", low):
+        from app.services.appliers_field import pm_due_lines
+
+        lines = pm_due_lines(user)
+        if not lines:
+            return {"ok": True, "reply": "Nothing is due in the next 7 days."}
+        return {"ok": True, "reply": "Reminders due:\n" + "\n".join(lines[:20])}
     if re.search(r"\b(contractors?|vendor list|who (?:are|do we(?: have)?) (?:our |the )?(?:contractors|vendors))\b", low):
         from app.services.contractors import roster_lines
 

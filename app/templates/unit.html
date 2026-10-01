@@ -77,7 +77,7 @@
     {% if editable %}
     {% if item.status in ['needed', 'vendored'] %}<form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>{% endif %}
     <details><summary>Edit this item</summary><form method="post" action="/tasks/{{ item.id }}/edit" class="stack"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>What <input name="title" value="{{ item.title }}" required></label><label>Notes <textarea name="notes">{{ item.notes }}</textarea></label><label>Vendor <input name="vendor" value="{{ item.vendor }}" list="contractor-names"></label><button type="submit">Save item</button></form></details>
-    <form method="post" action="/tasks/{{ item.id }}/delete" onsubmit="return confirm('Move this item to the restore bin?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove item</button></form>
+    <form method="post" action="/tasks/{{ item.id }}/delete" data-confirm="Move this item to the restore bin?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove item</button></form>
     {% endif %}
   </article>
   {% endfor %}
@@ -90,7 +90,7 @@
     {% if item.status in ['needed', 'vendored'] %}<form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>{% endif %}
     <details><summary>Edit this item</summary><form method="post" action="/tasks/{{ item.id }}/edit" class="stack"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>What <input name="title" value="{{ item.title }}" required></label><label>Notes <textarea name="notes">{{ item.notes }}</textarea></label><label>Vendor <input name="vendor" value="{{ item.vendor }}" list="contractor-names"></label><label>Status <select name="status">{% for value in ['needed', 'done', 'vendored', 'blocked'] %}<option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label><button type="submit">Save item</button></form></details>
 
-    <form method="post" action="/tasks/{{ item.id }}/delete" onsubmit="return confirm('Move this item to the restore bin?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove item</button></form>
+    <form method="post" action="/tasks/{{ item.id }}/delete" data-confirm="Move this item to the restore bin?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove item</button></form>
     {% endif %}
   </article>
   {% else %}
@@ -105,7 +105,7 @@
     {% if item.status in ['needed', 'vendored'] %}<form method="post" action="/tasks/{{ item.id }}/done"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit">Mark done</button></form>{% endif %}
     <details><summary>Edit this item</summary><form method="post" action="/tasks/{{ item.id }}/edit" class="stack"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>What <input name="title" value="{{ item.title }}" required></label><label>Notes <textarea name="notes">{{ item.notes }}</textarea></label><label>Vendor <input name="vendor" value="{{ item.vendor }}" list="contractor-names"></label><label>Status <select name="status">{% for value in ['needed', 'done', 'vendored', 'blocked'] %}<option value="{{ value }}" {% if item.status == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label><button type="submit">Save item</button></form></details>
 
-    <form method="post" action="/tasks/{{ item.id }}/delete" onsubmit="return confirm('Move this item to the restore bin?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove item</button></form>
+    <form method="post" action="/tasks/{{ item.id }}/delete" data-confirm="Move this item to the restore bin?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="ghost">Remove item</button></form>
     {% endif %}
   </article>
   {% else %}
@@ -175,6 +175,28 @@
       {% if item.phone %}<p>Service phone: {{ item.phone }}</p>{% endif %}
       {% if item.purchase_date %}<p>Purchased {{ item.purchase_date|apt_when }}{% if item.purchase_price is not none %} · ${{ '%.2f'|format(item.purchase_price) }}{% endif %}</p>{% endif %}
       {% if item.warranty_expires %}<p>Warranty through {{ item.warranty_expires|apt_when }}</p>{% endif %}
+      {% if item.install_date or item.filter_size or item.tonnage or item.seer or item.refrigerant %}
+      <p class="hint">Specs: {% if item.install_date %}installed {{ item.install_date|apt_when }} · {% endif %}{% if item.filter_size %}filter {{ item.filter_size }} · {% endif %}{% if item.tonnage %}{{ item.tonnage }} · {% endif %}{% if item.seer %}SEER {{ item.seer }} · {% endif %}{% if item.refrigerant %}{{ item.refrigerant }}{% endif %}</p>
+      {% endif %}
+      {% for row in reminders.get(item.id, []) %}
+      <p class="hint">{{ row.task }} every {{ row.every_days }} days{% if row.next_due %} · next {{ row.next_due.isoformat() }}{% endif %}</p>
+      {% if editable %}
+      <form method="post" action="/pm/{{ row.id }}/done">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/units/{{ unit.id }}">
+        <button type="submit" class="quiet">Mark done</button>
+      </form>
+      {% endif %}
+      {% endfor %}
+      {% if editable %}
+      <form method="post" action="/equipment/{{ item.id }}/pm" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/units/{{ unit.id }}">
+        <label>Reminder <input name="task" placeholder="filter change"></label>
+        <label>Every <input name="every_days" value="90" inputmode="numeric"> days</label>
+        <button type="submit" class="quiet">Save reminder</button>
+      </form>
+      {% endif %}
       {% if item.repair_notes %}<p>Repair history: {{ item.repair_notes }}</p>{% endif %}
       {% if item.parts_link %}<p><a href="{{ item.parts_link }}" target="_blank" rel="noopener noreferrer">Parts information</a></p>{% endif %}
       {% if editable %}
@@ -201,12 +223,17 @@
           <label>Purchase date <input name="purchase_date" value="{{ item.purchase_date.isoformat() if item.purchase_date else '' }}" type="date"></label>
           <label>Purchase price <input name="purchase_price" value="{{ item.purchase_price if item.purchase_price is not none else '' }}" inputmode="decimal"></label>
           <label>Warranty expires <input name="warranty_expires" value="{{ item.warranty_expires.isoformat() if item.warranty_expires else '' }}" type="date"></label>
+          <label>Install date <input name="install_date" value="{{ item.install_date.isoformat() if item.install_date else '' }}" type="date"></label>
+          <label>Filter size <input name="filter_size" value="{{ item.filter_size }}" placeholder="20x20x1"></label>
+          <label>Tonnage <input name="tonnage" value="{{ item.tonnage }}" placeholder="2.5 ton"></label>
+          <label>SEER <input name="seer" value="{{ item.seer }}"></label>
+          <label>Refrigerant <input name="refrigerant" value="{{ item.refrigerant }}" placeholder="R-410A"></label>
           <label>Repair notes <textarea name="repair_notes">{{ item.repair_notes }}</textarea></label>
           <label>Parts link <input name="parts_link" value="{{ item.parts_link }}" type="url" placeholder="https://…"></label>
           <button type="submit">Save this {{ kind_label(item.kind) or "item" }}</button>
         </form>
       </details>
-      <form method="post" action="/equipment/{{ item.id }}/delete" onsubmit="return confirm('Move this equipment record to the restore bin?');">
+      <form method="post" action="/equipment/{{ item.id }}/delete" data-confirm="Move this equipment record to the restore bin?">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit" class="ghost">Remove this {{ kind_label(item.kind) or "item" }}</button>
       </form>
@@ -237,6 +264,11 @@
       <label>Note for this one <textarea name="notes" placeholder="knob broken"></textarea></label>
       <label>Vendor <input name="vendor" list="contractor-names"></label>
       <label>Service phone <input name="phone" inputmode="tel"></label>
+      <label>Install date <input name="install_date" type="date"></label>
+      <label>Filter size <input name="filter_size" placeholder="20x20x1"></label>
+      <label>Tonnage <input name="tonnage" placeholder="2.5 ton"></label>
+      <label>SEER <input name="seer"></label>
+      <label>Refrigerant <input name="refrigerant" placeholder="R-410A"></label>
       <label>Purchase date <input name="purchase_date" type="date"></label>
       <label>Purchase price <input name="purchase_price" inputmode="decimal"></label>
       <label>Warranty expires <input name="warranty_expires" type="date"></label>
@@ -287,13 +319,27 @@
         <button type="submit">Save work</button>
       </form>
     </details>
-    <form method="post" action="/jobs/{{ job.id }}/delete" onsubmit="return confirm('Move this work record to the restore bin?');">
+    <form method="post" action="/jobs/{{ job.id }}/delete" data-confirm="Move this work record to the restore bin?">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next" value="/units/{{ unit.id }}">
       <button type="submit" class="ghost">Remove this work</button>
     </form>
     {% endif %}
     {% if job.detail and job.detail != job.title %}<p>{{ job.detail }}</p>{% endif %}
+    {% if parts.get(job.id) %}
+    <p class="hint">Parts: {% for part in parts.get(job.id) %}{{ part.qty|int if part.qty and part.qty.is_integer else part.qty or '' }} {{ part.name }}{% if part.note %} ({{ part.note }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+    {% endif %}
+    {% for photo in photos.get(job.id, []) %}
+    <p><img src="/media/{{ photo.id }}" alt="{{ photo.caption or 'Photo of this work' }}"></p>
+    {% endfor %}
+    {% if editable %}
+    <form method="post" action="/jobs/{{ job.id }}/parts" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="/units/{{ unit.id }}">
+      <label>Parts used <input name="parts" placeholder="capacitor, 2x contactor"></label>
+      <button type="submit" class="quiet">File parts</button>
+    </form>
+    {% endif %}
     {% for event in events.get(job.id, []) %}
     {% if event.body and event.body != job.title %}
     <p class="hint">{{ event.created_at|apt_when }} · {{ event.body }}</p>
@@ -309,8 +355,24 @@
   </article>
   {% endif %}
   {% endfor %}
+
+  <h2>Contractor visits</h2>
+  {% if not contractor_visits %}
+  <p class="empty">No contractor visits on this unit yet. Say “ABC Paint got into 204 at 8:10, should take 6 hours.”</p>
+  {% endif %}
+  {% for visit in contractor_visits %}
+  <article class="card">
+    <h3>{{ visit.contractor.name if visit.contractor else 'Contractor' }}</h3>
+    <p class="hint">
+      In {{ visit.check_in|apt_datetime if visit.check_in else '—' }}
+      {% if visit.check_out %} · Out {{ visit.check_out|apt_datetime }}{% else %} · on site now{% endif %}
+      {% if visit.estimated_hours %} · est {{ visit.estimated_hours }}h{% endif %}
+    </p>
+    {% if visit.note %}<p>{{ visit.note }}</p>{% endif %}
+  </article>
+  {% endfor %}
   {% if editable %}
-  <form method="post" action="/units/{{ unit.id }}/delete" onsubmit="return confirm('Remove this unit and its linked records? You can restore it later.');">
+  <form method="post" action="/units/{{ unit.id }}/delete" data-confirm="Remove this unit and its linked records? You can restore it later.">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit" class="ghost danger-button">Remove this unit</button>
   </form>

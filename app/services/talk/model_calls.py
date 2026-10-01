@@ -14,7 +14,17 @@ from app.services.talk.plans import _is_trip_plan, _separate_plan_records
 from app.services.talk.textutil import _place_ready
 
 def _from_model(user, text: str, key: str, source: str):
-    """The saved key answers first. Local chat runs only when this returns failed."""
+    """The saved key answers first. Local chat runs only when this returns failed.
+
+    Make-ready, contractor, reminder, and parts sentences are exact. They stage
+    their own confirm card and do not go to the model, which reads "filter
+    change" as a property edit.
+    """
+    from app.services.talk.field_chat import field_sentence
+
+    staged = field_sentence(user, text, key, source)
+    if staged:
+        return staged
     from app.services.providers import collect_tool_calls
 
     heard = collect_tool_calls(user, text)
@@ -117,10 +127,9 @@ def _from_calls(user, calls, key, source, quota_note, text: str = "") -> dict:
             if card.get("proposal"):
                 proposals.append(card["proposal"])
             continue
-        if name in ("plan_trip", "plan_day"):
-            # A model plan without explicit per-unit cards executes now so the reply
-            # can name each unit's record (e.g. "Separate records: ...").
-            result = apply_now(user, name, args, source, item_key)
+        if name in ("plan_trip", "plan_day", "set_ready_by", "ready_check", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used"):
+            # Field tools always stage a card; the click is the save.
+            result = commit_apply(user, name, args, source, item_key, batch_key=key)
             replies.append(result.get("reply") or "")
             proposals.extend(result.get("proposals") or ([result["proposal"]] if result.get("proposal") else []))
             continue

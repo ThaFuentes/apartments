@@ -431,6 +431,94 @@ def _record_change(tool: str, payload: dict, user=None) -> list[dict]:
             change("History", None, "Origin, destination, actor, and equipment snapshot recorded"),
         ])
     return rows
+def _field_tool_rows(payload: dict) -> list[dict]:
+    """Card details for the make-ready, contractor-visit, PM, and parts tools."""
+    from app.models import Contractor, Equipment, Job, Unit
+    prop = _find_property(payload)
+    rows = _site_rows(prop)
+    number = payload.get("unit_number") or ""
+    unit = _unit_row(prop, number) if number else None
+    if number:
+        rows.append(change("Unit", "—", number))
+        rows.append(change("Unit ID", "—", unit.id if unit else "Assigned when saved"))
+    tool = payload.get("_tool") or ""
+    if tool in {"set_ready_by", "ready_check"}:
+        if payload.get("ready_by") is not None:
+            rows.append(change("Target ready", "—", payload.get("ready_by") or "cleared"))
+        if payload.get("job"):
+            rows.append(change("Trade", "—", payload.get("job")))
+            rows.append(change("Done", "—", "yes" if payload.get("done") in (True, "1", 1) else "reopened"))
+    if tool in {"contractor_in", "contractor_out"}:
+        who = payload.get("contractor_id") or payload.get("contractor") or payload.get("vendor") or ""
+        if isinstance(who, (int, str)) and str(who).isdigit():
+            row = db_get(Contractor, int(who))
+            who = row.name if row else who
+        rows.append(change("Contractor", "—", who))
+        if payload.get("check_in"):
+            rows.append(change("Check-in", "—", payload.get("check_in")))
+        if payload.get("check_out"):
+            rows.append(change("Check-out", "—", payload.get("check_out")))
+        if payload.get("estimated_hours") is not None:
+            rows.append(change("Estimated hours", "—", payload.get("estimated_hours")))
+        if payload.get("title"):
+            rows.append(change("Work", "—", payload.get("title")))
+    if tool in {"pm_save", "pm_done"}:
+        gear = None
+        if payload.get("equipment_id") not in (None, ""):
+            gear = db_get(Equipment, payload.get("equipment_id"))
+        if gear:
+            unit_row = gear.unit
+            rows.append(change("Unit", "—", unit_row.unit_number if unit_row else "—"))
+            rows.append(change("Equipment", "—", " ".join(bit for bit in (gear.kind, gear.brand, gear.serial_number) if bit) or gear.id))
+        if payload.get("task"):
+            rows.append(change("Reminder", "—", payload.get("task")))
+        if payload.get("every_days") is not None:
+            rows.append(change("Every", "—", f"{payload.get('every_days')} days"))
+        if payload.get("next_due"):
+            rows.append(change("Next due", "—", payload.get("next_due")))
+        if payload.get("done_on"):
+            rows.append(change("Done on", "—", payload.get("done_on")))
+    if tool == "parts_used":
+        job = db_get(Job, payload.get("job_id")) if payload.get("job_id") not in (None, "") else None
+        if job:
+            unit_row = job.unit
+            rows.append(change("Unit", "—", unit_row.unit_number if unit_row else "—"))
+            rows.append(change("Work", "—", job.title))
+        for name in payload.get("parts") or []:
+            rows.append(change("Part used", "—", name))
+        if payload.get("part"):
+            rows.append(change("Part used", "—", payload.get("part")))
+    return rows
+
+
+def _set_ready_by(payload: dict, user=None) -> list[dict]:
+    return _field_tool_rows({**payload, "_tool": "set_ready_by"})
+
+
+def _ready_check(payload: dict, user=None) -> list[dict]:
+    return _field_tool_rows({**payload, "_tool": "ready_check"})
+
+
+def _contractor_in(payload: dict, user=None) -> list[dict]:
+    return _field_tool_rows({**payload, "_tool": "contractor_in"})
+
+
+def _contractor_out(payload: dict, user=None) -> list[dict]:
+    return _field_tool_rows({**payload, "_tool": "contractor_out"})
+
+
+def _pm_save(payload: dict, user=None) -> list[dict]:
+    return _field_tool_rows({**payload, "_tool": "pm_save"})
+
+
+def _pm_done(payload: dict, user=None) -> list[dict]:
+    return _field_tool_rows({**payload, "_tool": "pm_done"})
+
+
+def _parts_used(payload: dict, user=None) -> list[dict]:
+    return _field_tool_rows({**payload, "_tool": "parts_used"})
+
+
 _DETAILS = {
     "invite_viewer": _invite, "update_viewer": _update_viewer, "grant_access": _grant_access,
     "upsert_property": _upsert_property, "update_property": _update_property, "delete_property": _delete_property,
@@ -448,4 +536,11 @@ _DETAILS = {
     "log_odometer": lambda payload, user=None: _record_change("log_odometer", payload, user),
     "estimate_miles": lambda payload, user=None: _record_change("estimate_miles", payload, user),
     "set_default_property": lambda payload, user=None: _record_change("set_default_property", payload, user),
+    "set_ready_by": _set_ready_by,
+    "ready_check": _ready_check,
+    "contractor_in": _contractor_in,
+    "contractor_out": _contractor_out,
+    "pm_save": _pm_save,
+    "pm_done": _pm_done,
+    "parts_used": _parts_used,
 }

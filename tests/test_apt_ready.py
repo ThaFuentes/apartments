@@ -6,6 +6,121 @@ from app.models import Contractor, Unit, UnitTask
 from app.services.records import ensure_property
 
 
+class FieldToolsTests(AptTestBase):
+    """Contractor visits, PM reminders, parts, and the ready-by chat paths."""
+
+    def _unit(self, owner, number="204"):
+        from app.services.board import add_units
+
+        prop = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        add_units(owner, prop, number, "human")
+        db.session.commit()
+        return prop, Unit.query.filter_by(property_id=prop.id, unit_number=number).one()
+
+    def test_contractor_in_and_out_with_estimate_and_over_flag(self):
+        from app.services.appliers import apply_tool
+
+        owner = self.owner()
+        _prop, unit = self._unit(owner)
+        first = apply_tool(owner, "contractor_in", {"contractor": "ABC Paint", "property_id": unit.property_id, "unit_number": "204", "check_in": "8:10 am", "estimated_hours": 6}, "ai")
+        self.assertTrue(first.get("ok"), first)
+        self.assertIn("ABC Paint", first["reply"])
+        self.assertIn("6", first["reply"])
+        board = apply_tool(owner, "contractor_out", {"contractor": "ABC Paint", "property_id": unit.property_id, "unit_number": "204", "check_out": "3:45 pm"}, "ai")
+        self.assertTrue(board.get("ok"), board)
+        self.assertIn("Time on site", board["reply"])
+        self.assertEqual(board["minutes"], 455)
+        self.assertIn("over", board["reply"].lower())
+
+    def test_chat_check_in_and_out_sentences(self):
+        owner = self.owner()
+        self._unit(owner)
+        heard = handle_message(owner, "ABC Paint got into 204 at 8:10, should take 6 hours", idempotency_key="chat-in")
+        self.assertTrue(heard.get("pending"), heard)
+        payload = heard["proposal"]["payload"]
+        self.assertEqual(payload.get("contractor"), "ABC Paint")
+        self.assertEqual(payload.get("unit_number"), "204")
+        self.assertEqual(payload.get("estimated_hours"), 6)
+        self.assertIn("8:10", (payload.get("check_in") or "").lower())
+        self.save(owner)
+        left = handle_message(owner, "ABC Paint left 204 at 3:45", idempotency_key="chat-out")
+        self.assertTrue(left.get("pending"), left)
+        self.assertIn("3:45", (left["proposal"]["payload"].get("check_out") or "").lower())
+        saved = self.save(owner)
+        self.assertIn("over", saved.lower())
+
+    def test_who_is_on_site_answer(self):
+        from app.services.appliers import apply_tool
+
+        owner = self.owner()
+        _prop, unit = self._unit(owner)
+        apply_tool(owner, "contractor_in", {"contractor": "ABC Paint", "property_id": unit.property_id, "unit_number": "204", "estimated_hours": 6}, "ai")
+        db.session.commit()
+        heard = handle_message(owner, "who is on site", idempotency_key="on-site-1")
+        self.assertTrue(heard.get("ok"))
+        self.assertIn("ABC Paint", heard["reply"])
+        self.assertIn("unit 204", heard["reply"])
+
+    def test_pm_reminder_via_chat_and_due_answer(self):
+        from app.models import EquipmentPM
+        from app.services.appliers import file_piece
+
+        owner = self.owner()
+        _prop, unit = self._unit(owner)
+        gear, _amb = file_piece(owner, {"kind": "air conditioner"}, unit, None, unit.property_id, "human")
+        db.session.commit()
+        self.assertIsNotNone(gear)
+        heard = handle_message(owner, f"remind me to do a filter change every 90 days on the air conditioner in unit 204", idempotency_key="pm-1")
+        self.assertTrue(heard.get("pending"), heard)
+        payload = heard["proposal"]["payload"]
+        self.assertEqual(int(payload.get("equipment_id") or 0), gear.id)
+        self.assertEqual(payload.get("every_days"), 90)
+        saved = self.save(owner)
+        self.assertIn("Reminder saved", saved)
+        self.assertEqual(EquipmentPM.query.count(), 1)
+        row = EquipmentPM.query.one()
+        self.assertEqual(row.every_days, 90)
+        due = handle_message(owner, "what pm reminders are due", idempotency_key="pm-2")
+        self.assertTrue(due.get("ok"))
+
+    def test_ready_by_and_trade_check_via_chat(self):
+        from app.services.ready import ready_checklist
+
+        owner = self.owner()
+        _prop, unit = self._unit(owner, "210")
+        heard = handle_message(owner, "ready by 2026-10-15 for unit 210", idempotency_key="ready-1")
+        self.assertTrue(heard.get("pending"), heard)
+        self.assertEqual(heard["proposal"]["payload"].get("ready_by"), "2026-10-15")
+        self.assertIn("2026-10-15", self.save(owner))
+        self.assertEqual(unit.ready_by.isoformat(), "2026-10-15")
+
+        done = handle_message(owner, "paint is done on unit 210", idempotency_key="ready-2")
+        self.assertTrue(done.get("pending"), done)
+        self.assertEqual(done["proposal"]["payload"].get("job"), "paint")
+        self.save(owner)
+        tasks = UnitTask.query.filter_by(unit_id=unit.id).filter(UnitTask.deleted_at.is_(None)).all()
+        checks = ready_checklist(tasks)
+        paint = next(row for row in checks if row["slug"] == "paint")
+        self.assertTrue(paint["done"])
+
+    def test_parts_used_via_chat(self):
+        from app.models import Job, JobPart
+        from app.services.pending import confirm_id, request_apply
+
+        owner = self.owner()
+        _prop, unit = self._unit(owner)
+        staged = request_apply(owner, "record_unit_visit", {"property_id": unit.property_id, "property_name": "Woodview", "city": "Odessa", "unit_number": "204", "title": "Replace the capacitor", "status": "done"}, "ai", "parts-job")
+        self.assertTrue(confirm_id(owner, staged["proposal"]["id"], "human").get("ok"))
+        job = Job.query.filter_by(unit_id=unit.id, title="Replace the capacitor").one()
+        heard = handle_message(owner, "used capacitor, 2x contactor on unit 204", idempotency_key="parts-1")
+        self.assertTrue(heard.get("pending"), heard)
+        self.save(owner)
+        names = {row.name for row in JobPart.query.filter_by(job_id=job.id).all()}
+        self.assertIn("capacitor", names)
+        self.assertIn("contactor", names)
+
+
 class ReadyContractorTests(AptTestBase):
     def test_trashout_job_and_contractor_reuse(self):
         from app.services.board import add_units, apply_unit_board
