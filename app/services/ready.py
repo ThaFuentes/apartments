@@ -7,6 +7,7 @@ from app.builddb.builddb import db
 from app.models import Property, Unit, UnitTask
 from app.services.clock import local_today, utcnow
 from app.services.people import person_label
+from app.services.records import audit
 
 READY_JOBS = (
     ("trashout", "Trashout"),
@@ -62,6 +63,8 @@ def open_ready_titles(unit_id: int) -> set[str]:
 def add_ready_job(user, unit: Unit, job: str, source: str, vendor: str = "") -> dict:
     from app.services.board import add_needed, set_occupancy
 
+    if (unit.occupancy or "") == "occupied":
+        return {"ok": False, "reply": f"Mark unit {unit.unit_number} vacant before adding make-ready work."}
     slug = match_job(job) or ""
     title = job_label(slug) if slug else (job or "").strip()[:200]
     if not title:
@@ -75,6 +78,7 @@ def add_ready_job(user, unit: Unit, job: str, source: str, vendor: str = "") -> 
             "unit_id": unit.id,
         }
     kind = "vendor" if (vendor or "").strip() else "task"
+    unit.rentable = False
     add_needed(user, unit, [title], source, kind=kind, vendor=vendor or "")
     who = person_label(getattr(user, "id", None))
     reply = f"Unit {unit.unit_number} is a make ready and needs {title}."
@@ -96,17 +100,17 @@ def days_overdue(ready_by, today=None) -> int:
 def set_ready_by(user, unit: Unit, raw: str) -> dict:
     text = (raw or "").strip()
     if not text:
+        before = unit.ready_by.isoformat() if unit.ready_by else ""
         unit.ready_by = None
-        return {
-            "ok": True,
-            "reply": f"Cleared the target-ready date on unit {unit.unit_number}.",
-            "unit_id": unit.id,
-        }
+        audit(getattr(user, "id", None), "human", "update", "unit", unit.id, {"ready_by": before}, {"ready_by": "", "unit_number": unit.unit_number, "property_id": unit.property_id})
+        return {"ok": True, "reply": f"Cleared the target-ready date on unit {unit.unit_number}.", "unit_id": unit.id}
     try:
         day = date.fromisoformat(text)
     except ValueError:
         return {"ok": False, "reply": "Use a date like 2026-10-15."}
+    before = {"ready_by": unit.ready_by.isoformat() if unit.ready_by else "", "occupancy": unit.occupancy or "", "rentable": bool(unit.rentable)}
     unit.ready_by = day
+    audit(getattr(user, "id", None), "human", "update", "unit", unit.id, before, {"ready_by": day.isoformat(), "occupancy": unit.occupancy or "", "rentable": bool(unit.rentable), "unit_number": unit.unit_number, "property_id": unit.property_id})
     who = person_label(getattr(user, "id", None))
     reply = f"Unit {unit.unit_number} target ready {day.isoformat()}."
     if who:
@@ -115,6 +119,23 @@ def set_ready_by(user, unit: Unit, raw: str) -> dict:
     if overdue:
         reply += f" {overdue} day{'s' if overdue != 1 else ''} overdue."
     return {"ok": True, "reply": reply, "unit_id": unit.id}
+
+
+def set_move_out_date(user, unit: Unit, raw: str) -> dict:
+    text = (raw or "").strip()
+    if not text:
+        before = unit.move_out_date.isoformat() if unit.move_out_date else ""
+        unit.move_out_date = None
+        audit(getattr(user, "id", None), "human", "update", "unit", unit.id, {"move_out_date": before}, {"move_out_date": "", "unit_number": unit.unit_number, "property_id": unit.property_id})
+        return {"ok": True, "reply": f"Cleared the move-out date on unit {unit.unit_number}.", "unit_id": unit.id}
+    try:
+        day = date.fromisoformat(text)
+    except ValueError:
+        return {"ok": False, "reply": "Use a date like 2026-10-15."}
+    before = unit.move_out_date.isoformat() if unit.move_out_date else ""
+    unit.move_out_date = day
+    audit(getattr(user, "id", None), "human", "update", "unit", unit.id, {"move_out_date": before}, {"move_out_date": day.isoformat(), "unit_number": unit.unit_number, "property_id": unit.property_id})
+    return {"ok": True, "reply": f"Unit {unit.unit_number} move-out date {day.isoformat()}.", "unit_id": unit.id}
 
 
 def _task_for_title(tasks, title: str) -> UnitTask | None:
@@ -133,14 +154,18 @@ def _task_for_title(tasks, title: str) -> UnitTask | None:
 
 
 def set_ready_job_done(user, unit: Unit, job: str, done: bool) -> dict:
+    if (unit.occupancy or "") == "occupied":
+        return {"ok": False, "reply": f"Mark unit {unit.unit_number} vacant before changing make-ready work."}
     slug = match_job(job) or ""
     title = job_label(slug) if slug else (job or "").strip()[:200]
     if not title:
         return {"ok": False, "reply": "Which make-ready job?"}
-    if (unit.occupancy or "") != "make_ready":
+    if not done and (unit.occupancy or "") != "make_ready":
         from app.services.board import set_occupancy
 
         set_occupancy(user, unit, "make_ready", "human")
+    elif not done and unit.rentable:
+        unit.rentable = False
     tasks = (
         UnitTask.query.filter_by(unit_id=unit.id)
         .filter(UnitTask.deleted_at.is_(None))
@@ -148,8 +173,15 @@ def set_ready_job_done(user, unit: Unit, job: str, done: bool) -> dict:
         .all()
     )
     row = _task_for_title(tasks, title)
+    if not done and row is None:
+        return add_ready_job(user, unit, slug or title, "human")
     if done:
         if row is None:
+            if (unit.occupancy or "") != "make_ready":
+                from app.services.board import set_occupancy
+
+                set_occupancy(user, unit, "make_ready", "human")
+            unit.rentable = False
             added = add_ready_job(user, unit, slug or title, "human")
             if not added.get("ok"):
                 return added
@@ -170,6 +202,7 @@ def set_ready_job_done(user, unit: Unit, job: str, done: bool) -> dict:
     if row is None:
         return add_ready_job(user, unit, slug or title, "human")
     if row.status == "done":
+        unit.rentable = False
         row.status = "vendored" if (row.kind or "") == "vendor" or (row.vendor or "").strip() else "needed"
         row.done_by_id = None
         row.done_at = None
@@ -209,13 +242,19 @@ def ready_cards(user) -> list[dict]:
     if not props:
         return []
     units = (
-        Unit.query.filter(Unit.deleted_at.is_(None), Unit.occupancy == "make_ready", Unit.property_id.in_(list(props) or [-1]))
+        Unit.query.filter(
+            Unit.deleted_at.is_(None),
+            db.or_(Unit.occupancy == "make_ready", Unit.rentable.is_(True)),
+            Unit.property_id.in_(list(props) or [-1]),
+        )
         .order_by(Unit.property_id.asc(), Unit.unit_number.asc())
         .all()
     )
     cards = []
     for unit in units:
         prop = props.get(unit.property_id) or db.session.get(Property, unit.property_id)
+        if not prop or prop.deleted_at:
+            continue
         tasks = (
             UnitTask.query.filter_by(unit_id=unit.id)
             .filter(UnitTask.deleted_at.is_(None))
@@ -240,6 +279,8 @@ def ready_cards(user) -> list[dict]:
                 "open_count": len(open_rows),
                 "done_count": sum(1 for row in tasks if row.status == "done"),
                 "ready_by": ready_day.isoformat() if ready_day else "",
+                "move_out_date": unit.move_out_date.isoformat() if unit.move_out_date else "",
+                "rentable": bool(unit.rentable),
                 "days_overdue": days_overdue(ready_day),
                 "checklist": ready_checklist(tasks),
             }

@@ -94,8 +94,15 @@ def create_app() -> Flask:
     def apt_when(value):
         if not value:
             return ""
-        local = _local_moment(value)
-        return local.strftime("%b %d, %Y").replace(" 0", " ")
+        from datetime import date, datetime
+
+        if isinstance(value, datetime):
+            text = _local_moment(value).strftime("%b %d, %Y")
+        elif isinstance(value, date):
+            text = value.strftime("%b %d, %Y")
+        else:
+            return ""
+        return text.replace(" 0", " ")
 
     @app.template_filter("apt_datetime")
     def apt_datetime(value):
@@ -222,6 +229,7 @@ def create_app() -> Flask:
         can_manage_regions = False
         property_choices = []
         header_property_id = None
+        default_property_id = None
         if getattr(current_user, "is_authenticated", False):
             from app.models import Notice, PendingAction
             from app.services.records import open_shift
@@ -234,10 +242,9 @@ def create_app() -> Flask:
                 confirmed = bool(shift.confirmed)
                 header_property_id = shift.property.id
             try:
-                from app.services.parse import property_catalog
-                from app.services.context import current_property
+                from app.services.context import property_picker
 
-                property_choices = property_catalog(current_user)
+                property_choices, default_property_id = property_picker(current_user)
                 here = current_property(current_user)
                 if here:
                     place = here.name
@@ -359,7 +366,8 @@ def create_app() -> Flask:
             "SITE_NAME": "Apt",
             "header_city": city or "City",
             "header_property": place or "Property",
-            "header_property_id": header_property_id,
+            "header_property_id": header_property_id or default_property_id,
+            "default_property_id": default_property_id,
             "header_confirmed": confirmed,
             "property_choices": property_choices,
             "share": share,

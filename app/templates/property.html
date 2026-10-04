@@ -30,6 +30,7 @@
     <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort='number', show=show or '', building=building or '', q=query or '') }}" {% if sort == "number" and not show %}aria-current="page"{% endif %}>Unit number</a>
     <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='worked', building=building or '', q=query or '') }}" {% if show == "worked" %}aria-current="page"{% endif %}>Had work</a>
     <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='make_ready', building=building or '', q=query or '') }}" {% if show == "make_ready" %}aria-current="page"{% endif %}>Make ready</a>
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='rentable', building=building or '', q=query or '') }}" {% if show == "rentable" %}aria-current="page"{% endif %}>Ready to rent</a>
     <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='occupied', building=building or '', q=query or '') }}" {% if show == "occupied" %}aria-current="page"{% endif %}>Occupied</a>
     <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='needs', building=building or '', q=query or '') }}" {% if show == "needs" %}aria-current="page"{% endif %}>Needs work</a>
     <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show=show or '', building='', q=query or '') }}" {% if not building %}aria-current="page"{% endif %}>All buildings</a>
@@ -50,11 +51,12 @@
       </summary>
       <div class="building-cards">
     {% for card in group.cards %}
-    <article class="unit-card{% if card.unit.occupancy == 'occupied' %} occupied{% elif card.unit.occupancy == 'make_ready' %} make-ready{% endif %}" data-unit-card data-number="{{ card.unit.unit_number }}" data-building="{{ card.unit.building }}">
+    <article class="unit-card{% if card.unit.rentable %} rentable{% elif card.unit.occupancy == 'occupied' %} occupied{% elif card.unit.occupancy == 'make_ready' %} make-ready{% endif %}" data-unit-card data-number="{{ card.unit.unit_number }}" data-building="{{ card.unit.building }}">
       <a href="/units/{{ card.unit.id }}"><strong>{{ card.unit.unit_number }}</strong></a>
       <span class="unit-meta">
         {% if card.unit.building %}Building {{ card.unit.building }} · {% endif %}
-        {% if card.unit.occupancy == 'occupied' %}Occupied{% elif card.unit.occupancy == 'make_ready' %}Make ready{% else %}Open{% endif %}
+        {% if card.unit.rentable %}<strong class="status-ready-rent">READY TO BE RENTED</strong>{% elif card.unit.occupancy == 'occupied' %}Occupied{% elif card.unit.occupancy == 'make_ready' %}Make ready{% else %}Open{% endif %}
+        {% if card.unit.rentable and card.open_tasks == 0 %} · Make-ready work complete{% endif %}
         {% if card.last %} · Last worked {{ card.last|apt_when }}{% else %} · Nothing logged yet{% endif %}
         {% if card.last_title %} · {{ card.last_title }}{% endif %}
         {% if card.open_tasks %} · {{ card.open_tasks }} to do{% endif %}

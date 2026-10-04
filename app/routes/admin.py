@@ -251,9 +251,11 @@ def users():
         people = [person for person in people if person.id == current_user.id or can_manage_user(current_user, person)]
     properties = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
     from app.services.access import can_manage_property_people, sees_all
+    from app.services.context import property_picker
 
     if current_user.role != "owner" and not sees_all(current_user):
         properties = [prop for prop in properties if can_manage_property_people(current_user, prop.id)]
+    properties, default_property_id = property_picker(current_user, properties)
     access = {(row.user_id, row.property_id): row for row in PropertyAccess.query.all()}
     from app.models import Region, RegionAccess, UserCapability
     from app.services.access import CAPABILITY_LABELS, ROLE_CAPABILITIES, normalize_role
@@ -278,6 +280,7 @@ def users():
         "users.html",
         people=people,
         properties=properties,
+        default_property_id=default_property_id,
         access=access,
         capabilities=CAPABILITY_LABELS,
         role_defaults=role_defaults,

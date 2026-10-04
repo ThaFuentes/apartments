@@ -77,6 +77,8 @@ def audit(actor_id, source, action, entity, entity_id, before, after) -> None:
         data = {**data, "related_unit_ids": related}
     if entity in {"unit", "job", "unit_visit", "equipment", "unit_task"} and property_id:
         label = data.get("title") or data.get("unit_number") or data.get("kind") or data.get("note") or action.replace("_", " ")
+        if entity == "unit" and unit and bool(data.get("rentable")) and not bool(before.get("rentable")):
+            label = f"Unit {unit.unit_number} READY TO BE RENTED"
         details = dumps({"entity": entity, "entity_id": entity_id, "before": before or {}, "after": after or {}})
         related_ids = set()
         if unit_id:

@@ -18,7 +18,10 @@ from app.routes.common import bp, login_required, _history_ok, _key, _new_key
 def map_page():
     if current_user.is_viewer and not current_user.can_see_live_map and not current_user.can_see_history:
         abort(403)
-    props = Property.query.filter(Property.deleted_at.is_(None), Property.lat.isnot(None)).all()
+    from app.services.access import visible_property_ids
+
+    allowed = visible_property_ids(current_user)
+    props = Property.query.filter(Property.deleted_at.is_(None), Property.lat.isnot(None), Property.id.in_(allowed or {-1})).all()
     pins = [
         {
             "name": p.name,
@@ -221,6 +224,11 @@ def media_file(media_id):
         abort(403)
     media = db.session.get(Media, media_id)
     if not media:
+        abort(404)
+    from app.services.access import can_see_property
+    if media.property_id and not can_see_property(current_user, media.property_id):
+        abort(404)
+    if not media.property_id and media.user_id != current_user.id:
         abort(404)
     data = read_blob(media.storage_name)
     if not data:

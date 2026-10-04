@@ -262,6 +262,10 @@ def _evolve_units():
         statements.append("ALTER TABLE units ADD COLUMN building VARCHAR(40) NOT NULL DEFAULT ''")
     if "ready_by" not in have:
         statements.append("ALTER TABLE units ADD COLUMN ready_by DATE NULL")
+    if "move_out_date" not in have:
+        statements.append("ALTER TABLE units ADD COLUMN move_out_date DATE NULL")
+    if "rentable" not in have:
+        statements.append("ALTER TABLE units ADD COLUMN rentable TINYINT(1) NOT NULL DEFAULT 0")
     if not statements:
         return
     with db.engine.begin() as conn:

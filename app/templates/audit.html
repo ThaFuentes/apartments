@@ -8,7 +8,10 @@
     <label>Property
       <select name="property">
         <option value="">All properties</option>
-        {% for prop in properties %}
+        {% for prop in properties if prop.id == default_property_id %}
+        <option value="{{ prop.id }}" {% if filters.property == prop.id|string %}selected{% endif %}>{{ prop.name }}</option>
+        {% endfor %}
+        {% for prop in properties if prop.id != default_property_id %}
         <option value="{{ prop.id }}" {% if filters.property == prop.id|string %}selected{% endif %}>{{ prop.name }}</option>
         {% endfor %}
       </select>

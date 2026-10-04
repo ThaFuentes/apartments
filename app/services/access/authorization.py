@@ -142,36 +142,117 @@ def _regional_city_is_assigned(user, city_name: str) -> bool:
 
 
 def _field_tool_place(user, tool: str, payload: dict) -> tuple[set[int], str]:
-    """Scope for the make-ready / contractor / PM tools: the property named in the payload."""
+    """Scope for make-ready / contractor / PM tools and their linked records."""
+    from app.models import Equipment, EquipmentPM, Job, Property, Unit
     from app.services.parse import resolve_property
 
     ids: set[int] = set()
     if tool in {"pm_save", "pm_done", "parts_used"} and payload.get("job_id") not in (None, ""):
-        from app.models import Job
-
         try:
             job = db.session.get(Job, int(payload["job_id"]))
+            payload_property_id = int(payload["property_id"]) if payload.get("property_id") else None
         except (TypeError, ValueError):
             job = None
-        if job and not job.deleted_at:
+            payload_property_id = None
+        if job and not job.deleted_at and (tool != "parts_used" or payload_property_id is None or payload_property_id == job.property_id):
             ids.add(job.property_id)
-    if tool in {"pm_save", "pm_done"} and payload.get("equipment_id") not in (None, ""):
-        from app.models import Equipment
+        elif tool == "parts_used":
+            return set(), "That work entry is not on the selected property."
+    if tool == "contractor_in" and payload.get("contractor_id") not in (None, ""):
+        from app.models import Contractor
 
+        try:
+            contractor_id = int(payload["contractor_id"])
+            property_id = int(payload.get("property_id") or 0)
+        except (TypeError, ValueError):
+            contractor_id, property_id = 0, 0
+        contractor = db.session.get(Contractor, contractor_id) if contractor_id else None
+        if not contractor or contractor.deleted_at:
+            return set(), "I can't find that contractor."
+        if not property_id:
+            return set(), "Choose the contractor's property and unit."
+        from app.services.records import normalize_unit
+
+        number = normalize_unit(payload.get("unit_number") or "")
+        if not number:
+            return set(), "Choose the contractor's unit."
+        unit = Unit.query.filter(
+            Unit.property_id == property_id,
+            Unit.deleted_at.is_(None),
+            db.func.lower(Unit.unit_number) == number.lower(),
+        ).first()
+        prop = db.session.get(Property, property_id)
+        if not prop or prop.deleted_at:
+            return set(), "I can't find that property."
+        if unit is None:
+            # A named new unit can be created by the field applier; its access is
+            # anchored by the explicitly selected property above.
+            ids.add(property_id)
+        else:
+            ids.add(unit.property_id)
+    if tool == "contractor_out" and payload.get("contractor_id") not in (None, ""):
+        from app.models import Contractor, ContractorVisit
+
+        try:
+            contractor_id = int(payload["contractor_id"])
+            property_id = int(payload.get("property_id") or 0)
+        except (TypeError, ValueError):
+            contractor_id, property_id = 0, 0
+        contractor = db.session.get(Contractor, contractor_id) if contractor_id else None
+        if not contractor or contractor.deleted_at:
+            return set(), "I can't find that contractor."
+        number = (payload.get("unit_number") or "").strip()
+        if number and property_id:
+            from app.services.records import normalize_unit
+
+            unit_number = normalize_unit(number)
+            visit = ContractorVisit.query.join(Unit, Unit.id == ContractorVisit.unit_id).filter(
+                ContractorVisit.contractor_id == contractor.id,
+                ContractorVisit.property_id == property_id,
+                Unit.property_id == property_id,
+                db.func.lower(Unit.unit_number) == unit_number.lower(),
+                ContractorVisit.check_out.is_(None),
+            ).order_by(ContractorVisit.id.desc()).first()
+            if visit:
+                ids.add(property_id)
+            else:
+                return set(), "That contractor has no open visit at this property and unit."
+    if tool == "pm_done" and payload.get("pm_id") not in (None, ""):
+        try:
+            pm_row = db.session.get(EquipmentPM, int(payload["pm_id"]))
+        except (TypeError, ValueError):
+            pm_row = None
+        gear = pm_row.equipment if pm_row else None
+        if not pm_row or not pm_row.active or not gear or gear.deleted_at:
+            return set(), "I can't find that active reminder."
+        if gear.unit_id and (not gear.unit or gear.unit.deleted_at or gear.unit.property_id != gear.property_id):
+            return set(), "That reminder belongs to a removed or mismatched unit."
+        place = db.session.get(Property, gear.property_id) if gear.property_id else None
+        if not place or place.deleted_at:
+            return set(), "That reminder belongs to a removed property."
+        ids.add(gear.property_id)
+    if tool in {"pm_save", "pm_done"} and payload.get("equipment_id") not in (None, ""):
         try:
             gear = db.session.get(Equipment, int(payload["equipment_id"]))
         except (TypeError, ValueError):
             gear = None
-        if gear and not gear.deleted_at and gear.property_id:
-            ids.add(gear.property_id)
+        place = db.session.get(Property, gear.property_id) if gear and gear.property_id else None
+        if not gear or gear.deleted_at or not place or place.deleted_at:
+            return set(), "I can't find that active equipment."
+        if gear.unit_id and (not gear.unit or gear.unit.deleted_at or gear.unit.property_id != gear.property_id):
+            return set(), "That equipment belongs to a removed or mismatched unit."
+        ids.add(gear.property_id)
     if payload.get("property_id") not in (None, ""):
         try:
             prop = db.session.get(Property, int(payload["property_id"]))
         except (TypeError, ValueError):
             prop = None
-        if prop and not prop.deleted_at:
-            ids.add(prop.id)
-            return ids, ""
+        if not prop or prop.deleted_at:
+            return set(), "I can't find that property."
+        if ids and prop.id not in ids:
+            return set(), "The record and selected property do not match."
+        ids.add(prop.id)
+        return ids, ""
     name = (payload.get("property_name") or "").strip()
     if name:
         verdict = resolve_property(name, payload.get("city") or "", payload.get("region") or "", user=user)
@@ -307,6 +388,10 @@ def _resource_property_ids(user, tool: str, payload: dict) -> tuple[set[int], st
             return set(), "That photo is not on your login."
         if media.property_id:
             ids.add(media.property_id)
+        elif media.job_id:
+            job = db.session.get(Job, media.job_id)
+            if job and not job.deleted_at:
+                ids.add(job.property_id)
     if payload.get("entity") == "expense" and payload.get("entity_id") not in (None, ""):
         if not _expense_belongs_to_user(user, payload) and role_of(user) != "owner":
             return set(), "That expense is not on your login."

@@ -31,6 +31,9 @@ def audit_log():
         if allowed
         else []
     )
+    from app.services.context import property_picker
+
+    properties, default_property_id = property_picker(current_user, properties)
     filters = {
         "property": (request.args.get("property") or "").strip(),
         "who": (request.args.get("who") or "").strip(),
@@ -48,7 +51,8 @@ def audit_log():
         query = UnitChange.query.filter(UnitChange.property_id.in_(allowed))
         if filters["property"]:
             try:
-                query = query.filter(UnitChange.property_id == int(filters["property"]))
+                selected_property = int(filters["property"])
+                query = query.filter(UnitChange.property_id == selected_property if selected_property in allowed else UnitChange.property_id.in_([]))
             except ValueError:
                 query = query.filter(UnitChange.property_id.in_([]))
         if filters["who"]:
@@ -93,6 +97,7 @@ def audit_log():
         entries=entries,
         properties=properties,
         filters=filters,
+        default_property_id=default_property_id,
         days=days,
         total=total,
         shown=len(entries),

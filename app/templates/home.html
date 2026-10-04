@@ -182,22 +182,24 @@
 
     <details>
     <summary>Log work</summary>
-    <form method="post" action="/log" class="card stack" data-place-search data-mode="one">
+    <form method="post" action="/log" class="card stack" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="idempotency_key" value="log-{{ msg_key }}">
       <label>Property
-        <input data-search autocomplete="off" placeholder="Type two letters, then tap the property">
+        <select name="property_id" required>
+          <option value="">Choose a property</option>
+          {% for prop in properties if prop.id == default_property_id %}
+          <option value="{{ prop.id }}" selected>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+          {% endfor %}
+          {% for prop in properties if prop.id != default_property_id %}
+          <option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+          {% endfor %}
+        </select>
       </label>
-      <div class="search-results" data-results></div>
-      <input type="hidden" name="property_id" data-property-id value="">
-      <p data-chosen class="lead" hidden></p>
-      <div data-new-place>
-        <p class="hint">Use this only when the property is not saved yet.</p>
-        <label>Property name <input name="new_name" data-name autocomplete="off"></label>
-        <label>City <input name="new_city" data-city autocomplete="off"></label>
-      </div>
+      {% if not properties %}<p class="hint">No properties are assigned to this login yet.</p>{% endif %}
       <label>Unit number <input name="unit_number" autocomplete="off" placeholder="Only if you have it"></label>
       <label>What you did <input name="title" required placeholder="What happened"></label>
+      <label>Photo <input type="file" name="photo" accept="image/*" capture="environment"></label>
       <button type="submit">Save this work</button>
     </form>
     </details>

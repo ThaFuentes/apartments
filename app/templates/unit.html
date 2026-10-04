@@ -8,7 +8,8 @@
     {% if unit.building %}<p class="kicker">Building {{ unit.building }}</p>{% else %}<p class="kicker">Building not assigned</p>{% endif %}
     <p class="hint">{{ gear|length }} equipment · {{ tasks.get('part', [])|length }} parts · {{ tasks.get('vendor', [])|length }} vendored · {{ tasks.get('task', [])|length + tasks.get('work_order', [])|length }} open items · {{ jobs|length }} labor records</p>
     <p class="lead">
-      {% if unit.occupancy == 'occupied' %}Occupied — someone lives here.
+      {% if unit.rentable %}Ready to be rented.
+      {% elif unit.occupancy == 'occupied' %}Occupied — someone lives here.
       {% elif unit.occupancy == 'make_ready' %}Make ready — this one still needs work.
       {% else %}No occupancy set yet.{% endif %}
       {% if last %} Last worked {{ last|apt_when }}.{% endif %}
@@ -31,7 +32,28 @@
   </form>
   {% endif %}
 
+  {% if unit.move_out_date %}<p class="hint">Move-out date: {{ unit.move_out_date|apt_when }}</p>{% endif %}
+  {% if editable %}
+  <form method="post" action="/units/{{ unit.id }}/move-out" class="ready-date">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Move-out date <input type="date" name="move_out_date" value="{{ unit.move_out_date.isoformat() if unit.move_out_date else '' }}"></label>
+    <button type="submit" class="quiet">Save move-out date</button>
+  </form>
+  {% endif %}
+  {% if unit.rentable %}<p class="status-ready-rent">READY TO BE RENTED</p>{% endif %}
+  {% if editable and unit.occupancy == 'make_ready' and not unit.rentable %}
+  <form method="post" action="/units/{{ unit.id }}/rentable" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" name="rentable" value="1">Mark ready to rent</button>
+  </form>
+  {% elif editable and unit.rentable %}
+  <form method="post" action="/units/{{ unit.id }}/rentable" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" name="rentable" value="0" class="quiet">Clear rentable status</button>
+  </form>
+  {% endif %}
   <h2>Make ready</h2>
+
   {% if editable %}
   <p class="hint">Tap a job this unit still needs. Names on the contractor list can be called here without typing them again.</p>
   <div class="chips ready-jobs">
@@ -299,6 +321,10 @@
   </details>
   {% endif %}
 
+  {% if standalone_photos %}
+  <h2>Work photos</h2>
+  {% for photo in standalone_photos %}<p><img src="/media/{{ photo.id }}" alt="{{ photo.caption or 'Photo of this work' }}"></p>{% endfor %}
+  {% endif %}
   <h2>What was done</h2>
   {% if not jobs and not visits %}
   <p class="empty">No work is on this unit yet.</p>

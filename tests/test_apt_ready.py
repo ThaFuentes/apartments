@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from tests.apt_test_support import APP, AptTestBase, db, handle_message
-from app.models import Contractor, Unit, UnitTask
+from app.models import AuditLog, Contractor, Unit, UnitTask
 from app.services.records import ensure_property
 
 
@@ -61,6 +61,61 @@ class FieldToolsTests(AptTestBase):
         self.assertTrue(heard.get("ok"))
         self.assertIn("ABC Paint", heard["reply"])
         self.assertIn("unit 204", heard["reply"])
+
+    def test_inventory_default_filter_and_authorized_query(self):
+        from app.models import Equipment, PropertyAccess
+        from app.services.appliers import file_piece
+        from app.services.people import create_user
+
+        owner = self.owner()
+        first = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        second = ensure_property("Brookview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        user, _ = create_user(username="maint", password="field-pass", display_name="Maintenance", role="maintenance_person", created_by=owner)
+        db.session.add_all([
+            PropertyAccess(user_id=user.id, property_id=first.id, can_edit=True),
+            PropertyAccess(user_id=user.id, property_id=second.id, can_edit=True),
+        ])
+        user.default_property_id = second.id
+        user.default_property_confirmed = True
+        db.session.commit()
+        first_gear, _ = file_piece(owner, {"kind": "washer"}, None, None, first.id, "human")
+        second_gear, _ = file_piece(owner, {"kind": "dryer"}, None, None, second.id, "human")
+        from app.models import EquipmentPM
+        from app.services.clock import local_today
+        first_pm = EquipmentPM(equipment_id=first_gear.id, task="Washer clean", every_days=90, next_due=local_today(), active=True)
+        second_pm = EquipmentPM(equipment_id=second_gear.id, task="Dryer clean", every_days=90, next_due=local_today(), active=True)
+        db.session.add_all([first_pm, second_pm])
+        db.session.commit()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "maint", "password": "field-pass"})
+        page = client.get("/inventory")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Dryer", page.data)
+        self.assertNotIn(b"Washer", page.data)
+        all_rows = client.get("/inventory?property=")
+        self.assertIn(b"Washer", all_rows.data)
+        self.assertIn(b"Dryer", all_rows.data)
+        default_only = client.get(f"/inventory?property={second.id}")
+        self.assertIn(b"Dryer", default_only.data)
+        self.assertNotIn(b"Washer", default_only.data)
+        self.assertIn(b"All assigned properties", all_rows.data)
+        blocked = client.get(f"/inventory?property={owner.id + 999}")
+        self.assertNotIn(b"Washer", blocked.data)
+        self.assertNotIn(b"Dryer", blocked.data)
+        malformed = client.get("/inventory?property=not-a-property")
+        self.assertNotIn(b"Washer", malformed.data)
+        self.assertNotIn(b"Dryer", malformed.data)
+        blocked_pm = client.get(f"/pm?property={owner.id + 999}")
+        self.assertNotIn(b"Washer", blocked_pm.data)
+        self.assertNotIn(b"Dryer", blocked_pm.data)
+        default_pm = client.get("/pm")
+        self.assertIn(b"Dryer clean", default_pm.data)
+        self.assertNotIn(b"Washer clean", default_pm.data)
+        all_pm = client.get("/pm?property=")
+        self.assertIn(b"Washer clean", all_pm.data)
+        self.assertIn(b"Dryer clean", all_pm.data)
 
     def test_pm_reminder_via_chat_and_due_answer(self):
         from app.models import EquipmentPM
@@ -122,6 +177,178 @@ class FieldToolsTests(AptTestBase):
 
 
 class ReadyContractorTests(AptTestBase):
+    _unit = FieldToolsTests._unit
+
+    def test_rentable_status_stays_visible_after_make_ready_closes(self):
+        from datetime import timedelta
+
+        from app.services.clock import local_today
+        from app.services.board import add_units
+        from app.services.ready import add_ready_job, ready_cards, set_ready_by
+
+        owner = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        add_units(owner, prop, "210", "human")
+        db.session.commit()
+        unit = Unit.query.filter_by(property_id=prop.id, unit_number="210").one()
+        add_ready_job(owner, unit, "trashout", "human")
+        from datetime import timedelta
+        from app.services.clock import local_today
+        target = local_today() + timedelta(days=4)
+        unit.rentable = True
+        unit.occupancy = ""
+        set_ready_by(owner, unit, target.isoformat())
+        db.session.commit()
+
+        cards = ready_cards(owner)
+        self.assertEqual([card["unit"].id for card in cards], [unit.id])
+        self.assertTrue(cards[0]["rentable"])
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        board = client.get("/ready")
+        self.assertEqual(board.status_code, 200)
+        self.assertIn(b"READY TO BE RENTED", board.data)
+        self.assertIn(b"Start a turn", board.data)
+        self.assertNotIn("Make ready · done".encode(), board.data)
+        from app.services.board import add_units
+        add_units(owner, prop, "220", "human")
+        db.session.commit()
+        occupied_unit = Unit.query.filter_by(property_id=prop.id, unit_number="220").one()
+        occupied_unit.occupancy = "occupied"
+        db.session.commit()
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        blocked_start = client.post("/ready/start", data={"csrf_token": token, "unit_id": str(occupied_unit.id)}, follow_redirects=False)
+        self.assertEqual(blocked_start.status_code, 302)
+        db.session.refresh(occupied_unit)
+        self.assertEqual(occupied_unit.occupancy, "occupied")
+        start_turn = client.post("/ready/start", data={"csrf_token": token, "unit_id": str(unit.id)}, follow_redirects=False)
+        self.assertEqual(start_turn.status_code, 302)
+        db.session.refresh(unit)
+        self.assertFalse(unit.rentable)
+        self.assertEqual(unit.occupancy, "make_ready")
+        unit.rentable = True
+        unit.occupancy = ""
+        db.session.commit()
+        property_page = client.get(f"/properties/{prop.id}?show=rentable")
+        self.assertEqual(property_page.status_code, 200)
+        self.assertIn(b"Unit 210", property_page.data)
+
+        unit.rentable = True
+        unit.occupancy = ""
+        db.session.commit()
+        previous_occupancy = unit.occupancy
+        set_ready_by(owner, unit, target.isoformat())
+        self.assertEqual(unit.occupancy, previous_occupancy)
+        self.assertTrue(unit.rentable)
+        unit.rentable = False
+        unit.occupancy = "make_ready"
+        self.assertIn(unit.id, [card["unit"].id for card in ready_cards(owner)])
+
+    def test_opening_make_ready_clears_rentable_and_filters_stay_distinct(self):
+        from app.services.board import add_units
+        from app.services.browse import unit_cards
+        from app.services.ready import add_ready_job
+
+        owner = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        add_units(owner, prop, "301, 302", "human")
+        db.session.commit()
+        rentable, turning = Unit.query.filter_by(property_id=prop.id).order_by(Unit.unit_number.asc()).all()
+        rentable.rentable = True
+        rentable.occupancy = ""
+        db.session.commit()
+
+        self.assertEqual([card["unit"].unit_number for card in unit_cards(prop.id, show="rentable")["cards"]], ["301"])
+        self.assertEqual(unit_cards(prop.id, show="make_ready")["cards"], [])
+        add_ready_job(owner, rentable, "paint", "human")
+        db.session.commit()
+        self.assertFalse(rentable.rentable)
+        self.assertEqual(rentable.occupancy, "make_ready")
+        self.assertEqual([card["unit"].unit_number for card in unit_cards(prop.id, show="make_ready")["cards"]], ["301"])
+        self.assertEqual([card["unit"].unit_number for card in unit_cards(prop.id, show="rentable")["cards"]], [])
+
+        turning.occupancy = ""
+        turning.rentable = True
+        db.session.commit()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        marked_occupied = client.post(
+            f"/units/{turning.id}/occupancy",
+            data={"csrf_token": token, "occupancy": "occupied"},
+            follow_redirects=False,
+        )
+        self.assertEqual(marked_occupied.status_code, 302)
+        db.session.refresh(turning)
+        self.assertEqual(turning.occupancy, "occupied")
+        self.assertFalse(turning.rentable)
+        occupancy_audit = AuditLog.query.filter_by(action="update", entity="unit", entity_id=turning.id).order_by(AuditLog.id.desc()).first()
+        self.assertIsNotNone(occupancy_audit)
+        self.assertIn('"rentable": true', occupancy_audit.before_json)
+        self.assertIn('"rentable": false', occupancy_audit.after_json)
+
+        blocked_manual_task = client.post(
+            f"/units/{turning.id}/tasks",
+            data={"csrf_token": token, "kind": "task", "title": "Paint"},
+            follow_redirects=False,
+        )
+        self.assertEqual(blocked_manual_task.status_code, 302)
+        self.assertIsNone(UnitTask.query.filter_by(unit_id=turning.id).first())
+        blocked_job = client.post(
+            f"/units/{turning.id}/ready",
+            data={"csrf_token": token, "job": "paint"},
+            follow_redirects=False,
+        )
+        self.assertEqual(blocked_job.status_code, 409)
+        from app.services.ready import add_ready_job, set_ready_job_done
+        self.assertFalse(add_ready_job(owner, turning, "paint", "human")["ok"])
+        self.assertFalse(set_ready_job_done(owner, turning, "paint", True)["ok"])
+        from app.models import Contractor
+        from app.services.contractors import call_to_unit
+        contractor = Contractor(name="Occupied-unit contractor", company="", phone="", trade="", notes="")
+        self.assertFalse(call_to_unit(owner, contractor, turning, "paint")["ok"])
+        from app.services.board import apply_unit_board
+        blocked_chat_needs = apply_unit_board(
+            owner,
+            {"action": "needs", "property_hint": "Woodview", "unit_number": "302", "titles": ["Paint"], "kind": "task"},
+            "human",
+        )
+        db.session.rollback()
+        self.assertFalse(blocked_chat_needs["ok"])
+        self.assertIn("vacant", blocked_chat_needs["reply"])
+        allowed_chat_part = apply_unit_board(
+            owner,
+            {"action": "part", "property_hint": "Woodview", "unit_number": "302", "title": "Capacitor"},
+            "human",
+        )
+        self.assertTrue(allowed_chat_part["ok"], allowed_chat_part)
+        self.assertIsNotNone(UnitTask.query.filter_by(unit_id=turning.id, kind="part").first())
+        UnitTask.query.filter_by(unit_id=turning.id, kind="part").delete(synchronize_session=False)
+        db.session.commit()
+        self.assertIsNone(UnitTask.query.filter_by(unit_id=turning.id).first())
+        blocked_checklist = client.post(
+            f"/units/{turning.id}/ready-check",
+            data={"csrf_token": token, "job": "paint", "done": "1"},
+            follow_redirects=False,
+        )
+        self.assertEqual(blocked_checklist.status_code, 409)
+        blocked_rentable = client.post(
+            f"/units/{turning.id}/rentable",
+            data={"csrf_token": token, "rentable": "1"},
+            follow_redirects=False,
+        )
+        self.assertEqual(blocked_rentable.status_code, 302)
+        db.session.refresh(turning)
+        self.assertEqual(turning.occupancy, "occupied")
+        self.assertFalse(turning.rentable)
+        self.assertIsNone(UnitTask.query.filter_by(unit_id=turning.id).first())
+
     def test_trashout_job_and_contractor_reuse(self):
         from app.services.board import add_units, apply_unit_board
         from app.services.contractors import list_contractors, match_contractor
@@ -199,6 +426,58 @@ class ReadyContractorTests(AptTestBase):
         self.assertEqual(unit_page.status_code, 200)
         self.assertIn(b"Trashout", unit_page.data)
         self.assertIn(b"Call them to this unit", unit_page.data)
+
+    def test_move_out_and_photo_logged_from_field_form(self):
+        from io import BytesIO
+        from PIL import Image
+        from app.models import Job, Media
+        from app.services.board import add_units
+
+        owner = self.owner()
+        prop, unit = self._unit(owner, "215")
+        buffer = BytesIO()
+        Image.new("RGB", (2, 2), (20, 60, 90)).save(buffer, format="PNG")
+        photo = buffer.getvalue()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        saved = client.post(
+            "/log",
+            data={
+                "csrf_token": token,
+                "property_id": str(prop.id),
+                "unit_number": unit.unit_number,
+                "title": "Replaced fan belt",
+                "photo": (BytesIO(photo), "work.png", "image/png"),
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(saved.status_code, 302)
+        job = Job.query.filter_by(property_id=prop.id, title="Replaced fan belt").one()
+        media = Media.query.filter_by(job_id=job.id).one()
+        self.assertEqual(media.unit_id, unit.id)
+        self.assertEqual(media.mime, "image/png")
+        viewed = client.get(f"/media/{media.id}")
+        self.assertEqual(viewed.status_code, 200)
+        self.assertEqual(viewed.data, photo)
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        rejected = client.post(
+            "/log",
+            data={
+                "csrf_token": token,
+                "property_id": str(prop.id),
+                "unit_number": unit.unit_number,
+                "title": "Not an image",
+                "photo": (BytesIO(b"not an image"), "fake.png", "image/png"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        self.assertEqual(rejected.status_code, 302)
+        self.assertEqual(Job.query.filter_by(title="Not an image").count(), 0)
 
     def test_ready_list_has_target_date_overdue_and_checklist(self):
         from datetime import timedelta

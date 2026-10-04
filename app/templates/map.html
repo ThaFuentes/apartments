@@ -3,7 +3,7 @@
 {% block main %}
 <section class="sheet">
   <h1>Map</h1>
-  <p class="lead">Property pins and the drive. No building layouts.</p>
+  <p class="lead">Property pins and the drive. Building markers and make-ready map flags are parked for now; units do not have separate map locations yet.</p>
   <div id="map" class="map"></div>
   {% if current_user.role != 'viewer' %}
   <form method="post" action="/share" class="row-actions">
@@ -23,5 +23,5 @@
 </section>
 <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}?v={{ asset_v }}">
 <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}?v={{ asset_v }}"></script>
-<template id="map-data">{{ {"pins": pins, "home": home}|tojson }}</template>
+<template id="apt-map-data">{{ {"pins": pins, "home": home}|tojson }}</template>
 {% endblock %}

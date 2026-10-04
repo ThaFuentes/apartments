@@ -264,10 +264,15 @@ def apply_contractor_in(user, payload: dict, source: str) -> dict:
         )
         db.session.add(row)
         word = "In"
-    if unit.occupancy not in ("occupied", "make_ready"):
+    has_turn_task = bool(task and task.status in ("needed", "vendored"))
+    if unit.occupancy == "make_ready" and unit.rentable:
+        unit.rentable = False
+    if unit.occupancy not in ("occupied", "make_ready") and (not unit.rentable or has_turn_task):
         from app.services.board import set_occupancy
 
         set_occupancy(user, unit, "make_ready", source)
+    elif has_turn_task:
+        unit.rentable = False
     db.session.flush()
     audit(
         getattr(user, "id", None),
@@ -319,6 +324,8 @@ def apply_contractor_out(user, payload: dict, source: str) -> dict:
     )
     if row is None:
         return {"ok": False, "reply": f"{contractor.name} has no open visit on unit {unit.unit_number}. Who checked in, and when?"}
+    if row.property_id != unit.property_id:
+        return {"ok": False, "reply": "That contractor visit belongs to another property."}
     row.check_out = _clock_from(payload, "check_out") or utcnow()
     # "left at 3:45" after an 8:10 arrival is the afternoon, not 3:45 a.m.
     raw_out = str(payload.get("check_out") or "")
@@ -333,13 +340,13 @@ def apply_contractor_out(user, payload: dict, source: str) -> dict:
     minutes = 0
     if row.check_in and row.check_out:
         minutes = max(0, int((row.check_out - row.check_in).total_seconds() // 60))
-    spent = f"{minutes // 60}h {minutes % 2 * 0 + minutes % 60:02d}m" if minutes else ""
     spent = f"{minutes // 60}h {minutes % 60:02d}m" if minutes else ""
     over = ""
     if row.estimated_hours and minutes:
         estimate_minutes = int(round(float(row.estimated_hours) * 60))
         if minutes > estimate_minutes * 1.25 and minutes - estimate_minutes >= 60:
             over = f" That is over the {row.estimated_hours:g}-hour estimate."
+
     db.session.flush()
     audit(
         getattr(user, "id", None),
@@ -397,12 +404,11 @@ def contractor_board(user) -> dict:
             }
         )
     day = local_today()
-    flagged = (
-        ContractorVisit.query.filter(ContractorVisit.check_out.isnot(None))
-        .order_by(ContractorVisit.id.desc())
-        .limit(200)
-        .all()
-    )
+    flagged_query = ContractorVisit.query.filter(ContractorVisit.check_out.isnot(None))
+    if getattr(user, "role", "") != "owner":
+        allowed = visible_property_ids(user)
+        flagged_query = flagged_query.filter(ContractorVisit.property_id.in_(allowed or {-1}))
+    flagged = flagged_query.order_by(ContractorVisit.id.desc()).limit(200).all()
     over_today = []
     for row in flagged:
         if not row.check_out or not row.check_in or not row.estimated_hours:
@@ -504,12 +510,19 @@ def apply_pm_done(user, payload: dict, source: str) -> dict:
             except (TypeError, ValueError):
                 gear = None
         query = EquipmentPM.query.filter_by(active=True)
+        query = query.join(Equipment, Equipment.id == EquipmentPM.equipment_id).filter(Equipment.deleted_at.is_(None))
         if gear is not None:
             query = query.filter_by(equipment_id=gear.id)
         rows = query.order_by(EquipmentPM.next_due.asc()).limit(1).all() if (gear is not None or not payload.get("task")) else query.filter(EquipmentPM.task.ilike(f"%{(payload.get('task') or '')[:100]}%")).order_by(EquipmentPM.next_due.asc()).limit(1).all()
         row = rows[0] if rows else None
-    if row is None:
-        return {"ok": False, "reply": "I can't find that reminder. Name the equipment and the task."}
+    if row is None or not row.active or not row.equipment or row.equipment.deleted_at:
+        return {"ok": False, "reply": "I can't find that active reminder. Name the equipment and the task."}
+    gear = row.equipment
+    if gear.unit_id and (not gear.unit or gear.unit.deleted_at or gear.unit.property_id != gear.property_id):
+        return {"ok": False, "reply": "That reminder is attached to a removed or mismatched unit."}
+    place = db.session.get(Property, gear.property_id) if gear.property_id else None
+    if not place or place.deleted_at:
+        return {"ok": False, "reply": "That reminder is attached to a removed property."}
     day = _day(payload.get("done_on")) or local_today()
     before = {"last_done": row.last_done.isoformat() if row.last_done else "", "next_due": row.next_due.isoformat() if row.next_due else ""}
     row.last_done = day
@@ -524,7 +537,6 @@ def apply_pm_done(user, payload: dict, source: str) -> dict:
         before,
         {"last_done": day.isoformat(), "next_due": row.next_due.isoformat()},
     )
-    gear = row.equipment
     unit = gear.unit if gear else None
     where = f"unit {unit.unit_number}" if unit else "the record"
     reply = f"{row.task} is logged on the {gear.kind or 'equipment'} in {where}. Next due {row.next_due.isoformat()}."
@@ -588,10 +600,9 @@ def _day(value):
         return None
 
 
-def pm_due_lines(user) -> list[str]:
-    """Reminders due in the next 7 days, or already past due."""
+def pm_due_rows(user) -> list[dict]:
+    """Structured maintenance reminders due in the next 7 days or overdue."""
     from app.services.access import sees_all, visible_property_ids
-    from app.models import Property
 
     query = EquipmentPM.query.filter_by(active=True).filter(EquipmentPM.next_due.isnot(None))
     rows = query.order_by(EquipmentPM.next_due.asc()).limit(200).all()
@@ -600,22 +611,31 @@ def pm_due_lines(user) -> list[str]:
     allowed = None if sees_all(user) else visible_property_ids(user)
     today = local_today()
     week = today + timedelta(days=7)
-    lines = []
+    result = []
     for row in rows:
         if not row.next_due or row.next_due > week:
             continue
         item = gear.get(row.equipment_id)
-        if item is None:
+        if item is None or item.deleted_at:
+            continue
+        if item.unit_id and (not item.unit or item.unit.deleted_at):
+            continue
+        place = db.session.get(Property, item.property_id) if item.property_id else None
+        if not place or place.deleted_at:
             continue
         if allowed is not None and item.property_id not in allowed:
             continue
-        unit = item.unit
-        place = ""
-        if item.property_id:
-            prop = db.session.get(Property, item.property_id)
-            place = prop.name if prop else ""
-        late = (today - row.next_due).days
-        when = f"{late} day{'s' if late != 1 else ''} overdue" if late > 0 else ("due today" if late == 0 else f"due {row.next_due.isoformat()}")
-        where = " ".join(bit for bit in (f"unit {unit.unit_number}" if unit else "", place) if bit)
-        lines.append(f"{row.task} — {item.kind or 'equipment'}{f' in {where}' if where else ''}: {when}")
+        result.append({"reminder": row, "equipment": item, "unit": item.unit, "property": place, "days_overdue": max((today - row.next_due).days, 0)})
+    return result
+
+
+def pm_due_lines(user) -> list[str]:
+    """Text view of maintenance reminders due in the next 7 days or overdue."""
+    lines = []
+    for item in pm_due_rows(user):
+        row, gear, unit, prop = item["reminder"], item["equipment"], item["unit"], item["property"]
+        late = item["days_overdue"]
+        when = f"{late} day{'s' if late != 1 else ''} overdue" if late else ("due today" if row.next_due == local_today() else f"due {row.next_due.isoformat()}")
+        where = " ".join(bit for bit in (f"unit {unit.unit_number}" if unit else "", prop.name if prop else "") if bit)
+        lines.append(f"{row.task} — {gear.kind or 'equipment'}{f' in {where}' if where else ''}: {when}")
     return lines

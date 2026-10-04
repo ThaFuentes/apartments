@@ -43,6 +43,23 @@ def only_property(user) -> Property | None:
     return _visible(user, props[0]) if len(props) == 1 else None
 
 
+def property_picker(user, properties: list[Property] | None = None) -> tuple[list[Property], int | None]:
+    """Put the person's remembered work site first and select it when available."""
+    from app.services.parse import property_catalog
+
+    choices = list(properties if properties is not None else property_catalog(user))
+    preferred = remembered_property(user)
+    if preferred is None:
+        preferred = current_property(user)
+    if preferred is None and choices:
+        # Stable first choice for company-wide roles without a current site.
+        preferred = choices[0]
+    if preferred and any(prop.id == preferred.id for prop in choices):
+        choices.sort(key=lambda prop: (prop.id != preferred.id, prop.name.lower(), prop.id))
+        return choices, preferred.id
+    return choices, None
+
+
 SITE_BOUND_ROLES = {
     "office",
     "assistant_manager",

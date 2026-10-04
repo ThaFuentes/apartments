@@ -11,14 +11,33 @@ from app.services.talk import clear_chat, handle_message, handle_photo
 from app.routes.common import bp, login_required, _history_ok, _key, _new_key
 
 
+def _back_to(default: str = "/") -> str:
+    """Only ever return to a same-site relative path, never a posted absolute URL."""
+    from app.auth import sanitize_next
+
+    target = request.form.get("next") or ""
+    if not (target or "").strip():
+        target = request.referrer or ""
+    return sanitize_next(target, default)
+
+
 @bp.route("/")
 @login_required
 def home():
     if current_user.is_viewer:
         return redirect("/reports")
     from app.services.browse import home_board
+    from app.services.context import property_picker
 
-    return render_template("home.html", board=home_board(current_user.id, current_user), msg_key=_new_key())
+    properties, default_property_id = property_picker(current_user)
+    return render_template(
+        "home.html",
+        board=home_board(current_user.id, current_user),
+        properties=properties,
+        default_property_id=default_property_id,
+        msg_key=_new_key(),
+    )
+
 
 @bp.post("/sites")
 @login_required
@@ -72,18 +91,28 @@ def plan_day():
     from app.services.clock import local_today
     from app.services.pending import commit_apply
     from app.services.records import site_profile as profile_for
+    from app.services.access import can_edit_property, require_edit
 
     profile = profile_for()
     today = local_today(profile.timezone if profile else None).isoformat()
-    from app.models import Property
+    from app.services.context import property_picker
 
-    properties = Property.query.filter(Property.deleted_at.is_(None)).order_by(Property.name.asc()).all()
+    properties, default_property_id = property_picker(current_user)
     if request.method == "POST":
         from app.services.plan import work_cards
 
         stops = []
         ids = request.form.getlist("property_id")
         works = request.form.getlist("work")
+        for raw_id in ids:
+            try:
+                selected_property = db.session.get(Property, int(raw_id))
+            except (TypeError, ValueError):
+                selected_property = None
+            if not selected_property or selected_property.deleted_at:
+                flash("Choose an assigned property for the plan.", "warn")
+                return redirect("/plan")
+            require_edit(current_user, selected_property)
         typed = []
         for unit, title in zip(request.form.getlist("card_unit"), request.form.getlist("card_work")):
             unit = (unit or "").strip()
@@ -96,7 +125,7 @@ def plan_day():
                 prop = db.session.get(Property, int(prop_id))
             except (TypeError, ValueError):
                 continue
-            if not prop or prop.deleted_at:
+            if not prop or prop.deleted_at or not can_edit_property(current_user, prop.id):
                 continue
             items = work_cards(work or "")
             if first:
@@ -120,7 +149,7 @@ def plan_day():
                 stops.append({"property_name": new_name, "city": new_city, "region": "", "items": items})
         if not stops:
             flash("Add a work card for each job. Say the unit on that card.", "warn")
-            return render_template("plan.html", today=today, properties=properties, msg_key=_new_key())
+            return render_template("plan.html", today=today, properties=properties, default_property_id=default_property_id, msg_key=_new_key())
         payload = {"starts_on": request.form.get("day") or today, "stops": stops}
         if (request.form.get("odometer_start") or "").strip():
             payload["odometer_start"] = request.form.get("odometer_start")
@@ -137,7 +166,7 @@ def plan_day():
         if result.get("trip_id"):
             return redirect(f"/trips/{result['trip_id']}")
         return redirect("/trips")
-    return render_template("plan.html", today=today, properties=properties, msg_key=_new_key())
+    return render_template("plan.html", today=today, properties=properties, default_property_id=default_property_id, msg_key=_new_key())
 
 @bp.post("/log")
 @login_required
@@ -146,15 +175,68 @@ def log_work():
         abort(403)
     from app.services.pending import commit_apply
 
+    raw_property_id = (request.form.get("property_id") or "").strip()
+    try:
+        property_id = int(raw_property_id)
+    except (TypeError, ValueError):
+        flash("Choose a property for this work.", "warn")
+        return redirect("/")
+
+    from app.services.access import require_edit
+    from app.services.files import save_blob
+
+    prop = db.session.get(Property, property_id)
+    require_edit(current_user, prop)
+
+    blob = request.files.get("photo")
+    raw = blob.read() if blob and blob.filename else b""
+    if blob and blob.filename and (not raw or len(raw) > 12 * 1024 * 1024):
+        flash("Choose a photo smaller than 12 MB.", "warn")
+        return redirect("/")
+    mime = ""
+    if raw:
+        try:
+            from PIL import Image
+
+            image = Image.open(__import__("io").BytesIO(raw))
+            image.verify()
+            mime = Image.MIME.get(image.format, "")
+        except Exception:
+            flash("Choose a valid photo image.", "warn")
+            return redirect("/")
+
     payload = {
-        "property_id": request.form.get("property_id") or "",
-        "property_name": request.form.get("new_name") or "",
-        "city": request.form.get("new_city") or "",
+        "property_id": prop.id,
+        "property_name": prop.name,
+        "city": prop.city.name if prop.city else "",
+        "region": prop.city.region if prop.city else "",
         "unit_number": request.form.get("unit_number") or "",
         "title": request.form.get("title") or "",
         "status": "done",
     }
     result = commit_apply(current_user, "log_work", payload, "human", _key() or _new_key())
+    if raw and result.get("ok"):
+        from app.models import Media
+        from app.services.clock import utcnow
+
+        result_job_id = result.get("job_id")
+        result_unit_id = result.get("unit_id")
+        if not result_job_id and not result_unit_id:
+            flash("Work was logged, but the photo could not be attached because no work record was returned.", "warn")
+        else:
+            media = Media(
+                user_id=current_user.id,
+                kind="photo",
+                storage_name=save_blob(raw),
+                mime=mime,
+                caption=(request.form.get("title") or "")[:300],
+                property_id=prop.id,
+                job_id=result_job_id,
+                unit_id=result_unit_id,
+                created_at=utcnow(),
+            )
+            db.session.add(media)
+            db.session.commit()
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
     return redirect("/")
 
@@ -215,13 +297,13 @@ def review():
     accept_all = request.form.get("accept_all") == "1"
     result = batch_confirm(current_user, ids, accept_all=accept_all, source="human")
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return redirect(request.form.get("next") or "/")
+    return redirect(_back_to("/"))
 
 def _pending_response(result, *, ok_flash=True):
     if request.is_json or request.headers.get("Accept") == "application/json":
         return jsonify(result)
     flash(result.get("reply") or "", "ok" if (result.get("ok") if ok_flash else True) else "warn")
-    return redirect(request.form.get("next") or request.referrer or "/")
+    return redirect(_back_to("/"))
 
 
 @bp.post("/pending/<int:pending_id>/confirm")
@@ -266,7 +348,7 @@ def edit_pending(pending_id):
         changes["miles"] = float(request.form.get("miles"))
     result = update_pending(current_user, pending_id, changes)
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return redirect(request.form.get("next") or request.referrer or "/")
+    return redirect(_back_to("/"))
 
 @bp.post("/property/default")
 @login_required
@@ -281,7 +363,7 @@ def property_default():
         "human",
     )
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return redirect(request.form.get("next") or "/")
+    return redirect(_back_to("/"))
 
 
 @bp.post("/property/confirm")
@@ -291,7 +373,7 @@ def property_confirm():
         abort(403)
     result = confirm_property(current_user, "human")
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return redirect(request.form.get("next") or "/")
+    return redirect(_back_to("/"))
 
 @bp.get("/miles")
 @login_required

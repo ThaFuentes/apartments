@@ -238,8 +238,10 @@ def add_units(user, prop: Property, text: str, source: str, building: str = "") 
 
 
 def set_occupancy(user, unit: Unit, occupancy: str, source: str) -> None:
-    before = unit.occupancy or ""
+    before = {"occupancy": unit.occupancy or "", "rentable": bool(unit.rentable)}
     unit.occupancy = occupancy
+    if occupancy in {"occupied", "make_ready"}:
+        unit.rentable = False
     from app.services.access import announce
 
     words = {"occupied": "occupied", "make_ready": "a make ready", "": "cleared"}
@@ -255,8 +257,8 @@ def set_occupancy(user, unit: Unit, occupancy: str, source: str) -> None:
         "update",
         "unit",
         unit.id,
-        {"occupancy": before},
-        {"occupancy": occupancy, "unit_number": unit.unit_number, "property_id": unit.property_id},
+        before,
+        {"occupancy": occupancy, "rentable": bool(unit.rentable), "unit_number": unit.unit_number, "property_id": unit.property_id},
     )
 
 
@@ -432,7 +434,10 @@ def apply_unit_board(user, payload, source) -> dict:
         titles = payload.get("titles") or []
         if isinstance(titles, str):
             titles = split_needs(titles)
-        rows = add_needed(user, unit, titles, source, kind=payload.get("kind") or "", vendor=payload.get("vendor") or "")
+        kind = payload.get("kind") or ""
+        if kind == "task" and unit.occupancy == "occupied":
+            return {"ok": False, "reply": f"Mark unit {unit.unit_number} vacant before adding make-ready work."}
+        rows = add_needed(user, unit, titles, source, kind=kind, vendor=payload.get("vendor") or "")
         if not rows:
             return {"ok": False, "reply": "What does that unit need?"}
         names = ", ".join(row.title for row in rows)
@@ -441,6 +446,8 @@ def apply_unit_board(user, payload, source) -> dict:
             reply += f" Saved by {who}."
         return {"ok": True, "reply": reply, "unit_id": unit.id}
     if action == "done":
+        if unit.occupancy == "occupied":
+            return {"ok": False, "reply": f"Mark unit {unit.unit_number} vacant before changing make-ready work."}
         row, open_rows = complete_task(user, unit, payload.get("title") or "", source)
         if row is None:
             if not open_rows:

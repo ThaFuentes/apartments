@@ -27,7 +27,10 @@
       {% if properties %}
       <fieldset class="stack property-picks">
         <legend>Works at</legend>
-        {% for prop in properties %}
+        {% for prop in properties if prop.id == default_property_id %}
+        <label class="check"><input type="checkbox" name="property_id" value="{{ prop.id }}" {% if properties|length == 1 %}checked{% endif %}> {{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</label>
+        {% endfor %}
+        {% for prop in properties if prop.id != default_property_id %}
         <label class="check"><input type="checkbox" name="property_id" value="{{ prop.id }}" {% if properties|length == 1 %}checked{% endif %}> {{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</label>
         {% endfor %}
       </fieldset>

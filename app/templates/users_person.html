@@ -68,7 +68,10 @@
       <label>At property
         <select name="property_id">
           <option value="">—</option>
-          {% for prop in properties %}
+          {% for prop in properties if prop.id == default_property_id %}
+          <option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+          {% endfor %}
+          {% for prop in properties if prop.id != default_property_id %}
           <option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
           {% endfor %}
         </select>
@@ -96,7 +99,18 @@
     <summary>Properties they can work</summary>
     <form method="post" action="/users/{{ person.id }}/access" class="stack" style="margin-top:0.7rem">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      {% for prop in properties %}
+      {% for prop in properties if prop.id == default_property_id %}
+      {% set row = access.get((person.id, prop.id)) %}
+      <fieldset class="stack">
+        <legend>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</legend>
+        <label class="check"><input type="checkbox" name="see-{{ prop.id }}" value="1" {% if row %}checked{% endif %}> See</label>
+        {% if person.role not in ['owner', 'admin', 'viewer'] %}
+        <label class="check"><input type="checkbox" name="edit-{{ prop.id }}" value="1" {% if row and row.can_edit %}checked{% endif %}> Edit units</label>
+        {% endif %}
+        <label class="check"><input type="checkbox" name="notify-{{ prop.id }}" value="1" {% if row and row.notify %}checked{% endif %}> Notify when units change</label>
+      </fieldset>
+      {% endfor %}
+      {% for prop in properties if prop.id != default_property_id %}
       {% set row = access.get((person.id, prop.id)) %}
       <fieldset class="stack">
         <legend>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</legend>

@@ -376,6 +376,8 @@ def unit_cards(property_id: int, sort: str = "recent", query: str = "", show: st
             continue
         if show == "make_ready" and (unit.occupancy or "") != "make_ready":
             continue
+        if show == "rentable" and not unit.rentable:
+            continue
         if show == "occupied" and (unit.occupancy or "") != "occupied":
             continue
         if show == "needs" and not needed_by.get(unit.id):

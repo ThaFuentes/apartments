@@ -38,7 +38,10 @@
       <a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Home</a>
       <a href="/trips" {% if request.path.startswith('/trips') %}aria-current="page"{% endif %}>Plan</a>
       <a href="/places" {% if request.path.startswith('/places') or request.path.startswith('/properties') %}aria-current="page"{% endif %}>Properties</a>
-      <a href="/ready" {% if request.path.startswith('/ready') or request.path.startswith('/contractors') %}aria-current="page"{% endif %}>Make ready</a>
+      <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
+      <a href="/ready" {% if request.path == '/ready' or request.path.startswith('/contractors') %}aria-current="page"{% endif %}>Make ready</a>
+      <a href="/pm" {% if request.path.startswith('/pm') %}aria-current="page"{% endif %}>Upkeep</a>
+      <a href="/inventory" {% if request.path.startswith('/inventory') %}aria-current="page"{% endif %}>Inventory</a>
       {% if can_manage_people %}
       <a href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>People</a>
       {% endif %}
@@ -76,7 +79,7 @@
       <label>Your office
         <select name="property_id">
           {% for prop in property_choices %}
-          <option value="{{ prop.id }}" {% if header_property_id == prop.id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+          <option value="{{ prop.id }}" {% if (header_property_id or default_property_id) == prop.id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -117,6 +120,7 @@
     <a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Home</a>
     <a href="/trips" {% if request.path.startswith('/trips') %}aria-current="page"{% endif %}>Plan</a>
     <a href="/places" {% if request.path.startswith('/places') or request.path.startswith('/properties') %}aria-current="page"{% endif %}>Properties</a>
+    <a href="/ready" {% if request.path == '/ready' or request.path.startswith('/contractors') %}aria-current="page"{% endif %}>Make ready</a>
     {% if can_manage_people %}
     <a href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>People</a>
     {% endif %}

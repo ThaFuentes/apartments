@@ -1,7 +1,7 @@
 """Property, unit, and equipment record routes."""
 from __future__ import annotations
 
-from flask import abort, flash, redirect, render_template, request
+from flask import abort, flash, make_response, redirect, render_template, request
 from flask_login import current_user
 
 from app.builddb.builddb import db
@@ -48,7 +48,7 @@ def property_detail(property_id):
     if sort not in ("recent", "number"):
         sort = "recent"
     show = request.args.get("show") or ""
-    if show not in ("", "worked", "make_ready", "occupied", "needs"):
+    if show not in ("", "worked", "make_ready", "rentable", "occupied", "needs"):
         show = ""
     building = (request.args.get("building") or "").strip()
     from app.services.board import recent_changes
@@ -210,6 +210,11 @@ def unit_detail(unit_id):
     if job_ids:
         for media in Media.query.filter(Media.job_id.in_(job_ids)).order_by(Media.id.asc()).all():
             photos.setdefault(media.job_id, []).append(media)
+    standalone_photos = (
+        Media.query.filter(Media.job_id.is_(None), Media.property_id == unit.property_id, Media.unit_id == unit.id)
+        .order_by(Media.id.asc())
+        .all()
+    )
     reminders = {}
     gear_ids = [item.id for item in gear]
     if gear_ids:
@@ -240,6 +245,7 @@ def unit_detail(unit_id):
         events=events,
         parts=parts,
         photos=photos,
+        standalone_photos=standalone_photos,
         reminders=reminders,
         contractor_visits=contractor_visits,
         gear=gear,
@@ -315,6 +321,9 @@ def unit_task_add(unit_id):
     kind = (request.form.get("kind") or "task").strip()
     if kind not in ("task", "part", "work_order", "vendor"):
         kind = "task"
+    if kind == "task" and unit.occupancy == "occupied":
+        flash(f"Mark unit {unit.unit_number} vacant before adding make-ready work.", "warn")
+        return redirect(f"/units/{unit.id}")
     add_needed(
         current_user,
         unit,
@@ -534,7 +543,9 @@ def equipment_delete(gear_id):
 @bp.post("/drive")
 @login_required
 def drive():
-    resp = make_response(redirect(request.form.get("next") or "/"))
+    from app.auth import sanitize_next
+
+    resp = make_response(redirect(sanitize_next(request.form.get("next") or "", "/")))
     secure = bool(request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https")
     if request.form.get("on") == "1":
         resp.set_cookie("apt_drive", "1", max_age=60 * 60 * 12, samesite="Lax", httponly=True, secure=secure, path="/")
@@ -555,10 +566,12 @@ def job_edit(job_id):
 
         require_edit(current_user, db.session.get(Property, job.property_id))
     before = {"title": job.title, "detail": job.detail, "status": job.status}
+    from app.auth import sanitize_next
+
     title = (request.form.get("title") or "").strip()
     if not title:
         flash("Work needs a title.", "warn")
-        return redirect(request.form.get("next") or f"/units/{job.unit_id}" if job.unit_id else "/trips")
+        return redirect(sanitize_next(request.form.get("next") or "", f"/units/{job.unit_id}" if job.unit_id else "/trips"))
     job.title = title[:300]
     job.detail = (request.form.get("detail") or "")[:4000]
     status = (request.form.get("status") or job.status).strip().lower()
@@ -566,7 +579,7 @@ def job_edit(job_id):
     audit(current_user.id, "human", "update", "job", job.id, before, {"title": job.title, "detail": job.detail, "status": job.status, "unit_id": job.unit_id, "property_id": job.property_id})
     db.session.commit()
     flash("Work updated and change recorded.", "ok")
-    return redirect(request.form.get("next") or (f"/units/{job.unit_id}" if job.unit_id else "/trips"))
+    return redirect(sanitize_next(request.form.get("next") or "", f"/units/{job.unit_id}" if job.unit_id else "/trips"))
 
 @bp.post("/units/<int:unit_id>/restore")
 @login_required
@@ -587,9 +600,11 @@ def job_delete(job_id):
         abort(403)
     from app.services.pending import commit_apply
 
+    from app.auth import sanitize_next
+
     result = commit_apply(current_user, "soft_delete", {"entity": "job", "entity_id": job_id}, "human", _key() or f"del-job-{job_id}-{_new_key()}")
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return redirect(request.form.get("next") or "/trips")
+    return redirect(sanitize_next(request.form.get("next") or "", "/trips"))
 
 @bp.post("/jobs/<int:job_id>/restore")
 @login_required
@@ -598,6 +613,8 @@ def job_restore(job_id):
         abort(403)
     from app.services.pending import commit_apply
 
+    from app.auth import sanitize_next
+
     result = commit_apply(current_user, "restore", {"entity": "job", "entity_id": job_id}, "human", _key() or f"restore-job-{job_id}-{_new_key()}")
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return redirect(request.form.get("next") or "/trips")
+    return redirect(sanitize_next(request.form.get("next") or "", "/trips"))

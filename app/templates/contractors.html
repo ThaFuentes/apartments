@@ -45,10 +45,9 @@
       <h4>Call to another unit</h4>
       {% if properties %}
       <label>Property
-        <select name="property_id">
-          {% for prop in properties %}
-          <option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
-          {% endfor %}
+        <select name="property_id" required>
+          {% for prop in properties if prop.id == default_property_id %}<option value="{{ prop.id }}" selected>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>{% endfor %}
+          {% for prop in properties if prop.id != default_property_id %}<option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>{% endfor %}
         </select>
       </label>
       {% endif %}
@@ -78,6 +77,66 @@
     <form method="post" action="/contractors/{{ person.id }}/delete" data-confirm="Take {{ person.name }} off the contractor list?">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="ghost">Remove from the list</button>
+    </form>
+
+    <h3>On site now</h3>
+    {% set visits = contractor_visits_for.get(person.id, []) %}
+    {% if visits %}
+    <ul class="list">
+      {% for visit in visits %}
+      <li>
+        <strong>{{ visit.contractor.name if visit.contractor else 'Contractor' }}</strong>
+        · unit {{ visit.unit.unit_number if visit.unit else '—' }} at {{ visit.property.name if visit.property else '—' }}
+        · in {{ visit.check_in|apt_datetime if visit.check_in else '—' }}
+        {% if visit.check_out %}· out {{ visit.check_out|apt_datetime }}{% else %}· on site now{% endif %}
+        {% if visit.estimated_hours %}· est {{ visit.estimated_hours }}h{% endif %}
+        {% if visit.note %}· {{ visit.note }}{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="hint">Not checked in right now.</p>
+    {% endif %}
+
+    <form method="post" action="/contractors/{{ person.id }}/check-in" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h4>Check a contractor in</h4>
+      <label>Unit <input name="unit_number" required placeholder="210"></label>
+      {% if properties %}
+      <label>Property
+        <select name="property_id" required>
+          {% for prop in properties if prop.id == default_property_id %}<option value="{{ prop.id }}" selected>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>{% endfor %}
+          {% for prop in properties if prop.id != default_property_id %}<option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label>Time <input name="check_in" placeholder="8:10 am or 8:10"></label>
+      <label>Estimated time <input name="estimated_hours" type="number" step="0.5" min="0.5" max="72" placeholder="6"></label>
+      <label>For
+        <select name="title">
+          <option value="">{{ person.trade or "Their usual work" }}</option>
+          {% for slug, label in jobs %}
+          <option value="{{ slug }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Check in</button>
+    </form>
+
+    <form method="post" action="/contractors/{{ person.id }}/check-out" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h4>Check a contractor out</h4>
+      <label>Unit <input name="unit_number" required placeholder="210"></label>
+      {% if properties %}
+      <label>Property
+        <select name="property_id" required>
+          {% for prop in properties if prop.id == default_property_id %}<option value="{{ prop.id }}" selected>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>{% endfor %}
+          {% for prop in properties if prop.id != default_property_id %}<option value="{{ prop.id }}">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label>Time <input name="check_out" placeholder="3:45 pm or 15:45"></label>
+      <button type="submit">Check out</button>
     </form>
   </article>
   {% endfor %}

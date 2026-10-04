@@ -8,9 +8,22 @@
     <h1>Make ready</h1>
     <p class="lead">Units that still need trashout, paint, carpet, and the rest. Call a saved contractor onto another unit from here.</p>
     <p><a href="/contractors">Contractor list</a></p>
+    {% if editable and available_units %}
+    <form method="post" action="/ready/start" class="card inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Start a turn
+        <select name="unit_id" required>
+          {% for unit in available_units %}
+          <option value="{{ unit.id }}" {% if unit.property_id == default_property_id and loop.first %}selected{% endif %}>Unit {{ unit.unit_number }}{% if unit.property %} · {{ unit.property.name }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Start make ready</button>
+    </form>
+    {% endif %}
   </div>
   {% if not cards %}
-  <p class="empty">No make-ready units in your properties right now. Mark a unit make ready, then tap trashout, paint, or carpet.</p>
+  <p class="empty">No units on the turn board right now. Start a turn or mark a unit ready to rent below.</p>
   {% endif %}
   {% if on_site %}
   <div class="card stack">
@@ -27,15 +40,18 @@
   {% endif %}
   <div class="stack ready-list">
     {% for card in cards %}
-    <article class="unit-card make-ready">
+    <article class="unit-card{% if card.rentable %} rentable{% elif card.unit.occupancy == 'make_ready' %} make-ready{% endif %}">
       <a href="/units/{{ card.unit.id }}"><strong>Unit {{ card.unit.unit_number }}</strong></a>
       <span class="unit-meta">
         {% if card.property %}<a href="/properties/{{ card.property.id }}?show=make_ready">{{ card.property.name }}</a>{% endif %}
         {% if card.unit.building %} · Building {{ card.unit.building }}{% endif %}
         {% if card.open_count %} · {{ card.open_count }} open{% endif %}
         {% if card.done_count %} · {{ card.done_count }} done{% endif %}
-        {% if card.ready_by %} · Target {{ card.ready_by }}{% endif %}
-        {% if card.days_overdue %} · <span class="overdue">{{ card.days_overdue }} day{% if card.days_overdue != 1 %}s{% endif %} overdue</span>{% endif %}
+        {% if card.move_out_date %} · Move-out {{ card.move_out_date }}{% endif %}
+        {% if card.ready_by %} · Target ready {{ card.ready_by }}{% endif %}
+        {% if card.rentable %} · <strong class="status-ready-rent">READY TO BE RENTED</strong>{% endif %}
+        {% if card.rentable and card.open_count == 0 %} · Make-ready work complete{% endif %}
+        {% if card.days_overdue %} · <strong class="overdue">{{ card.days_overdue }} day{% if card.days_overdue != 1 %}s{% endif %} overdue</strong>{% endif %}
       </span>
       {% if card.jobs %}
       <span class="unit-gear">{% for job in card.jobs %}{{ job }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
@@ -44,12 +60,35 @@
       <span class="hint">Called: {{ card.vendors|join(', ') }}</span>
       {% endif %}
       {% if editable %}
+      {% if not card.rentable %}
+      <form method="post" action="/units/{{ card.unit.id }}/occupancy" class="ready-date">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="occupancy" value="occupied">
+        <input type="hidden" name="next" value="/ready">
+        <button type="submit" class="quiet">Mark occupied</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/units/{{ card.unit.id }}/move-out" class="ready-date">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/ready">
+        <label>Move-out date <input type="date" name="move_out_date" value="{{ card.move_out_date }}"></label>
+        <button type="submit" class="quiet">Save move-out date</button>
+      </form>
       <form method="post" action="/units/{{ card.unit.id }}/ready-by" class="ready-date">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="next" value="/ready">
         <label>Target ready <input type="date" name="ready_by" value="{{ card.ready_by }}"></label>
-        <button type="submit" class="quiet">Save date</button>
+        <button type="submit" class="quiet">Save target</button>
       </form>
+      {% if card.unit.occupancy == 'make_ready' or card.rentable %}
+      <form method="post" action="/units/{{ card.unit.id }}/rentable" class="ready-date">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="rentable" value="{{ '0' if card.rentable else '1' }}">
+        <input type="hidden" name="next" value="/ready">
+        <button type="submit" class="{% if card.rentable %}is-done{% else %}quiet{% endif %}">{% if card.rentable %}Clear rentable status{% else %}Mark ready to rent{% endif %}</button>
+      </form>
+      {% endif %}
+      {% if card.unit.occupancy == 'make_ready' %}
       <ul class="ready-check">
         {% for item in card.checklist %}
         <li>
@@ -63,6 +102,7 @@
         </li>
         {% endfor %}
       </ul>
+      {% endif %}
       {% if contractors %}
       <form method="post" action="/units/{{ card.unit.id }}/call" class="inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

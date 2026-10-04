@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Equipment inventory{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <p class="kicker">Maintenance</p>
+    <h1>Equipment inventory</h1>
+    <p class="lead">Equipment filed{% if selected_property_id and properties.get(selected_property_id) %} at {{ properties[selected_property_id].name }}{% else %} on your assigned properties{% endif %}.</p>
+    <p><a href="/pm">Preventive maintenance</a></p>
+  </div>
+  {% if property_choices|length > 1 %}
+  <form method="get" class="card stack">
+    <label>Property
+      <select name="property" onchange="this.form.submit()">
+        <option value="" {% if show_all_properties %}selected{% endif %}>All assigned properties</option>
+        {% for prop in property_choices %}
+        <option value="{{ prop.id }}" {% if selected_property_id == prop.id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="quiet">Show equipment</button>
+  </form>
+  {% endif %}
+  {% if not equipment %}<p class="empty">No equipment{% if selected_property_id and properties.get(selected_property_id) %} at {{ properties[selected_property_id].name }}{% endif %} has been filed yet.</p>{% endif %}
+  {% for item in equipment %}
+  <article class="card">
+    <h2>{{ (item.kind or 'Equipment')|title }}{% if item.brand %} · {{ item.brand }}{% endif %}</h2>
+    <p class="hint">
+      {% if item.unit_id %}<a href="/units/{{ item.unit_id }}">Unit {{ item.unit.unit_number if item.unit else '—' }}</a>{% endif %}
+      {% if properties.get(item.property_id) %} · <a href="/properties/{{ item.property_id }}">{{ properties[item.property_id].name }}</a>{% endif %}
+      {% if item.model_number %} · Model {{ item.model_number }}{% endif %}
+      {% if item.serial_number %} · Serial {{ item.serial_number }}{% endif %}
+    </p>
+    {% if item.notes %}<p>{{ item.notes }}</p>{% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}

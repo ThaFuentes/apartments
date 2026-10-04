@@ -63,7 +63,7 @@
   </details>
   {% endfor %}
   {% endif %}
-  <form method="post" action="/log" class="card stack" data-place-search data-mode="one">
+  <form method="post" action="/log" class="card stack" data-place-search data-mode="one" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="log-{{ msg_key }}">
     {% if here %}
@@ -79,6 +79,7 @@
     {% endif %}
     <label>Unit number <input name="unit_number" inputmode="text" autocomplete="off" placeholder="Only if you have it"></label>
     <label>What you did <input name="title" required placeholder="AC install, work order, eval…"></label>
+    <label>Photo <input type="file" name="photo" accept="image/*" capture="environment"></label>
     <button type="submit">Save this work</button>
   </form>
   <div class="composer-dock">

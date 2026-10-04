@@ -165,6 +165,8 @@ class AptTest07(AptTestBase):
         ensure_property("Bentwood", "Odessa", "Texas", user.id, address="1 Main St")
         ensure_property("Bentwood", "Lubbock", "Texas", user.id, address="2 Main St")
         wood = ensure_property("Woodview", "Odessa", "Texas", user.id)
+        user.default_property_id = wood.id
+        user.default_property_confirmed = True
         db.session.commit()
         asked = handle_message(user, "delete all bentwood apartments", idempotency_key="del-all")
         self.assertNotIn("named all", asked["reply"].lower())
@@ -190,7 +192,9 @@ class AptTest07(AptTestBase):
         client.post("/login", data={"username": "alex", "password": "field-pass"})
         home = client.get("/")
         self.assertNotIn(b"Not in the list", home.data)
-        self.assertIn(b"data-name", home.data)
+        self.assertIn(b'<select name="property_id" required>', home.data)
+        self.assertIn(f'<option value="{wood.id}" selected>Woodview'.encode(), home.data)
+        self.assertNotIn(b"data-place-search", home.data)
         plan = client.get("/plan")
         self.assertEqual(plan.status_code, 200)
         self.assertIn(b"Make a plan", plan.data)
@@ -199,6 +203,13 @@ class AptTest07(AptTestBase):
         self.assertIn(b"Make a plan", trips.data)
         with client.session_transaction() as sess:
             token = sess.get("csrf_token")
+        logged = client.post(
+            "/log",
+            data={"csrf_token": token, "property_id": str(wood.id), "unit_number": "12", "title": "Replaced hallway bulb"},
+            follow_redirects=True,
+        )
+        self.assertEqual(logged.status_code, 200)
+        self.assertTrue(Job.query.filter_by(property_id=wood.id, title="Replaced hallway bulb").first())
         saved = client.post(
             "/plan",
             data={"csrf_token": token, "day": "2026-09-24", "property_id": str(wood.id), "work": "Replace the AC"},

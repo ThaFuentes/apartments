@@ -131,6 +131,8 @@ def call_to_unit(user, contractor: Contractor, unit, title: str = "", source: st
     from app.services.board import add_needed, set_occupancy
     from app.services.ready import job_label, match_job
 
+    if (unit.occupancy or "") == "occupied":
+        return {"ok": False, "reply": f"Mark unit {unit.unit_number} vacant before sending make-ready work."}
     job = (title or "").strip()
     slug = match_job(job) if job else ""
     if slug:
@@ -140,6 +142,7 @@ def call_to_unit(user, contractor: Contractor, unit, title: str = "", source: st
     remember_contractor(user, contractor.name, phone=contractor.phone, trade=contractor.trade)
     if (unit.occupancy or "") != "occupied" and (unit.occupancy or "") != "make_ready":
         set_occupancy(user, unit, "make_ready", source)
+    unit.rentable = False
     rows = add_needed(user, unit, [job[:200]], source, kind="vendor", vendor=contractor.name)
     who = person_label(getattr(user, "id", None))
     reply = f"Called {contractor.name} to unit {unit.unit_number}"

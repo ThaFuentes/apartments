@@ -739,7 +739,7 @@
   }
 
   const mapBox = document.getElementById("map");
-  const mapDataEl = document.getElementById("map-data");
+  const mapDataEl = document.getElementById("apt-map-data");
   if (mapBox && mapDataEl && window.L) {
     let data = { pins: [], home: null };
     try { data = JSON.parse(mapDataEl.textContent || "{}"); } catch (err) {}

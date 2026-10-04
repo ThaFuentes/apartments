@@ -168,11 +168,11 @@ class GuestAccessTests(AptTestBase):
         settings_html = (root / "app/templates/settings.html").read_text()
         self.assertNotIn("jsdelivr", map_html)
         self.assertIn("vendor/leaflet", map_html)
-        self.assertIn('id="map-data"', map_html)
+        self.assertIn('id="apt-map-data"', map_html)
         self.assertNotIn("<script>", settings_html)
         self.assertIn('id="provider-info"', settings_html)
         js = (root / "app/static/js/apt.js").read_text()
-        self.assertIn('getElementById("map-data")', js)
+        self.assertIn('getElementById("apt-map-data")', js)
         self.assertIn('getElementById("provider-info")', js)
         video = root / "app/static/intro/open.mp4"
         self.assertLess(video.stat().st_size, 500 * 1024)

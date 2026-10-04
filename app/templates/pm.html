@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Preventive maintenance{% endblock %}
+{% block main %}
+<section class="sheet">
+  <div class="hero">
+    <p class="kicker">Maintenance</p>
+    <h1>Preventive maintenance</h1>
+    <p class="lead">Due this week and overdue reminders{% if selected_property_id and property_choices|length > 1 %} at the selected property{% elif show_all_properties %} across your assigned properties{% else %} at your default property{% endif %}.</p>
+    <p><a href="/inventory">Equipment inventory</a></p>
+  </div>
+  {% if property_choices|length > 1 %}
+  <form method="get" class="card stack">
+    <label>Property
+      <select name="property" onchange="this.form.submit()">
+        <option value="" {% if show_all_properties %}selected{% endif %}>All assigned properties</option>
+        {% for prop in property_choices %}
+        <option value="{{ prop.id }}" {% if selected_property_id == prop.id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="quiet">Show reminders</button>
+  </form>
+  {% endif %}
+  {% if not reminders %}<p class="empty">No preventive-maintenance reminders are due this week.</p>{% endif %}
+  {% for item in reminders %}
+  <article class="card stack">
+    <h2>{{ item.reminder.task }}</h2>
+    <p class="hint">{{ (item.equipment.kind or 'Equipment')|title }}{% if item.equipment.brand %} · {{ item.equipment.brand }}{% endif %}{% if item.equipment.model_number %} · {{ item.equipment.model_number }}{% endif %}</p>
+    <p>
+      {% if item.unit %}<a href="/units/{{ item.unit.id }}">Unit {{ item.unit.unit_number }}</a>{% endif %}
+      {% if item.property %} · <a href="/properties/{{ item.property.id }}">{{ item.property.name }}</a>{% endif %}
+      · Due {{ item.reminder.next_due|apt_when }}
+      {% if item.days_overdue %} · <strong class="overdue">{{ item.days_overdue }} day{% if item.days_overdue != 1 %}s{% endif %} overdue</strong>{% endif %}
+    </p>
+    {% if item.editable %}
+    <form method="post" action="/pm/{{ item.reminder.id }}/done">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="/pm">
+      <button type="submit">Mark done · schedule next</button>
+    </form>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endblock %}
