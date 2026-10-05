@@ -53,12 +53,19 @@ def refresh_notices(user) -> None:
     profile = site_profile()
     today = local_today(profile.timezone if profile else None)
     start, end = week_bounds(today)
-    have = Report.query.filter(
-        Report.kind.in_(("weekly", "company")),
-        Report.period_start == start,
-        Report.deleted_at.is_(None),
-        Report.status.in_(("ready", "sent")),
-    ).first()
+    from app.services.access import role_of
+    from app.services.report_scope import report_lane
+
+    if role_of(user) in ("owner", "admin"):
+        rows = Report.query.filter(
+            Report.kind.in_(("weekly", "company")),
+            Report.period_start == start,
+            Report.deleted_at.is_(None),
+            Report.status.in_(("ready", "sent")),
+        ).all()
+        have = any(report_lane(row)["audience"] == "company" for row in rows)
+    else:
+        have = True
     if today.weekday() >= 4 and not have:
         _ensure(user.id, "weekly_due", "The weekly company report is not saved for this week yet.", "/reports")
     else:

@@ -223,6 +223,7 @@ def create_app() -> Flask:
         share = {"on": False, "viewers": 0, "fresh": False}
         notices = []
         pending_n = 0
+        pm_n = 0
         chat_lines = []
         chat_cards = []
         can_manage_people = False
@@ -273,6 +274,13 @@ def create_app() -> Flask:
                 .all()
             )
             pending_n = PendingAction.query.filter_by(user_id=current_user.id, status="pending").count()
+            try:
+                from app.services.upkeep import pm_count
+
+                pm_n = pm_count(current_user)
+            except Exception:
+                db.session.rollback()
+                pm_n = 0
             if getattr(current_user, "role", "") != "viewer":
                 from app.models import ChatMessage
                 from app.services.records import loads as _loads
@@ -353,12 +361,12 @@ def create_app() -> Flask:
         chat_key = _secrets.token_hex(8)
         assistant_name = "Apt"
         try:
-            from app.services.records import site_profile
+            from app.services.ai_voice import spoken_name
 
-            profile = site_profile()
-            if profile and (profile.assistant_name or "").strip():
-                assistant_name = profile.assistant_name.strip()
+            who = current_user if getattr(current_user, "is_authenticated", False) else None
+            assistant_name = spoken_name(who)
         except Exception:
+            db.session.rollback()
             assistant_name = "Apt"
         return {
             "csrf_token": token,
@@ -373,6 +381,7 @@ def create_app() -> Flask:
             "share": share,
             "notices": notices,
             "pending_n": pending_n,
+            "pm_n": pm_n,
             "chat_lines": chat_lines,
             "chat_cards": chat_cards,
             "chat_key": chat_key,

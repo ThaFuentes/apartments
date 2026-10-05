@@ -329,6 +329,9 @@ def complete_task(user, unit: Unit, hint: str, source: str) -> tuple[UnitTask | 
     best.status = "done"
     best.done_by_id = user.id
     best.done_at = utcnow()
+    best.return_note = ""
+    best.returned_by_id = None
+    best.returned_at = None
     from app.services.access import announce
 
     announce(
@@ -530,6 +533,42 @@ def unit_history(unit_id: int, limit: int = 100) -> list[dict]:
     return history
 
 
+def _task_change(task) -> dict:
+    """One make-ready card: who finished it, and who sent it back."""
+    unit = task.unit.unit_number if task.unit else ""
+    occupancy = (task.unit.occupancy or "") if task.unit else ""
+    note = (task.return_note or "").strip()
+    sent_back = bool(note) and task.status != "done"
+    if task.status == "done":
+        who_id = task.done_by_id or task.created_by_id
+        when = task.done_at or task.created_at
+        kind = "done"
+    elif sent_back:
+        who_id = task.returned_by_id or task.created_by_id
+        when = task.returned_at or task.created_at
+        kind = "sent back"
+    else:
+        who_id = task.created_by_id
+        when = task.created_at
+        kind = task.status or "needed"
+    show_done = task.status != "done" and bool(task.done_by_id)
+    return {
+        "when": when,
+        "who": person_label(who_id),
+        "what": task.title,
+        "where": f"unit {unit}" if unit else "",
+        "kind": kind,
+        "record": "task",
+        "task_id": task.id,
+        "unit_id": task.unit_id,
+        "status": task.status,
+        "occupancy": occupancy,
+        "note": note if sent_back else "",
+        "done_by": person_label(task.done_by_id) if show_done else "",
+        "done_at": task.done_at if show_done else None,
+    }
+
+
 def recent_changes(property_id: int, limit: int = 12) -> list[dict]:
     from app.models import Equipment
 
@@ -549,6 +588,7 @@ def recent_changes(property_id: int, limit: int = 12) -> list[dict]:
                 "what": job.title,
                 "where": f"unit {unit}" if unit else "",
                 "kind": "work",
+                "record": "work",
             }
         )
     for task in (
@@ -558,17 +598,7 @@ def recent_changes(property_id: int, limit: int = 12) -> list[dict]:
         .limit(limit)
         .all()
     ):
-        unit = task.unit.unit_number if task.unit else ""
-        who_id = task.done_by_id if task.status == "done" and task.done_by_id else task.created_by_id
-        rows.append(
-            {
-                "when": task.done_at or task.created_at,
-                "who": person_label(who_id),
-                "what": task.title,
-                "where": f"unit {unit}" if unit else "",
-                "kind": task.status,
-            }
-        )
+        rows.append(_task_change(task))
     for item in (
         Equipment.query.filter_by(property_id=property_id)
         .filter(Equipment.deleted_at.is_(None))
@@ -584,6 +614,7 @@ def recent_changes(property_id: int, limit: int = 12) -> list[dict]:
                 "what": " ".join(bit for bit in (item.brand, item.kind) if bit) or "equipment",
                 "where": f"unit {unit}" if unit else "",
                 "kind": "equipment",
+                "record": "equipment",
             }
         )
     rows.sort(key=lambda row: row["when"] or utcnow(), reverse=True)

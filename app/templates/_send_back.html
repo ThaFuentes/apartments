@@ -1,0 +1,8 @@
+<form method="post" action="/tasks/{{ task_id }}/send-back" class="send-back">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+  <label>Still needs
+    <input name="note" required maxlength="2000" value="{{ note or '' }}" placeholder="Needs a second coat in the bedrooms">
+  </label>
+  <button type="submit" class="quiet">{{ button or "Send back" }}</button>
+</form>

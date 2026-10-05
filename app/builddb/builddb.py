@@ -87,9 +87,15 @@ def _evolve_field_log():
             "tonnage": "VARCHAR(40) NOT NULL DEFAULT ''",
             "seer": "VARCHAR(40) NOT NULL DEFAULT ''",
             "refrigerant": "VARCHAR(40) NOT NULL DEFAULT ''",
+            "how_to": "TEXT NULL",
         },
         "contractors": {
             "company": "VARCHAR(160) NOT NULL DEFAULT ''",
+        },
+        "unit_tasks": {
+            "returned_by_id": "INT NULL",
+            "returned_at": "DATETIME NULL",
+            "return_note": "TEXT NULL",
         },
     }
     for table, columns in additions.items():
@@ -138,6 +144,8 @@ def _evolve_credentials():
         statements.append("ALTER TABLE api_credentials ADD COLUMN burst_tokens INT NOT NULL DEFAULT 5000")
     if "burst_seconds" not in have:
         statements.append("ALTER TABLE api_credentials ADD COLUMN burst_seconds INT NOT NULL DEFAULT 180")
+    if "shared" not in have:
+        statements.append("ALTER TABLE api_credentials ADD COLUMN shared TINYINT(1) NOT NULL DEFAULT 0")
     if not statements:
         return
     with db.engine.begin() as conn:
@@ -167,6 +175,14 @@ def _evolve_mail():
         statements.append("ALTER TABLE assistant_profiles ADD COLUMN smtp_from VARCHAR(200) NOT NULL DEFAULT ''")
     if "smtp_password_ciphertext" not in have:
         statements.append("ALTER TABLE assistant_profiles ADD COLUMN smtp_password_ciphertext TEXT NULL")
+    if "platform_instructions" not in have:
+        statements.append("ALTER TABLE assistant_profiles ADD COLUMN platform_instructions TEXT NULL")
+    if "personal_name" not in have:
+        statements.append("ALTER TABLE assistant_profiles ADD COLUMN personal_name VARCHAR(80) NOT NULL DEFAULT ''")
+    if "personal_instructions" not in have:
+        statements.append("ALTER TABLE assistant_profiles ADD COLUMN personal_instructions TEXT NULL")
+    if "key_source" not in have:
+        statements.append("ALTER TABLE assistant_profiles ADD COLUMN key_source VARCHAR(16) NOT NULL DEFAULT 'collective'")
     if not statements:
         return
     with db.engine.begin() as conn:

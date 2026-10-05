@@ -3,18 +3,38 @@
 {% block main %}
 <section class="sheet">
   <h1>Reports</h1>
-  <p class="lead">Weekly and company copies for bosses. They open them with a username. An email is only used when that person has one.</p>
+  <p class="lead">The weekly report is for property managers, regional managers, and admins. It covers their properties and who did the work. One person can still get their own week. Saved copies stay apart: you see your properties, your region, or your own week. The company report stays with the owner, admins, and bosses.</p>
   {% if current_user.role != 'viewer' %}
   <form method="post" action="/reports/build" class="row-actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
+    {% if team_report %}
     <button type="submit" name="kind" value="weekly">Save weekly report</button>
+    {% if current_user.role == 'owner' or current_user.role == 'admin' %}
     <button type="submit" name="kind" value="company">Save company report</button>
+    {% endif %}
+    {% else %}
+    <button type="submit" name="kind" value="person">Save my week</button>
+    {% endif %}
+  </form>
+  {% if team_report and people %}
+  <form method="post" action="/reports/build" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ msg_key }}-person">
+    <label>One person
+      <select name="person_id">
+        {% for person in people %}
+        <option value="{{ person.id }}">{{ person.display_name or person.username }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" name="kind" value="person">Save this person's week</button>
   </form>
   {% endif %}
-  <h2>Saved</h2>
+  {% endif %}
+  <h2>Saved for this login</h2>
   {% if not saved %}
-  <p class="empty">No saved report yet. The live week is below until you save it for the company.</p>
+  <p class="empty">No saved report yet. The live week is below until you save it.</p>
   {% endif %}
   <ul class="list">
     {% for report in saved %}
@@ -23,12 +43,21 @@
   </ul>
   {% if preview %}
   <h2>This week, not saved yet</h2>
+  {% if preview.audience_line %}<p>{{ preview.audience_line }}</p>{% endif %}
   <p>{{ preview.period.start }} – {{ preview.period.end }} · <a href="/reports/preview.csv">Download CSV</a></p>
   <ul>
     <li>Went {{ preview.totals.jobs_went }}, completed {{ preview.totals.jobs_done }}, units {{ preview.totals.units }}</li>
     <li>Gas {{ money(preview.expenses.gas) }} · food {{ money(preview.expenses.food) }} · other {{ money(preview.expenses.other) }}</li>
     <li>Miles about {{ preview.miles.estimate }}</li>
   </ul>
+  {% if preview.people %}
+  <h2>Who did the work</h2>
+  <ul>
+    {% for row in preview.people %}
+    <li>{{ row.name }}: {{ row.jobs }} jobs, {{ row.done }} completed, {{ money(row.spend_cents) }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
   {% endif %}
 </section>
 {% endblock %}

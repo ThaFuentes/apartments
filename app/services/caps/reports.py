@@ -20,7 +20,7 @@ CAPS = [
             "company report for the bosses",
             "property report for woodview",
         ),
-        howto="Say weekly, company, or property report. It is staged and waits for your yes.",
+        howto="Say weekly report for the managers, regionals, and admins, or one person's week. Each copy stays with that login. It is staged and waits for your yes.",
     ),
     Capability(
         tool="send_report",
@@ -28,6 +28,6 @@ CAPS = [
         says=(
             "send the report to the bosses",
         ),
-        howto="Say send the report. It goes to the boss logins, and emails only the ones with an email.",
+        howto="Say send the report. Only the company report goes to the boss logins. A property or person report stays in its lane.",
     ),
 ]

@@ -10,7 +10,7 @@ The operator said this in plain words: if there is an AI, have it take the sente
 
 1. **Card answers stay local, and they stay first.** "Yes", "yes, save it", "no", and a bare answer such as "odessa" or a unit number close a card this app already opened. They are not a new job. Sending them to a model first burns a key and often returns prose without pressing the confirm button, so the card sits there forever. Leave these in front of the model.
 
-2. **Then the saved keys.** `_from_model` calls `collect_tool_calls` in `app/services/providers.py`. Keys run in the owner's `use_order`. The first real answer wins. A tool call is the action. The reply in the thread is what happened.
+2. **Then the saved keys.** `_from_model` calls `collect_tool_calls` in `app/services/providers.py`. A person who picked their own keys uses that list. Everyone else uses the owner's keys in `use_order`, then any key a teammate marked shared. The first real answer wins. A tool call is the action. The reply in the thread is what happened. Platform rules (no flirting, no sexual talk) are always in the prompt. A person can change the assistant's name and add notes. They cannot turn those rules off.
 
 3. **Local chat is the backup.** `_local_fallback` runs only when there is no key, every key is cooling down, out of quota, errors, or returns nothing (`_from_model` returns `None` or `{"failed": True}`). Local chat must still file a trip, a plan, a property, a unit, an address, gear, and a record question. She has to be able to work with the keys off.
 

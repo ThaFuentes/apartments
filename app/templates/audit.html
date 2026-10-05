@@ -3,7 +3,7 @@
 {% block main %}
 <section class="sheet">
   <h1>Audit log</h1>
-  <p class="lead">Every change on the units you can see: who made it, when, and what it looked like before.{% if owner_console %} Owners reverse product writes from the <a href="/security/audit">security console</a>.{% endif %}</p>
+  <p class="lead">Every change on the units you can see: who made it, when, and what it looked like before.{% if can_reverse %} Regionals, admins, and the owner can put removed inventory back.{% endif %}{% if owner_console %} The <a href="/security/audit">security console</a> still has the full product write log.{% endif %}</p>
   <form method="get" action="/audit" class="filters">
     <label>Property
       <select name="property">
@@ -29,6 +29,41 @@
     <button type="submit">Show</button>
   </form>
   <p class="hint">{{ total }} change{{ '' if total == 1 else 's' }} in the last {{ days }} days{% if shown < total %} · showing the newest {{ shown }}{% endif %}.</p>
+  {% if can_reverse %}
+  <details class="card">
+    <summary>Put inventory back{% if removed_total %} · {{ removed_total }} still removed{% endif %}</summary>
+    <p class="hint">This is the inventory one person removed in the last {{ days if days < 30 else 30 }} days, on properties you cover. It does not rewind every other change.</p>
+    {% if removers %}
+    <form method="post" action="/audit/restore-inventory" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="days" value="{{ days if days < 30 else 30 }}">
+      <input type="hidden" name="who" value="{{ filters.who }}">
+      <input type="hidden" name="property" value="{{ filters.property }}">
+      <label>Person
+        <select name="person_id">
+          {% for person in removers %}
+          <option value="{{ person.id }}">{{ person.name }} · {{ person.count }} removed</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Put their inventory back</button>
+    </form>
+    <ul class="list">
+      {% for row in removed %}
+      <li>{{ row.who }} removed {{ row.label }} · {{ row.where }} · {{ row.when|apt_datetime }}
+        <form method="post" action="/audit/{{ row.id }}/reverse" class="row-actions">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="days" value="{{ days }}">
+          <button type="submit">Put this back</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No removed inventory is waiting on your properties.</p>
+    {% endif %}
+  </details>
+  {% endif %}
   {% if not entries %}
   <p class="empty">Nothing recorded yet. Unit edits, make readies, and notes show up here with the person's name.</p>
   {% endif %}

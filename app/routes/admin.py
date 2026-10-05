@@ -27,22 +27,23 @@ def settings():
         abort(403)
     from app.services.records import site_profile
 
-    profile = site_profile()
-    keys = []
-    providers = []
-    if current_user.role == "owner":
-        from app.services import budget
-        from app.services.providers import PROVIDERS
+    from app.services import budget
+    from app.services.access import can_manage_company_settings
+    from app.services.ai_voice import member_profile, shared_key_labels, spoken_name
+    from app.services.providers import PROVIDERS
 
-        keys = ApiCredential.query.filter_by(user_id=current_user.id).all()
-        keys.sort(key=lambda row: (row.use_order or 99, 0 if row.preferred else 1, row.id))
-        for row in keys:
-            row.provider_label = (PROVIDERS.get(row.provider) or {}).get("label") or row.provider
-            row.used = budget.spent(row)
-        providers = [
-            {"id": key, "label": spec["label"], "hint": spec["hint"], "models": list(spec["models"])}
-            for key, spec in PROVIDERS.items()
-        ]
+    profile = site_profile()
+    house = can_manage_company_settings(current_user)
+    mine = None if current_user.role == "owner" else member_profile(current_user)
+    keys = ApiCredential.query.filter_by(user_id=current_user.id).all()
+    keys.sort(key=lambda row: (row.use_order or 99, 0 if row.preferred else 1, row.id))
+    for row in keys:
+        row.provider_label = (PROVIDERS.get(row.provider) or {}).get("label") or row.provider
+        row.used = budget.spent(row)
+    providers = [
+        {"id": key, "label": spec["label"], "hint": spec["hint"], "models": list(spec["models"])}
+        for key, spec in PROVIDERS.items()
+    ]
     if request.method == "POST":
         if current_user.role != "owner":
             abort(403)
@@ -52,6 +53,7 @@ def settings():
             "assistant_name": request.form.get("assistant_name"),
             "tone": request.form.get("tone"),
             "always_ask": request.form.get("always_ask"),
+            "platform_instructions": request.form.get("platform_instructions"),
             "default_city": request.form.get("default_city"),
             "default_region": request.form.get("default_region"),
             "report_voice": request.form.get("report_voice"),
@@ -71,7 +73,56 @@ def settings():
         result = commit_apply(current_user, "update_settings", payload, "human", _key() or _new_key())
         flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
         return redirect("/settings")
-    return render_template("settings.html", profile=profile, keys=keys, providers=providers, msg_key=_new_key())
+    return render_template(
+        "settings.html",
+        profile=profile,
+        mine=mine,
+        house=house,
+        house_name=spoken_name(None),
+        shared_keys=shared_key_labels() if current_user.role == "owner" else [],
+        keys=keys,
+        providers=providers,
+        msg_key=_new_key(),
+    )
+
+
+@bp.post("/settings/assistant")
+@login_required
+def settings_assistant():
+    """A person's name, added notes, and whether chat uses their key or the collective."""
+    if current_user.is_viewer or current_user.role == "owner":
+        abort(403)
+    from app.services.ai_voice import member_profile
+    from app.services.records import audit
+
+    name = (request.form.get("personal_name") or "").strip()[:80]
+    notes = (request.form.get("personal_instructions") or "").strip()[:4000]
+    source = (request.form.get("key_source") or "collective").strip().lower()
+    if source not in ("collective", "own"):
+        source = "collective"
+    row = member_profile(current_user, create=True)
+    before = {
+        "personal_name": row.personal_name or "",
+        "personal_instructions": row.personal_instructions or "",
+        "key_source": row.key_source or "collective",
+    }
+    row.personal_name = name
+    row.personal_instructions = notes
+    row.key_source = source
+    audit(current_user.id, "human", "update", "assistant_profile", row.id, before, {
+        "personal_name": name,
+        "personal_instructions": notes,
+        "key_source": source,
+    })
+    db.session.commit()
+    own = [item for item in ApiCredential.query.filter_by(user_id=current_user.id, active=True).all()]
+    if source == "own" and not own:
+        flash("Saved. You have no key turned on, so the collective keys still answer.", "ok")
+    elif source == "own":
+        flash("Saved. Your keys answer. The platform rules still apply.", "ok")
+    else:
+        flash("Saved. The collective keys answer. Your name and notes still apply.", "ok")
+    return redirect("/settings")
 
 
 @bp.post("/settings/mail-test")
@@ -94,8 +145,10 @@ def settings_mail_test():
 
 
 @bp.post("/settings/key")
-@owner_required
+@login_required
 def settings_key():
+    if current_user.is_viewer:
+        abort(403)
     from app.services.providers import PROVIDERS, check_key
 
     provider = (request.form.get("provider") or "").strip().lower()
@@ -123,6 +176,7 @@ def settings_key():
         active=True,
         preferred=others == 0,
         use_order=others + 1,
+        shared=request.form.get("shared") == "1" and current_user.role != "owner",
         model_checked_at=utcnow(),
         created_at=utcnow(),
     )
@@ -131,7 +185,8 @@ def settings_key():
 
     audit(current_user.id, "human", "update", "api_credential", None, {}, {"provider": provider, "last4": row.last4, "model": row.model_id})
     db.session.commit()
-    flash(f"Saved the {PROVIDERS[provider]['label']} key ····{row.last4}. Model {row.model_id}.", "ok")
+    shared_note = " Shared with the collective." if row.shared else ""
+    flash(f"Saved the {PROVIDERS[provider]['label']} key ····{row.last4}. Model {row.model_id}.{shared_note}", "ok")
     return redirect("/settings")
 
 
@@ -143,8 +198,10 @@ def _bounded_int(name: str, fallback: int, low: int, high: int) -> int:
 
 
 @bp.post("/settings/key/<int:key_id>")
-@owner_required
+@login_required
 def settings_key_update(key_id):
+    if current_user.is_viewer:
+        abort(403)
     row = ApiCredential.query.filter_by(id=key_id, user_id=current_user.id).first()
     if not row:
         abort(404)
@@ -154,6 +211,8 @@ def settings_key_update(key_id):
     base_url = (request.form.get("base_url") or "").strip()
     row.base_url = base_url[:300] or None
     row.active = request.form.get("active") == "1"
+    if current_user.role != "owner":
+        row.shared = request.form.get("shared") == "1"
     row.max_reply_tokens = _bounded_int("max_reply_tokens", row.max_reply_tokens or 0, 0, 100000)
     row.burst_tokens = _bounded_int("burst_tokens", row.burst_tokens or 5000, 0, 1000000)
     minutes = _bounded_int("burst_minutes", (row.burst_seconds or 180) // 60, 1, 1440)
@@ -176,8 +235,10 @@ def settings_key_update(key_id):
 
 
 @bp.post("/settings/key/<int:key_id>/prefer")
-@owner_required
+@login_required
 def settings_key_prefer(key_id):
+    if current_user.is_viewer:
+        abort(403)
     row = ApiCredential.query.filter_by(id=key_id, user_id=current_user.id).first()
     if not row:
         abort(404)
@@ -194,8 +255,10 @@ def settings_key_prefer(key_id):
 
 
 @bp.post("/settings/key/<int:key_id>/delete")
-@owner_required
+@login_required
 def settings_key_delete(key_id):
+    if current_user.is_viewer:
+        abort(403)
     row = ApiCredential.query.filter_by(id=key_id, user_id=current_user.id).first()
     if row:
         db.session.delete(row)

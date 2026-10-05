@@ -18,6 +18,8 @@
         <label>Name <input name="assistant_name" value="{{ profile.assistant_name if profile else 'Apt' }}"></label>
         <label>How it talks <input name="tone" value="{{ profile.tone if profile else '' }}" placeholder="talking to my boss"></label>
         <label>Always ask <textarea name="always_ask" rows="3" placeholder="Leave blank if it should not add questions">{{ profile.always_ask if profile else '' }}</textarea></label>
+        <p class="lead">Already on for every login, including people who bring their own key: no flirting and no sexual talk. They can change the name and add their own notes. They cannot turn that off.</p>
+        <label>Platform notes <textarea name="platform_instructions" rows="4" maxlength="4000" placeholder="Add anything else the assistant must always follow.">{{ profile.platform_instructions if profile and profile.platform_instructions else '' }}</textarea></label>
       </div>
     </details>
     <details>
@@ -65,8 +67,36 @@
       <button type="submit">Send test email</button>
     </form>
   </details>
+  {% endif %}
+  {% if current_user.role != 'owner' %}
+  <h2>Your assistant</h2>
+  <form method="post" action="/settings/assistant" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p class="lead">The house assistant is named {{ house_name }}. Leave the name blank to keep that name. What you write is added after the house style. The platform rules stay on, including when you bring your own key.</p>
+    <label>Name <input name="personal_name" value="{{ mine.personal_name if mine and mine.personal_name else '' }}" placeholder="{{ house_name }}" maxlength="80"></label>
+    <label>Your notes
+      <textarea name="personal_instructions" rows="5" maxlength="4000" placeholder="Call me by my first name. Short answers. Remind me to write the unit number.">{{ mine.personal_instructions if mine and mine.personal_instructions else '' }}</textarea>
+    </label>
+    {% if not house %}
+    <p class="hint">Which key answers</p>
+    <label class="check"><input type="radio" name="key_source" value="collective" {% if not mine or mine.key_source != 'own' %}checked{% endif %}> Collective keys</label>
+    <label class="check"><input type="radio" name="key_source" value="own" {% if mine and mine.key_source == 'own' %}checked{% endif %}> My own keys</label>
+    <p class="hint">No key, or Collective, uses the house keys. A key you share is used by people on the collective after the house keys. Your own keys stay guarded by the same platform rules.</p>
+    {% endif %}
+    <button type="submit">Save my assistant</button>
+  </form>
+  {% endif %}
   <h2>AI keys</h2>
-  <p class="lead">Add the keys you already pay for or a free Gemini key. 1st is used first, then 2nd, then 3rd, if a key is out of quota. Only the last 4 characters are shown. You can also say “make Gemini 1st” in chat.</p>
+  {% if current_user.role == 'owner' %}
+  <p class="lead">These are the collective keys. A person with no key of their own uses this list. A key someone shares is tried after these. 1st is used first, then 2nd, then 3rd, if a key is out of quota. Only the last 4 characters are shown. You can also say “make Gemini 1st” in chat.</p>
+  {% if shared_keys %}
+  <p class="hint">Also in the collective: {% for item in shared_keys %}{{ item.who }} · {{ item.label }} ····{{ item.last4 }}{% if not loop.last %}; {% endif %}{% endfor %}.</p>
+  {% endif %}
+  {% elif house %}
+  <p class="lead">These keys are the ones your chat uses. Share one and people on the collective can use it after the house keys. Only the last 4 characters are shown.</p>
+  {% else %}
+  <p class="lead">Add a key you already pay for, or leave this empty and use the collective. 1st is used first. Only the last 4 characters are shown. You can say “make Gemini 1st” in chat to order your own keys.</p>
+  {% endif %}
   <p class="lead">Every key has a burst budget (tokens over a few minutes). When a key reaches it, that key rests and the next one answers, so a free key is never pushed into a lockout. Burst tokens of 0 turns the budget off. Max reply tokens caps one answer; 0 leaves the provider default.</p>
   {% for row in keys %}
   <article class="card">
@@ -87,6 +117,9 @@
         </select>
       </label>
       <label class="check"><input type="checkbox" name="active" value="1" {% if row.active %}checked{% endif %}> On</label>
+      {% if current_user.role != 'owner' %}
+      <label class="check"><input type="checkbox" name="shared" value="1" {% if row.shared %}checked{% endif %}> Share with the collective</label>
+      {% endif %}
       <div class="actions">
         <button type="submit">Save this key</button>
       </div>
@@ -121,11 +154,11 @@
     </label>
     <label>Different model id <input name="model_custom" placeholder="Only if it is not in the list"></label>
     <label>Base URL <input name="base_url" placeholder="Only for Other OpenAI-compatible"></label>
+    {% if current_user.role != 'owner' %}
+    <label class="check"><input type="checkbox" name="shared" value="1"> Share with the collective</label>
+    {% endif %}
     <button type="submit">Check and save key</button>
   </form>
   <template id="provider-info">{{ providers|tojson }}</template>
-  {% else %}
-  <p>API keys and people stay on the owner's login.</p>
-  {% endif %}
 </section>
 {% endblock %}

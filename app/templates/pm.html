@@ -1,45 +1,79 @@
 {% extends "base.html" %}
-{% block title %}Preventive maintenance{% endblock %}
+{% block title %}Upkeep{% endblock %}
 {% block main %}
 <section class="sheet">
   <div class="hero">
     <p class="kicker">Maintenance</p>
-    <h1>Preventive maintenance</h1>
-    <p class="lead">Due this week and overdue reminders{% if selected_property_id and property_choices|length > 1 %} at the selected property{% elif show_all_properties %} across your assigned properties{% else %} at your default property{% endif %}.</p>
+    <h1>Upkeep</h1>
+    <p class="lead">{{ reminders|length }} reminder{% if reminders|length != 1 %}s{% endif %}{% if due_count %} · {{ due_count }} need doing now{% endif %}.</p>
+    <p class="hint">Marking one done resets it for a month, two months, or whatever you set. The number is the list. There is no calendar.</p>
     <p><a href="/inventory">Equipment inventory</a></p>
   </div>
   {% if property_choices|length > 1 %}
-  <form method="get" class="card stack">
-    <label>Property
-      <select name="property" onchange="this.form.submit()">
-        <option value="" {% if show_all_properties %}selected{% endif %}>All assigned properties</option>
-        {% for prop in property_choices %}
-        <option value="{{ prop.id }}" {% if selected_property_id == prop.id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit" class="quiet">Show reminders</button>
-  </form>
+  <details class="change-extra">
+    <summary>Which property</summary>
+    <form method="get" class="stack">
+      <label>Property
+        <select name="property">
+          <option value="" {% if show_all_properties %}selected{% endif %}>All assigned properties</option>
+          {% for prop in property_choices %}
+          <option value="{{ prop.id }}" {% if selected_property_id == prop.id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="quiet">Show reminders</button>
+    </form>
+  </details>
   {% endif %}
-  {% if not reminders %}<p class="empty">No preventive-maintenance reminders are due this week.</p>{% endif %}
+  {% if not reminders %}<p class="empty">No upkeep reminders yet. Add a pool pump, a filter, or any other piece and it counts here.</p>{% endif %}
   {% for item in reminders %}
   <article class="card stack">
     <h2>{{ item.reminder.task }}</h2>
-    <p class="hint">{{ (item.equipment.kind or 'Equipment')|title }}{% if item.equipment.brand %} · {{ item.equipment.brand }}{% endif %}{% if item.equipment.model_number %} · {{ item.equipment.model_number }}{% endif %}</p>
+    <p class="hint">{{ item.kind_label }}{% if item.equipment.brand %} · {{ item.equipment.brand }}{% endif %}{% if item.equipment.model_number %} · {{ item.equipment.model_number }}{% endif %} · every {{ item.every_label }} · {{ item.left_label }}</p>
     <p>
-      {% if item.unit %}<a href="/units/{{ item.unit.id }}">Unit {{ item.unit.unit_number }}</a>{% endif %}
+      {% if item.unit %}<a href="/units/{{ item.unit.id }}">Unit {{ item.unit.unit_number }}</a>{% else %}Property equipment{% endif %}
       {% if item.property %} · <a href="/properties/{{ item.property.id }}">{{ item.property.name }}</a>{% endif %}
-      · Due {{ item.reminder.next_due|apt_when }}
-      {% if item.days_overdue %} · <strong class="overdue">{{ item.days_overdue }} day{% if item.days_overdue != 1 %}s{% endif %} overdue</strong>{% endif %}
     </p>
+    {% with how_to=item.how_to, editable=item.editable, equipment_id=item.equipment.id, next='/pm' %}
+    {% include "_how_to.html" %}
+    {% endwith %}
     {% if item.editable %}
     <form method="post" action="/pm/{{ item.reminder.id }}/done">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next" value="/pm">
-      <button type="submit">Mark done · schedule next</button>
+      <button type="submit">Done · reset this reminder</button>
     </form>
     {% endif %}
   </article>
   {% endfor %}
+  {% if editable_properties %}
+  <details class="change-extra">
+    <summary>Add pool or property equipment</summary>
+    <form method="post" action="/pm/gear" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Property
+        <select name="property_id" required>
+          {% for prop in editable_properties %}
+          <option value="{{ prop.id }}" {% if prop.id == default_property_id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>What it is
+        <select name="kind" required>
+          {% for value, label in gear_kinds %}
+          <option value="{{ value }}" {% if value == 'pool pump' %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Name <input name="brand" autocomplete="off" placeholder="South pool Pentair"></label>
+      <label>What the team does
+        <textarea name="how_to" maxlength="4000" placeholder="Skim at 8. Check the pump basket. Backwash when the pressure is up about 10. The lid wrench is in the pump house."></textarea>
+      </label>
+      <label>Reminder <input name="task" placeholder="Check the pump"></label>
+      {% include "_every_days.html" %}
+      <button type="submit">Save this piece</button>
+    </form>
+  </details>
+  {% endif %}
 </section>
 {% endblock %}

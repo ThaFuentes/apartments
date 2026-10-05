@@ -89,7 +89,9 @@ def apply_draft_report(user, payload, source) -> dict:
     kind = (payload.get("kind") or "weekly").strip().lower()
     if kind in ("boss", "bosses", "company packet"):
         kind = "company"
-    if kind not in ("weekly", "company", "property", "adhoc"):
+    if kind in ("person", "individual", "mine", "my week"):
+        kind = "person"
+    if kind not in ("weekly", "company", "property", "adhoc", "person"):
         kind = "weekly"
     profile = site_profile()
     starts = None
@@ -105,29 +107,51 @@ def apply_draft_report(user, payload, source) -> dict:
         found = find_properties(payload["property_name"], payload.get("city") or "")
         if found:
             prop_id = found[0].id
-    if not prop_id and getattr(user, "role", "") not in ("owner", "admin"):
-        return {"ok": False, "reply": "Scoped report packs are not enabled for this role yet."}
+    from app.services.report_scope import scope_for
+
+    scope = scope_for(user, person_id=payload.get("person_id"), property_id=prop_id)
+    if not scope.get("ok"):
+        return {"ok": False, "reply": scope.get("reply") or "That report is outside your properties."}
+    if scope["audience"] == "person":
+        kind = "person"
+    elif kind == "company" and scope["audience"] != "company":
+        kind = "weekly"
     snapshot = build_snapshot(
         kind=kind,
         starts_on=starts,
         property_id=prop_id,
+        property_ids=scope["property_ids"],
+        person_id=scope["person_id"],
+        audience=scope["audience"],
+        subject=scope["subject"],
+        audience_line=scope["audience_line"],
         author=user.label(),
     )
     from datetime import date
 
     start = date.fromisoformat(snapshot["period"]["start"])
     end = date.fromisoformat(snapshot["period"]["end"])
-    existing = (
+    from app.services.report_scope import report_lane
+
+    want_ids = None if scope["property_ids"] is None else tuple(sorted(int(i) for i in scope["property_ids"]))
+    want = (scope["audience"], scope["person_id"], want_ids)
+    existing = None
+    for row in (
         Report.query.filter(
             Report.kind == kind,
             Report.period_start == start,
             Report.period_end == end,
+            Report.created_by_id == user.id,
             Report.deleted_at.is_(None),
             Report.status.in_(("ready", "sent")),
         )
         .order_by(Report.id.desc())
-        .first()
-    )
+        .all()
+    ):
+        lane = report_lane(row)
+        if (lane["audience"], lane["person_id"], lane["property_ids"]) == want:
+            existing = row
+            break
     if existing and existing.status == "sent" and not payload.get("force"):
         return {
             "ok": True,
@@ -145,7 +169,7 @@ def apply_draft_report(user, payload, source) -> dict:
         audit(user.id, source, "update", "report", existing.id, before, {"title": existing.title})
         return {
             "ok": True,
-            "reply": f"{existing.title}\n\n{chat_excerpt(body)}\n\nBosses with a login can open it. Email is only used when they have one.\nCSV: /reports/{existing.id}/csv",
+            "reply": f"{existing.title}\n\n{chat_excerpt(body)}\n\n{_who_reads(scope)}\nCSV: /reports/{existing.id}/csv",
             "report_id": existing.id,
         }
     report = Report(
@@ -164,28 +188,49 @@ def apply_draft_report(user, payload, source) -> dict:
     db.session.add(report)
     db.session.flush()
     audit(user.id, source, "create", "report", report.id, {}, {"kind": kind, "title": report.title})
-    bosses = User.query.filter_by(role="viewer", active=True, can_see_reports=True).count()
-    who = f"{bosses} boss login(s) can read it now." if bosses else "Add a boss whenever you want — they do not need an email."
-    return {"ok": True, "reply": f"{report.title}\n\n{chat_excerpt(body)}\n\n{who}\nCSV: /reports/{report.id}/csv", "report_id": report.id}
+    return {
+        "ok": True,
+        "reply": f"{report.title}\n\n{chat_excerpt(body)}\n\n{_who_reads(scope)}\nCSV: /reports/{report.id}/csv",
+        "report_id": report.id,
+    }
+
+
+def _who_reads(scope) -> str:
+    if scope.get("audience") == "company":
+        bosses = User.query.filter_by(role="viewer", active=True, can_see_reports=True).count()
+        if bosses:
+            return f"{bosses} boss login(s) can read this company report. It is not mixed into a property or a person's week."
+        return "Add a boss whenever you want — they do not need an email. This company report stays off the property and person lists."
+    if scope.get("audience") == "person":
+        subject = scope.get("subject") or "that person"
+        return f"This week stays with {subject} and the managers who cover those properties."
+    return "This stays with the managers and regionals for these properties. It is not the company report."
 
 
 def apply_send_report(user, payload, source) -> dict:
     from app.services.reports import sign_report
 
+    from app.services.report_scope import can_open_report, report_lane, reports_for
+
     source = _src(source)
-    report = db.session.get(Report, int(payload.get("report_id") or 0))
-    if not report or report.deleted_at is not None:
-        report = (
-            Report.query.filter(Report.deleted_at.is_(None), Report.status.in_(("ready", "sent")))
-            .order_by(Report.id.desc())
-            .first()
-        )
+    try:
+        raw_id = int(payload.get("report_id") or 0)
+    except (TypeError, ValueError):
+        raw_id = 0
+    report = db.session.get(Report, raw_id) if raw_id else None
+    if report and (report.deleted_at is not None or not can_open_report(user, report)):
+        report = None
+    if report is None and raw_id:
+        return {"ok": False, "reply": "That report is not on your login."}
+    if report is None:
+        report = next((row for row in reports_for(user) if report_lane(row)["audience"] == "company"), None)
     if not report:
         return {"ok": False, "reply": "Save a weekly or company report first."}
+    company_packet = report_lane(report)["audience"] == "company"
     before = {"status": report.status, "sent_at": report.sent_at.isoformat() if report.sent_at else None}
     report.status = "sent"
     report.sent_at = utcnow()
-    viewers = User.query.filter_by(role="viewer", active=True, can_see_reports=True).all()
+    viewers = User.query.filter_by(role="viewer", active=True, can_see_reports=True).all() if company_packet else []
     delivered = []
     for viewer in viewers:
         db.session.add(
@@ -219,6 +264,13 @@ def apply_send_report(user, payload, source) -> dict:
         )
     owner_link = sign_report(report.id, ttl=900)
     extras = []
+    if not company_packet:
+        audit(user.id, source, "send", "report", report.id, before, {"status": "sent", "viewers": []})
+        return {
+            "ok": True,
+            "reply": f"Marked {report.title} sent. It stays in its lane and was not sent to every boss.",
+            "report_id": report.id,
+        }
     for bit in re.split(r"[,;\s]+", str(payload.get("also") or "")):
         bit = bit.strip()
         if "@" in bit and bit not in extras:

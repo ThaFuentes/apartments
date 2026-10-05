@@ -106,6 +106,10 @@ class AssistantProfile(db.Model):
     smtp_user = db.Column(db.String(200), nullable=False, default="")
     smtp_from = db.Column(db.String(200), nullable=False, default="")
     smtp_password_ciphertext = db.Column(db.Text, nullable=True)
+    platform_instructions = db.Column(db.Text, nullable=True, default="")
+    personal_name = db.Column(db.String(80), nullable=False, default="")
+    personal_instructions = db.Column(db.Text, nullable=True, default="")
+    key_source = db.Column(db.String(16), nullable=False, default="collective")
 class ApiCredential(db.Model):
     __tablename__ = "api_credentials"
     __table_args__ = _OPTS
@@ -125,6 +129,7 @@ class ApiCredential(db.Model):
     max_reply_tokens = db.Column(db.Integer, nullable=False, default=0)
     burst_tokens = db.Column(db.Integer, nullable=False, default=5000)
     burst_seconds = db.Column(db.Integer, nullable=False, default=180)
+    shared = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 class ApiUsage(db.Model):
     """Tokens a key spent, so a burst window can rest it before the provider 429s."""

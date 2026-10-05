@@ -231,6 +231,12 @@
       });
       if (empty) empty.hidden = shown !== 0;
     });
+    if (input.value.trim()) {
+      list.querySelectorAll("[data-building-block]").forEach(function (block) {
+        const any = Array.prototype.some.call(block.querySelectorAll("[data-unit-card]"), function (card) { return !card.hidden; });
+        if (any) block.open = true;
+      });
+    }
   });
 
   const mic = document.getElementById("mic");

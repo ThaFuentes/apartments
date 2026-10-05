@@ -154,6 +154,7 @@ class Equipment(db.Model):
     style = db.Column(db.String(80), nullable=False, default="")
     color = db.Column(db.String(40), nullable=False, default="")
     notes = db.Column(db.Text, nullable=False, default="")
+    how_to = db.Column(db.Text, nullable=True, default="")
     # Nameplate details: install date and HVAC specs.
     install_date = db.Column(db.Date, nullable=True)
     filter_size = db.Column(db.String(40), nullable=False, default="")

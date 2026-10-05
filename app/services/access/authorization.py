@@ -46,8 +46,16 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
         if tool == "log_expense" and payload.get("property_id") and not can_see_property(user, int(payload["property_id"])):
             return {"ok": False, "reply": "That property is outside your assigned scope."}
         return {"ok": True}
-    if tool in {"draft_report", "send_report"}:
-        return {"ok": has_capability(user, "manage_reports"), "reply": "Report changes are not available to this role."}
+    if tool == "send_report":
+        allowed = role in ("owner", "admin")
+        return {"ok": allowed, "reply": "" if allowed else "Only an owner or admin sends a report."}
+    if tool == "draft_report":
+        allowed = (
+            has_capability(user, "manage_reports")
+            or has_capability(user, "write_maintenance")
+            or has_capability(user, "log_personal_expenses")
+        )
+        return {"ok": allowed, "reply": "" if allowed else "Report changes are not available to this role."}
     if tool == "read_reports":
         return {"ok": has_capability(user, "read_reports"), "reply": "Reports are not available to this role."}
     if tool == "update_settings":

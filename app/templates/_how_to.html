@@ -1,0 +1,14 @@
+{% if how_to %}<p class="how-to">{{ how_to }}</p>{% endif %}
+{% if editable %}
+<details class="change-extra">
+  <summary>How we do this</summary>
+  <form method="post" action="/equipment/{{ equipment_id }}/how-to" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <label>What to do, how, and when
+      <textarea name="how_to" maxlength="4000" placeholder="Skim at 8. Check the pump basket. Backwash when the pressure is up about 10. The lid wrench is in the pump house.">{{ how_to or '' }}</textarea>
+    </label>
+    <button type="submit" class="quiet">Save instructions</button>
+  </form>
+</details>
+{% endif %}

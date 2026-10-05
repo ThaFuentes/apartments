@@ -392,11 +392,10 @@ def answer_record(user, text: str) -> dict | None:
         permitted = authorize_tool(user, "read_reports", {})
         if not permitted.get("ok"):
             return permitted
-        report = (
-            Report.query.filter(Report.deleted_at.is_(None))
-            .order_by(Report.id.desc())
-            .first()
-        )
+        from app.services.report_scope import reports_for
+
+        saved = reports_for(user)
+        report = saved[0] if saved else None
         if not report:
             return {"ok": True, "reply": "No report yet. Say weekly report or company report and I'll write it here."}
         return {"ok": True, "reply": f"{report.title}\n\n{chat_excerpt(report.body_md or '')}"}

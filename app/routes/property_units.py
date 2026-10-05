@@ -229,6 +229,7 @@ def unit_detail(unit_id):
     from app.services.board import task_groups, unit_history
     from app.services.contractors import list_contractors
     from app.services.equipment import kind_choices, kind_label
+    from app.services.upkeep import days_until, interval_label, left_label
     from app.services.people import person_label
     from app.services.ready import job_choices
 
@@ -259,9 +260,26 @@ def unit_detail(unit_id):
         deleted_gear=deleted_gear,
         deleted_jobs=deleted_jobs,
         who=person_label,
+        interval_label=interval_label,
+        days_until=days_until,
+        left_label=left_label,
         editable=can_edit_property(current_user, unit.property_id),
         last=last,
     )
+
+
+def _record_next(unit) -> str:
+    """Stay on the unit, its property, or the make-ready board."""
+    from app.auth import sanitize_next
+
+    raw = sanitize_next((request.form.get("next") or "").strip(), "")
+    home = f"/units/{unit.id}"
+    prop = f"/properties/{unit.property_id}"
+    if ".." in raw:
+        return home
+    if raw in {home, "/ready", prop} or raw.startswith(prop + "?") or raw.startswith(prop + "#"):
+        return raw
+    return home
 
 
 def _editable_unit(unit_id: int):
@@ -323,7 +341,15 @@ def unit_task_add(unit_id):
         kind = "task"
     if kind == "task" and unit.occupancy == "occupied":
         flash(f"Mark unit {unit.unit_number} vacant before adding make-ready work.", "warn")
-        return redirect(f"/units/{unit.id}")
+        return redirect(_record_next(unit))
+    if kind == "task" and (
+        (request.form.get("turn") or "").strip().lower() in {"1", "true", "yes", "on"}
+        or unit.rentable
+        or (unit.occupancy or "") == "make_ready"
+    ):
+        from app.services.ready import reopen_turn
+
+        reopen_turn(current_user, unit)
     add_needed(
         current_user,
         unit,
@@ -335,7 +361,7 @@ def unit_task_add(unit_id):
     )
     db.session.commit()
     flash(f"Saved on unit {unit.unit_number}.", "ok")
-    return redirect(f"/units/{unit.id}")
+    return redirect(_record_next(unit))
 
 
 @bp.post("/tasks/<int:task_id>/edit")
@@ -377,14 +403,36 @@ def task_done(task_id):
     if not row or row.deleted_at:
         abort(404)
     _editable_unit(row.unit_id)
-    before = {"status": row.status, "done_by_id": row.done_by_id, "done_at": row.done_at.isoformat() if row.done_at else None}
+    before = {"status": row.status, "done_by_id": row.done_by_id, "done_at": row.done_at.isoformat() if row.done_at else None, "return_note": row.return_note or ""}
     row.status = "done"
     row.done_by_id = current_user.id
     row.done_at = utcnow()
-    audit(current_user.id, "human", "update", "unit_task", row.id, before, {"status": row.status, "title": row.title, "unit_id": row.unit_id, "property_id": row.property_id})
+    row.return_note = ""
+    row.returned_by_id = None
+    row.returned_at = None
+    audit(current_user.id, "human", "update", "unit_task", row.id, before, {"status": row.status, "title": row.title, "return_note": "", "unit_id": row.unit_id, "property_id": row.property_id})
     db.session.commit()
     flash(f"Done: {row.title}.", "ok")
     return redirect(f"/units/{row.unit_id}")
+
+
+@bp.post("/tasks/<int:task_id>/send-back")
+@login_required
+def task_send_back(task_id):
+    from app.models import UnitTask
+    from app.services.ready import send_back_task
+
+    row = db.session.get(UnitTask, task_id)
+    if not row or row.deleted_at:
+        abort(404)
+    unit = _editable_unit(row.unit_id)
+    result = send_back_task(current_user, row, request.form.get("note") or "")
+    if result.get("ok"):
+        db.session.commit()
+    else:
+        db.session.rollback()
+    flash(result.get("reply") or "Saved.", "ok" if result.get("ok") else "warn")
+    return redirect(_record_next(unit))
 
 
 @bp.post("/tasks/<int:task_id>/delete")

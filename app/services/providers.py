@@ -6,7 +6,7 @@ import json
 import requests
 
 from app.builddb.builddb import db
-from app.models import ApiCredential, User
+from app.models import ApiCredential
 from app.services import budget
 from app.services.clock import utcnow
 from app.services.crypto import decrypt_text, encrypt_text, last4
@@ -378,36 +378,16 @@ def check_key(provider: str, api_key: str, model: str, base_url: str = "") -> di
 
 
 def keys_for(user) -> list:
-    from app.services.access import can_manage_company_settings
+    from app.services.ai_voice import keys_for_user
 
-    owner = user if can_manage_company_settings(user) else User.query.filter_by(role="owner").order_by(User.id.asc()).first()
-    if not owner:
-        return []
-    rows = ApiCredential.query.filter_by(user_id=owner.id).order_by(ApiCredential.id.asc()).all()
-    usable = [row for row in rows if getattr(row, "active", True)]
-    usable.sort(key=lambda row: (row.use_order or 99, 0 if getattr(row, "preferred", False) else 1, row.id))
-    return usable
+    return keys_for_user(user)
 
 
-def voice_brief() -> str:
-    """Name and tone from Settings. This is what the chat is supposed to sound like."""
-    from app.services.records import site_profile
+def voice_brief(user=None) -> str:
+    """Platform rules, the house style, and this person's name and added notes."""
+    from app.services.ai_voice import voice_for
 
-    profile = site_profile()
-    name = ((profile.assistant_name if profile else "") or "Apt").strip() or "Apt"
-    tone = ((profile.tone if profile else "") or "").strip()
-    ask = ((profile.always_ask if profile else "") or "").strip()
-    voice = ((profile.report_voice if profile else "") or "").strip()
-    lines = [f"Your name is {name}. Use that name if you introduce yourself."]
-    if tone:
-        lines.append(f"Talk this way: {tone}.")
-    if ask:
-        lines.append(f"Always ask about: {ask}.")
-    else:
-        lines.append("Do not add extra questions.")
-    if voice:
-        lines.append(f"When a report is written, use this voice: {voice}.")
-    return "\n".join(lines)
+    return voice_for(user)
 
 
 def record_brief(user=None) -> str:
@@ -446,7 +426,7 @@ def collect_tool_calls(user, text: str):
     from app.services.context import context_brief
 
     prompt = (
-        voice_brief()
+        voice_brief(user)
         + "\n\n"
         + record_brief(user)
         + "\n\n"

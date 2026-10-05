@@ -51,6 +51,10 @@ KINDS = (
     ("water heater", ("water heater",)),
     ("thermostat", ("thermostat", "tstat")),
     ("package unit", ("package unit", "rooftop unit", "rtu")),
+    ("pool pump", ("pool pump", "circulation pump")),
+    ("pool filter", ("pool filter", "sand filter", "cartridge filter")),
+    ("pool heater", ("pool heater",)),
+    ("pool", ("swimming pool", "pool")),
 )
 
 KIND_CHOICES = tuple(kind for kind, _words in KINDS)
@@ -144,6 +148,13 @@ def describe(row: dict | None) -> str:
     return " ".join(bits).strip()
 
 
+def _mentioned(low: str, word: str) -> bool:
+    """A whole word. 'pool' does not also match inside 'pool pump'."""
+    if word == "pool":
+        return re.search(r"(^|[^a-z])pool(?! (?:pump|filter|heater))([^a-z]|$)", low) is not None
+    return re.search(rf"(^|[^a-z]){re.escape(word)}([^a-z]|$)", low) is not None
+
+
 def appliance_kinds(text: str) -> list[str]:
     """Every appliance named in the sentence. Drier counts as dryer."""
     low = (text or "").lower().replace("drier", "dryer")
@@ -151,7 +162,7 @@ def appliance_kinds(text: str) -> list[str]:
     for kind, words in KINDS:
         if kind == "washer dryer":
             continue
-        if any(re.search(rf"(^|[^a-z]){re.escape(word)}([^a-z]|$)", low) for word in words):
+        if any(_mentioned(low, word) for word in words):
             found.append(kind)
     return found
 
@@ -161,7 +172,7 @@ def parse_equipment(text: str) -> dict:
     low = raw.lower()
     row = empty()
     for kind, words in KINDS:
-        if any(re.search(rf"(^|[^a-z]){re.escape(word)}([^a-z]|$)", low) for word in words):
+        if any(_mentioned(low, word) for word in words):
             row["kind"] = kind
             break
     for brand in BRANDS:

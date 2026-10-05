@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from flask import abort, render_template, request
+from flask import abort, flash, redirect, render_template, request
 from flask_login import current_user
 
 from app.builddb.builddb import db
@@ -79,6 +79,18 @@ def audit_log():
             for key, value in after.items()
             if key not in _QUIET and before.get(key) != value
         ]
+        if row.action in ("delete", "remove", "restore"):
+            seen = {item["field"] for item in changes}
+            for key in ("kind", "brand", "model", "serial", "title", "unit_number", "notes", "status"):
+                if key in seen or not before.get(key):
+                    continue
+                changes.append(
+                    {
+                        "field": key,
+                        "before": before.get(key),
+                        "after": "removed" if row.action in ("delete", "remove") else "restored",
+                    }
+                )
         entries.append(
             {
                 "when": row.created_at,
@@ -91,7 +103,14 @@ def audit_log():
                 "changes": changes,
             }
         )
+    from app.services.reversals import can_reverse, inventory_removals
+
     owner_console = getattr(current_user, "role", "") == "owner"
+    removed = inventory_removals(current_user, min(days, 30)) if can_reverse(current_user) else []
+    removers: dict[int, dict] = {}
+    for item in removed:
+        bucket = removers.setdefault(item["actor_id"], {"id": item["actor_id"], "name": item["who"], "count": 0})
+        bucket["count"] += 1
     return render_template(
         "audit.html",
         entries=entries,
@@ -102,4 +121,54 @@ def audit_log():
         total=total,
         shown=len(entries),
         owner_console=owner_console,
+        can_reverse=can_reverse(current_user),
+        removed=removed[:40],
+        removed_total=len(removed),
+        removers=sorted(removers.values(), key=lambda item: item["name"].lower()),
     )
+
+
+@bp.post("/audit/<int:audit_id>/reverse")
+@login_required
+def audit_reverse(audit_id):
+    from app.services.reversals import can_reverse, reverse_audit
+
+    if not can_reverse(current_user):
+        abort(403)
+    result = reverse_audit(current_user, audit_id)
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect(_audit_back())
+
+
+@bp.post("/audit/restore-inventory")
+@login_required
+def audit_restore_inventory():
+    from app.services.reversals import can_reverse, restore_removed_inventory
+
+    if not can_reverse(current_user):
+        abort(403)
+    try:
+        person_id = int(request.form.get("person_id") or 0)
+    except ValueError:
+        person_id = 0
+    try:
+        days = max(1, min(30, int(request.form.get("days") or 14)))
+    except ValueError:
+        days = 14
+    result = restore_removed_inventory(current_user, person_id, days)
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect(_audit_back())
+
+
+def _audit_back() -> str:
+    who = (request.form.get("who") or "").strip()
+    days = (request.form.get("days") or "").strip()
+    prop = (request.form.get("property") or "").strip()
+    bits = []
+    if prop:
+        bits.append(f"property={prop}")
+    if who:
+        bits.append(f"who={who}")
+    if days:
+        bits.append(f"days={days}")
+    return "/audit" + (f"?{'&'.join(bits)}" if bits else "")

@@ -9,17 +9,20 @@
     <p class="lead">Units that still need trashout, paint, carpet, and the rest. Call a saved contractor onto another unit from here.</p>
     <p><a href="/contractors">Contractor list</a></p>
     {% if editable and available_units %}
-    <form method="post" action="/ready/start" class="card inline">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label>Start a turn
-        <select name="unit_id" required>
-          {% for unit in available_units %}
-          <option value="{{ unit.id }}" {% if unit.property_id == default_property_id and loop.first %}selected{% endif %}>Unit {{ unit.unit_number }}{% if unit.property %} · {{ unit.property.name }}{% endif %}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button type="submit">Start make ready</button>
-    </form>
+    <details class="change-extra">
+      <summary>Start a turn</summary>
+      <form method="post" action="/ready/start" class="card inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Start a turn
+          <select name="unit_id" required>
+            {% for unit in available_units %}
+            <option value="{{ unit.id }}" {% if unit.property_id == default_property_id and loop.first %}selected{% endif %}>Unit {{ unit.unit_number }}{% if unit.property %} · {{ unit.property.name }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Start make ready</button>
+      </form>
+    </details>
     {% endif %}
   </div>
   {% if not cards %}
@@ -68,18 +71,21 @@
         <button type="submit" class="quiet">Mark occupied</button>
       </form>
       {% endif %}
-      <form method="post" action="/units/{{ card.unit.id }}/move-out" class="ready-date">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="/ready">
-        <label>Move-out date <input type="date" name="move_out_date" value="{{ card.move_out_date }}"></label>
-        <button type="submit" class="quiet">Save move-out date</button>
-      </form>
-      <form method="post" action="/units/{{ card.unit.id }}/ready-by" class="ready-date">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="/ready">
-        <label>Target ready <input type="date" name="ready_by" value="{{ card.ready_by }}"></label>
-        <button type="submit" class="quiet">Save target</button>
-      </form>
+      <details class="change-extra">
+        <summary>Dates</summary>
+        <form method="post" action="/units/{{ card.unit.id }}/move-out" class="ready-date">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="/ready">
+          <label>Move-out date <input type="date" name="move_out_date" value="{{ card.move_out_date }}"></label>
+          <button type="submit" class="quiet">Save move-out date</button>
+        </form>
+        <form method="post" action="/units/{{ card.unit.id }}/ready-by" class="ready-date">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="/ready">
+          <label>Target ready <input type="date" name="ready_by" value="{{ card.ready_by }}"></label>
+          <button type="submit" class="quiet">Save target</button>
+        </form>
+      </details>
       {% if card.unit.occupancy == 'make_ready' or card.rentable %}
       <form method="post" action="/units/{{ card.unit.id }}/rentable" class="ready-date">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -88,7 +94,7 @@
         <button type="submit" class="{% if card.rentable %}is-done{% else %}quiet{% endif %}">{% if card.rentable %}Clear rentable status{% else %}Mark ready to rent{% endif %}</button>
       </form>
       {% endif %}
-      {% if card.unit.occupancy == 'make_ready' %}
+      {% if card.unit.occupancy == 'make_ready' or card.rentable %}
       <ul class="ready-check">
         {% for item in card.checklist %}
         <li>
@@ -97,32 +103,52 @@
             <input type="hidden" name="next" value="/ready">
             <input type="hidden" name="job" value="{{ item.slug }}">
             <input type="hidden" name="done" value="{{ '0' if item.done else '1' }}">
-            <button type="submit" class="{% if item.done %}is-done{% elif item.open %}is-open{% endif %}">{{ item.label }}{% if item.done %} · done{% elif item.open %} · needed{% endif %}{% if item.vendor %} · {{ item.vendor }}{% endif %}</button>
+            <button type="submit" class="{% if item.done %}is-done{% elif item.return_note %}is-open{% elif item.open %}is-open{% endif %}">{{ item.label }}{% if item.done %} · done{% elif item.return_note %} · sent back{% elif item.open %} · needed{% endif %}{% if item.actor %} · {{ item.actor }}{% endif %}{% if item.vendor %} · {{ item.vendor }}{% endif %}</button>
           </form>
         </li>
         {% endfor %}
       </ul>
+      {% for item in card.checklist if item.return_note %}
+      <p class="hint">{{ item.label }}: {{ item.return_note }}</p>
+      {% endfor %}
+      {% for item in card.checklist if item.done and item.task_id %}
+      <details class="change-extra">
+        <summary>Send {{ item.label }} back</summary>
+        {% with task_id=item.task_id, next='/ready', note='', button='Send back' %}
+        {% include "_send_back.html" %}
+        {% endwith %}
+      </details>
+      {% endfor %}
+      <details class="change-extra">
+        <summary>Add something else</summary>
+        {% with unit_id=card.unit.id, next='/ready' %}
+        {% include "_add_turn_item.html" %}
+        {% endwith %}
+      </details>
       {% endif %}
       {% if contractors %}
-      <form method="post" action="/units/{{ card.unit.id }}/call" class="inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>Call
-          <select name="contractor_id">
-            {% for person in contractors %}
-            <option value="{{ person.id }}">{{ person.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>For
-          <select name="title">
-            <option value="">Usual work</option>
-            {% for slug, label in jobs %}
-            <option value="{{ slug }}">{{ label }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button type="submit" class="quiet">Call to this unit</button>
-      </form>
+      <details class="change-extra">
+        <summary>Call a contractor</summary>
+        <form method="post" action="/units/{{ card.unit.id }}/call" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Call
+            <select name="contractor_id">
+              {% for person in contractors %}
+              <option value="{{ person.id }}">{{ person.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>For
+            <select name="title">
+              <option value="">Usual work</option>
+              {% for slug, label in jobs %}
+              <option value="{{ slug }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button type="submit" class="quiet">Call to this unit</button>
+        </form>
+      </details>
       {% endif %}
       {% endif %}
     </article>

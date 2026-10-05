@@ -8,13 +8,22 @@
   <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} here.</p>
   <p class="hint">Green units need make-ready work · Blue units are occupied · Search records across equipment, jobs, vendors, and notes.</p>
   {% if editable %}
-  <form method="post" action="/properties/{{ prop.id }}/units" class="card stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Building <input name="building" placeholder="1" autocomplete="off"></label>
-    <label>Units <textarea name="units" placeholder="1000-1020" required></textarea></label>
-    <p class="hint">1000-1020 in building 1 creates every unit in that building.</p>
-    <button type="submit">Add these units</button>
-  </form>
+  <p class="rare-actions">
+    <button type="button" class="quiet" data-open-dialog="add-units">Add units</button>
+  </p>
+  <dialog id="add-units" class="sheet-dialog" aria-labelledby="add-units-title">
+    <div class="dialog-bar">
+      <h2 id="add-units-title">Add units</h2>
+      <button type="button" class="quiet" data-close-dialog>Close</button>
+    </div>
+    <form method="post" action="/properties/{{ prop.id }}/units" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Building <input name="building" placeholder="1" autocomplete="off"></label>
+      <label>Units <textarea name="units" placeholder="1000-1020" required></textarea></label>
+      <p class="hint">1000-1020 in building 1 creates every unit in that building.</p>
+      <button type="submit">Add these units</button>
+    </form>
+  </dialog>
   {% endif %}
   <form method="get" class="unit-search-form">
     <label class="find-unit">Search unit records
@@ -43,7 +52,7 @@
   {% endif %}
   <div class="stack" id="unit-list">
     {% for group in groups %}
-    <details class="building-block" data-building-block {% if building or groups|length == 1 or not group.key %}open{% endif %}>
+    <details class="building-block" data-building-block>
       <summary class="building-head">
         <span class="building-name">{{ group.label }}</span>
         {% if group.range %}<span class="building-range">{{ group.range }}</span>{% endif %}
@@ -70,16 +79,19 @@
       {% endif %}
       <span class="unit-search-data" hidden>{{ card.search_blob }}</span>
       {% if editable %}
-      <form method="post" action="/units/{{ card.unit.id }}" class="inline unit-edit-inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>Unit number <input name="unit_number" value="{{ card.unit.unit_number }}" aria-label="Unit number"></label>
-        <label>Building <input name="building" value="{{ card.unit.building }}" aria-label="Building" placeholder="Unassigned"></label>
-        <button type="submit" class="quiet">Save unit</button>
-      </form>
-      <form method="post" action="/units/{{ card.unit.id }}/delete" data-confirm="Move unit {{ card.unit.unit_number }} and its records to the restore bin?">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="ghost">Remove unit</button>
-      </form>
+      <details class="unit-card-edit">
+        <summary>Edit this unit</summary>
+        <form method="post" action="/units/{{ card.unit.id }}" class="inline unit-edit-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Unit number <input name="unit_number" value="{{ card.unit.unit_number }}" aria-label="Unit number"></label>
+          <label>Building <input name="building" value="{{ card.unit.building }}" aria-label="Building" placeholder="Unassigned"></label>
+          <button type="submit" class="quiet">Save unit</button>
+        </form>
+        <form method="post" action="/units/{{ card.unit.id }}/delete" data-confirm="Move unit {{ card.unit.unit_number }} and its records to the restore bin?">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="ghost">Remove unit</button>
+        </form>
+      </details>
       {% endif %}
     </article>
     {% endfor %}
@@ -105,6 +117,24 @@
     <li>
       <strong>{{ row.what }}</strong>
       <span class="hint">{{ row.who or "Someone" }}{% if row.where %} · {{ row.where }}{% endif %} · {{ row.when|apt_when }} · {{ row.kind }}</span>
+      {% if row.note %}<p class="return-note">{{ row.note }}</p>{% endif %}
+      {% if row.done_by %}<span class="hint">{{ row.done_by }} marked this done{% if row.done_at %} · {{ row.done_at|apt_when }}{% endif %}</span>{% endif %}
+      {% if editable and row.record == 'task' and row.task_id and row.occupancy != 'occupied' %}
+      {% if row.status == 'done' or row.note %}
+      <details class="change-extra">
+        <summary>{{ 'Send back' if row.status == 'done' else "What's left" }}</summary>
+        {% with task_id=row.task_id, next=request.full_path, note=(row.note if row.status != 'done' else ''), button=('Send back' if row.status == 'done' else "Save what's left") %}
+        {% include "_send_back.html" %}
+        {% endwith %}
+      </details>
+      {% endif %}
+      <details class="change-extra">
+        <summary>Add something else</summary>
+        {% with unit_id=row.unit_id, next=request.full_path %}
+        {% include "_add_turn_item.html" %}
+        {% endwith %}
+      </details>
+      {% endif %}
     </li>
     {% endfor %}
   </ul>
@@ -118,21 +148,29 @@
   </ul>
   {% endif %}
   {% if editable %}
-  <h2>Edit</h2>
-  <form method="post" class="card stack" action="/properties/{{ prop.id }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="edit-{{ msg_key }}">
-    <label>Name <input name="name" value="{{ place_name }}" required></label>
-    <label>City <input name="city" value="{{ city_name }}" required></label>
-    <label>State <input name="region" value="{{ state_name }}"></label>
-    <label>Address <input name="address" value="{{ prop.address }}"></label>
-    <button type="submit">Save</button>
-  </form>
-  <form method="post" action="/properties/{{ prop.id }}/delete" data-confirm="Delete {{ prop.name }}?">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="del-{{ msg_key }}">
-    <button type="submit" class="ghost">Delete this property</button>
-  </form>
+  <p class="rare-actions">
+    <button type="button" class="quiet" data-open-dialog="edit-property">Edit property</button>
+  </p>
+  <dialog id="edit-property" class="sheet-dialog" aria-labelledby="edit-property-title">
+    <div class="dialog-bar">
+      <h2 id="edit-property-title">Edit property</h2>
+      <button type="button" class="quiet" data-close-dialog>Close</button>
+    </div>
+    <form method="post" class="stack" action="/properties/{{ prop.id }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="idempotency_key" value="edit-{{ msg_key }}">
+      <label>Name <input name="name" value="{{ place_name }}" required></label>
+      <label>City <input name="city" value="{{ city_name }}" required></label>
+      <label>State <input name="region" value="{{ state_name }}"></label>
+      <label>Address <input name="address" value="{{ prop.address }}"></label>
+      <button type="submit">Save</button>
+    </form>
+    <form method="post" action="/properties/{{ prop.id }}/delete" data-confirm="Delete {{ prop.name }}?">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="idempotency_key" value="del-{{ msg_key }}">
+      <button type="submit" class="ghost">Delete this property</button>
+    </form>
+  </dialog>
   {% endif %}
 </section>
 {% endblock %}

@@ -5,6 +5,7 @@
   <p class="kicker">{{ snapshot.company or 'Company' }} · {{ report.status }}</p>
   <h1>{{ snapshot.title or report.title }}</h1>
   <p>Prepared by {{ snapshot.author or 'the field manager' }}.</p>
+  {% if snapshot.audience_line %}<p>{{ snapshot.audience_line }}</p>{% endif %}
   <p>{{ snapshot.period.start }} through {{ snapshot.period.end }}</p>
   {% if report.kind == 'company' %}
   <p>Company review copy. Jobs she went for, what got done, units, miles, and gas, food, and other.</p>
@@ -26,6 +27,14 @@
     <li>Blocked: {{ snapshot.totals.jobs_blocked }}</li>
     <li>Units visited: {{ snapshot.totals.units }}</li>
   </ul>
+  {% if snapshot.people %}
+  <h2>Who did the work</h2>
+  <ul>
+    {% for row in snapshot.people %}
+    <li>{{ row.name }}: {{ row.jobs }} jobs, {{ row.done }} completed, {{ money(row.spend_cents) }}, {{ row.miles or 0 }} miles</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
   <h2>Properties and units</h2>
   {% for prop in snapshot.properties or [] %}
   <section class="card">
@@ -35,7 +44,7 @@
     <p>Went {{ prop.went }}, completed {{ prop.completed }}, blocked {{ prop.blocked }}, follow-up {{ prop.followup }}.</p>
     <ul>
       {% for job in prop.jobs %}
-      <li>{% if job.unit %}{{ job.unit }} — {% endif %}{{ job.title }} ({{ job.status }}){% if job.notes %} — {{ job.notes }}{% endif %}</li>
+      <li>{% if job.unit %}{{ job.unit }} — {% endif %}{{ job.title }} ({{ job.status }}){% if job.who %} · {{ job.who }}{% endif %}{% if job.notes %} — {{ job.notes }}{% endif %}</li>
       {% endfor %}
     </ul>
   </section>
@@ -88,6 +97,7 @@
     <label>Edit the written copy <textarea name="body_md" rows="8">{{ report.body_md }}</textarea></label>
     <button type="submit">Save edits</button>
   </form>
+  {% if snapshot.audience == 'company' %}
   <form method="post" action="/reports/{{ report.id }}/send" class="card stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">
@@ -104,6 +114,7 @@
   </ul>
   {% else %}
   <p>No bosses yet. Add one under Settings. They can read this without an email.</p>
+  {% endif %}
   {% endif %}
   {% endif %}
 </article>

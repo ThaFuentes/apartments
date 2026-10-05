@@ -599,3 +599,107 @@ class ReadyContractorTests(AptTestBase):
         self.assertEqual(unit.occupancy, "make_ready")
         titles = sorted(row.title for row in UnitTask.query.filter_by(unit_id=unit.id).all())
         self.assertEqual(titles, ["Paint", "Trashout"])
+
+    def test_office_sends_finished_make_ready_back_and_adds_a_missed_job(self):
+        from app.services.board import recent_changes
+        from app.services.people import create_user
+        from app.services.ready import add_ready_job, set_ready_job_done
+
+        owner = self.owner()
+        prop, unit = self._unit(owner, "115")
+        add_ready_job(owner, unit, "paint", "human")
+        add_ready_job(owner, unit, "trashout", "human")
+        set_ready_job_done(owner, unit, "paint", True)
+        set_ready_job_done(owner, unit, "trashout", True)
+        unit.rentable = True
+        unit.occupancy = ""
+        db.session.commit()
+        desk, _generated = create_user(
+            username="deskone", password="field-pass-9", display_name="Dana Desk", role="office", created_by=owner
+        )
+        db.session.commit()
+
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "deskone", "password": "field-pass-9"})
+        page = client.get(f"/properties/{prop.id}")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b"Who changed what", page.data)
+        self.assertIn(b"Paint", page.data)
+        self.assertIn(b"Alex", page.data)
+        self.assertIn(b"Send back", page.data)
+        self.assertIn(b"Add something else", page.data)
+        self.assertIn(b"unit 115", page.data)
+        self.assertIn(b"done", page.data)
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        paint = UnitTask.query.filter_by(unit_id=unit.id, title="Paint").one()
+        empty = client.post(
+            f"/tasks/{paint.id}/send-back",
+            data={"csrf_token": token, "note": "   ", "next": f"/properties/{prop.id}"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"Say what still needs doing.", empty.data)
+        db.session.refresh(paint)
+        self.assertEqual(paint.status, "done")
+
+        sent = client.post(
+            f"/tasks/{paint.id}/send-back",
+            data={
+                "csrf_token": token,
+                "note": "Needs a second coat in the bedrooms",
+                "next": f"/properties/{prop.id}",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(sent.status_code, 200)
+        self.assertIn(b"Needs a second coat in the bedrooms", sent.data)
+        self.assertIn(b"sent back", sent.data)
+        self.assertIn(b"Dana Desk", sent.data)
+        db.session.refresh(unit)
+        db.session.refresh(paint)
+        self.assertEqual(unit.occupancy, "make_ready")
+        self.assertFalse(unit.rentable)
+        self.assertEqual(paint.status, "needed")
+        self.assertEqual(paint.return_note, "Needs a second coat in the bedrooms")
+        self.assertEqual(paint.returned_by_id, desk.id)
+        self.assertEqual(paint.done_by_id, owner.id)
+        trash = UnitTask.query.filter_by(unit_id=unit.id, title="Trashout").one()
+        self.assertEqual(trash.status, "done")
+        cards = {row["what"]: row for row in recent_changes(prop.id)}
+        self.assertEqual(cards["Paint"]["kind"], "sent back")
+        self.assertEqual(cards["Paint"]["who"], "Dana Desk")
+        self.assertEqual(cards["Paint"]["done_by"], "Alex")
+
+        added = client.post(
+            f"/units/{unit.id}/tasks",
+            data={
+                "csrf_token": token,
+                "kind": "task",
+                "turn": "1",
+                "title": "Bug spray",
+                "next": f"/units/{unit.id}",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(added.status_code, 200)
+        self.assertIn(b"Bug spray", added.data)
+        spray = UnitTask.query.filter_by(unit_id=unit.id, title="Bug spray").one()
+        self.assertEqual(spray.status, "needed")
+        self.assertEqual(spray.kind, "task")
+        self.assertEqual(spray.created_by_id, desk.id)
+        db.session.refresh(unit)
+        self.assertEqual(unit.occupancy, "make_ready")
+        self.assertFalse(unit.rentable)
+
+        unit.occupancy = "occupied"
+        unit.rentable = False
+        db.session.commit()
+        blocked = client.post(
+            f"/tasks/{trash.id}/send-back",
+            data={"csrf_token": token, "note": "Trashout not fully completed", "next": f"/units/{unit.id}"},
+            follow_redirects=True,
+        )
+        self.assertIn(b"vacant", blocked.data.lower())
+        db.session.refresh(trash)
+        self.assertEqual(trash.status, "done")

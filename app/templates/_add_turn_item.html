@@ -1,0 +1,10 @@
+<form method="post" action="/units/{{ unit_id }}/tasks" class="send-back">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="kind" value="task">
+  <input type="hidden" name="turn" value="1">
+  {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+  <label>Add something else
+    <input name="title" required maxlength="200" placeholder="Bug spray">
+  </label>
+  <button type="submit" class="quiet">Add</button>
+</form>

@@ -24,15 +24,19 @@ from app.models import (
 )
 from app.services.clock import local_today, money, utcnow, week_bounds
 
-KINDS = ("weekly", "company", "property", "adhoc")
+KINDS = ("weekly", "company", "property", "adhoc", "person")
 
 
-def _plan_lines(start, end) -> list[dict]:
+def _plan_lines(start, end, property_ids=None, person_id=None) -> list[dict]:
     from app.services.plan import status_line
 
     rows = []
     items = PlanItem.query.filter(PlanItem.deleted_at.is_(None)).all()
     for item in items:
+        if property_ids is not None and item.property_id not in property_ids:
+            continue
+        if person_id and item.created_by_id != person_id:
+            continue
         trip = item.trip
         if not trip or not trip.starts_on or not (start <= trip.starts_on <= end):
             continue
@@ -76,6 +80,11 @@ def build_snapshot(
     kind: str = "weekly",
     starts_on=None,
     property_id: int | None = None,
+    property_ids: set | None = None,
+    person_id: int | None = None,
+    audience: str = "",
+    subject: str = "",
+    audience_line: str = "",
     author: str = "",
 ) -> dict:
     profile = owner_profile()
@@ -87,12 +96,30 @@ def build_snapshot(
     kind = kind if kind in KINDS else "weekly"
 
     trips = Trip.query.filter(Trip.deleted_at.is_(None), Trip.starts_on.isnot(None)).all()
-    trip_ids = {t.id for t in trips if t.starts_on and start <= t.starts_on <= end}
-    prior_trip_ids = {t.id for t in trips if t.starts_on and prior_start <= t.starts_on <= prior_end}
-
     jobs = Job.query.filter(Job.deleted_at.is_(None)).all()
     expenses = Expense.query.filter(Expense.deleted_at.is_(None), Expense.status == "confirmed").all()
     visits = UnitVisit.query.all()
+    if property_ids is not None:
+        linked = {
+            row.trip_id
+            for row in TripProperty.query.filter(TripProperty.property_id.in_(property_ids or {-1})).all()
+        }
+        trips = [row for row in trips if row.id in linked or (person_id and row.created_by_id == person_id)]
+        jobs = [row for row in jobs if row.property_id in property_ids]
+        visits = [row for row in visits if row.property_id in property_ids]
+        expenses = [
+            row
+            for row in expenses
+            if row.property_id in property_ids
+            or (person_id and not row.property_id and (row.user_id == person_id or row.created_by_id == person_id))
+        ]
+    if person_id:
+        trips = [row for row in trips if row.created_by_id == person_id]
+        jobs = [row for row in jobs if row.created_by_id == person_id]
+        visits = [row for row in visits if row.created_by_id == person_id]
+        expenses = [row for row in expenses if row.user_id == person_id or row.created_by_id == person_id]
+    trip_ids = {t.id for t in trips if t.starts_on and start <= t.starts_on <= end}
+    prior_trip_ids = {t.id for t in trips if t.starts_on and prior_start <= t.starts_on <= prior_end}
 
     def job_in(job: Job, ids, range_start, range_end) -> bool:
         if property_id and job.property_id != property_id:
@@ -136,6 +163,9 @@ def build_snapshot(
 
     properties = []
     cities = []
+    from app.services.report_scope import name_for
+
+    who_names: dict[int, str] = {}
     for prop in Property.query.filter(Property.id.in_(prop_ids or {0}), Property.deleted_at.is_(None)).all():
         city_name = prop.city.name if prop.city else ""
         if city_name and city_name not in cities:
@@ -196,6 +226,7 @@ def build_snapshot(
                     "title": job.title,
                     "status": job.status,
                     "notes": notes,
+                    "who": name_for(job.created_by_id, who_names),
                 }
             )
         properties.append(
@@ -284,6 +315,10 @@ def build_snapshot(
             continue
         if property_id and job.property_id != property_id:
             continue
+        if property_ids is not None and job.property_id not in property_ids:
+            continue
+        if person_id and job.created_by_id != person_id:
+            continue
         unit = db.session.get(Unit, job.unit_id) if job.unit_id else None
         prop = db.session.get(Property, job.property_id)
         followups.append(
@@ -298,20 +333,34 @@ def build_snapshot(
         )
 
     from app.services.miles import traveled_for_report
+    from app.services.report_scope import people_totals
 
-    driven = traveled_for_report(start, end)
+    mile_users = None
+    mile_trips = None
+    if person_id:
+        mile_users = {person_id}
+    elif property_ids is not None:
+        mile_users = {row.created_by_id for row in week_jobs if row.created_by_id}
+        mile_users |= {row.user_id for row in week_exp if row.user_id}
+        mile_users |= {row.created_by_id for row in trips if row.id in trip_ids and row.created_by_id}
+        mile_trips = set(trip_ids)
+    driven = traveled_for_report(start, end, user_ids=mile_users, trip_ids=mile_trips)
     snapshot_miles_traveled = driven["total"]
     snapshot_miles_log = driven["lines"]
     title_city = cities[0] if len(cities) == 1 else ", ".join(cities[:4])
-    if kind == "company":
+    if audience == "person" and subject:
+        title = f"Weekly report · {subject} · {start.isoformat()} to {end.isoformat()}"
+    elif kind == "company":
         title = f"Company report · {start.isoformat()} to {end.isoformat()}"
+    elif audience == "region" and subject:
+        title = f"Weekly report · {subject} · {start.isoformat()} to {end.isoformat()}"
     elif kind == "property":
         title = f"Property report · {start.isoformat()} to {end.isoformat()}"
     elif kind == "adhoc":
         title = f"Field report · {start.isoformat()} to {end.isoformat()}"
     else:
         title = f"Weekly report · {start.isoformat()} to {end.isoformat()}"
-    if title_city:
+    if title_city and audience != "person":
         title = f"{title} · {title_city}"
 
     snapshot = {
@@ -319,6 +368,12 @@ def build_snapshot(
         "title": title,
         "company": company,
         "author": author,
+        "audience": audience,
+        "subject": subject,
+        "audience_line": audience_line,
+        "person_id": int(person_id) if person_id else None,
+        "property_ids": None if property_ids is None else sorted({int(i) for i in property_ids}),
+        "people": [] if person_id else people_totals(week_jobs, week_exp, snapshot_miles_log),
         "voice": (profile.report_voice if profile else "") or "plain, for a company reader",
         "period": {"start": start.isoformat(), "end": end.isoformat()},
         "cities": cities,
@@ -337,7 +392,7 @@ def build_snapshot(
             "other": spend(week_exp, "other"),
             "lines": lines,
         },
-        "plan": _plan_lines(start, end),
+        "plan": _plan_lines(start, end, property_ids, person_id),
         "handoffs": handoffs[:12],
         "followups": followups,
         "prior": {
@@ -387,6 +442,11 @@ def render_csv(snapshot: dict) -> bytes:
     writer.writerow(["Follow-up", "Unit", "Property", "Status"])
     for row in snapshot.get("followups") or []:
         writer.writerow([row.get("title", ""), row.get("unit", ""), " ".join(x for x in (row.get("property"), row.get("city")) if x), row.get("status", "")])
+    if snapshot.get("people"):
+        writer.writerow([])
+        writer.writerow(["Person", "Jobs", "Completed", "Spend", "Miles"])
+        for row in snapshot["people"]:
+            writer.writerow([row.get("name", ""), row.get("jobs", 0), row.get("done", 0), money(row.get("spend_cents")), row.get("miles") or 0])
     return buf.getvalue().encode("utf-8-sig")
 
 
@@ -414,6 +474,8 @@ def render_markdown(snapshot: dict) -> str:
         f"Prepared for {snapshot.get('company') or 'the company'}.",
         f"Period: {period.get('start')} through {period.get('end')}.",
     ]
+    if snapshot.get("audience_line"):
+        lines.append(snapshot["audience_line"])
     if snapshot.get("kind") == "company":
         lines.append("This packet is the company review copy: jobs, units, miles, and money.")
     lines += [
@@ -425,6 +487,16 @@ def render_markdown(snapshot: dict) -> str:
         f"- Blocked: {totals.get('jobs_blocked', 0)}",
         f"- Units visited: {totals.get('units', 0)}",
         "",
+    ]
+    if snapshot.get("people"):
+        lines += ["## Who did the work", ""]
+        for row in snapshot["people"]:
+            lines.append(
+                f"- {row.get('name')}: {row.get('jobs', 0)} jobs, {row.get('done', 0)} completed, "
+                f"{money(row.get('spend_cents'))}, {row.get('miles') or 0} miles."
+            )
+        lines.append("")
+    lines += [
         "## Properties and units",
         "",
     ]
@@ -447,7 +519,8 @@ def render_markdown(snapshot: dict) -> str:
         for job in prop.get("jobs") or []:
             unit = f"{job.get('unit')} — " if job.get("unit") else ""
             note = f" — {job['notes']}" if job.get("notes") else ""
-            lines.append(f"- {unit}{job.get('title')} ({job.get('status')}){note}")
+            who = f" · {job['who']}" if job.get("who") else ""
+            lines.append(f"- {unit}{job.get('title')} ({job.get('status')}){who}{note}")
         lines.append("")
     lines += ["## Plan and what happened", ""]
     if snapshot.get("plan"):

@@ -1,11 +1,12 @@
-const ASSET_V = "32";
+const ASSET_V = "34";
 
 const CACHE = "apt-shell-" + ASSET_V;
 const SHELL = [
   "/static/offline.html",
   "/static/css/apt.css?v=" + ASSET_V,
   "/static/css/apt-desk.css?v=" + ASSET_V,
-  "/static/js/apt.js?v=" + ASSET_V
+  "/static/js/apt.js?v=" + ASSET_V,
+  "/static/js/overlays.js?v=" + ASSET_V
 ];
 
 self.addEventListener("install", function (event) {

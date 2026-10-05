@@ -40,7 +40,7 @@
       <a href="/places" {% if request.path.startswith('/places') or request.path.startswith('/properties') %}aria-current="page"{% endif %}>Properties</a>
       <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
       <a href="/ready" {% if request.path == '/ready' or request.path.startswith('/contractors') %}aria-current="page"{% endif %}>Make ready</a>
-      <a href="/pm" {% if request.path.startswith('/pm') %}aria-current="page"{% endif %}>Upkeep</a>
+      <a href="/pm" {% if request.path.startswith('/pm') %}aria-current="page"{% endif %}>Upkeep <span class="count-pill">{{ pm_n }}</span></a>
       <a href="/inventory" {% if request.path.startswith('/inventory') %}aria-current="page"{% endif %}>Inventory</a>
       {% if can_manage_people %}
       <a href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>People</a>
@@ -138,5 +138,6 @@
   </nav>
   {% endif %}
   <script src="{{ url_for('static', filename='js/apt.js') }}?v={{ asset_v }}"></script>
+  <script src="{{ url_for('static', filename='js/overlays.js') }}?v={{ asset_v }}"></script>
 </body>
 </html>

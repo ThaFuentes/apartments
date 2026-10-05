@@ -486,8 +486,10 @@ def apply_pm_save(user, payload: dict, source: str) -> dict:
     )
     unit = gear.unit
     where = f"unit {unit.unit_number}" if unit else "the record"
-    due = f" Next due {next_due.isoformat()}." if next_due else ""
-    reply = f"Reminder saved: {task} every {every_days} days on the {gear.kind or 'equipment'} in {where}.{due}"
+    from app.services.upkeep import interval_label
+
+    span = interval_label(every_days)
+    reply = f"Reminder saved: {task} every {span} on the {gear.kind or 'equipment'} in {where}."
     reply += _who_bit(user)
     return {"ok": True, "reply": reply, "pm_id": row.id, "equipment_id": gear.id}
 
@@ -539,7 +541,9 @@ def apply_pm_done(user, payload: dict, source: str) -> dict:
     )
     unit = gear.unit if gear else None
     where = f"unit {unit.unit_number}" if unit else "the record"
-    reply = f"{row.task} is logged on the {gear.kind or 'equipment'} in {where}. Next due {row.next_due.isoformat()}."
+    from app.services.upkeep import interval_label
+
+    reply = f"{row.task} is logged on the {gear.kind or 'equipment'} in {where}. It comes up again in {interval_label(row.every_days)}."
     reply += _who_bit(user)
     return {"ok": True, "reply": reply, "pm_id": row.id, "next_due": row.next_due.isoformat()}
 

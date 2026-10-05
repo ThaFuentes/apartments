@@ -75,6 +75,9 @@ class UnitTask(db.Model):
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     done_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     done_at = db.Column(db.DateTime, nullable=True)
+    returned_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    returned_at = db.Column(db.DateTime, nullable=True)
+    return_note = db.Column(db.Text, nullable=True, default="")
     deleted_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 

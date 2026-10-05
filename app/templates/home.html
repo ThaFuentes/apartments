@@ -38,6 +38,7 @@
     <a class="stat" href="/places"><strong>{{ board.place_count }}</strong><span>Properties</span></a>
     {% endif %}
     <a class="stat" href="/ready"><strong>{{ board.ready_count }}</strong><span>Make ready</span></a>
+    <a class="stat" href="/pm"><strong>{{ pm_n }}</strong><span>Upkeep</span></a>
     <a class="stat" href="{% if board.home_id %}/properties/{{ board.home_id }}?show=occupied{% else %}/places{% endif %}"><strong>{{ board.occupied_count }}</strong><span>Occupied</span></a>
     <a class="stat" href="/plan"><strong>{{ board.open_count }}</strong><span>Still open</span></a>
     {% if board.people %}

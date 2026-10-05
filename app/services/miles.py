@@ -129,10 +129,20 @@ def traveled_total(user_id: int) -> float:
     return round(sum(float(row.miles or 0) for row in counted), 1)
 
 
-def traveled_for_report(start, end) -> dict:
+def traveled_for_report(start, end, user_ids=None, trip_ids=None) -> dict:
+    """Miles in the period.
+
+    user_ids limits the people. trip_ids limits the trips, so a property
+    report does not pick up miles from a different property. Omit both for
+    the company packet.
+    """
     rows = MilesEntry.query.order_by(MilesEntry.recorded_at.asc()).all()
     in_period = []
     for row in rows:
+        if user_ids is not None and row.user_id not in user_ids:
+            continue
+        if trip_ids is not None and row.trip_id not in trip_ids:
+            continue
         day = row.recorded_at.date() if row.recorded_at else None
         if day and start <= day <= end:
             in_period.append(row)
@@ -151,6 +161,7 @@ def traveled_for_report(start, end) -> dict:
                 "note": row.note,
                 "origin": row.origin,
                 "destination": row.destination,
+                "user_id": row.user_id,
             }
             for row in counted
         ],

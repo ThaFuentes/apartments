@@ -195,18 +195,149 @@ def set_ready_job_done(user, unit: Unit, job: str, done: bool) -> dict:
         if row is None:
             return {"ok": False, "reply": f"Could not file {title}."}
         if row.status != "done":
+            before = {
+                "status": row.status,
+                "return_note": row.return_note or "",
+                "title": row.title,
+                "unit_id": unit.id,
+                "property_id": unit.property_id,
+            }
             row.status = "done"
             row.done_by_id = getattr(user, "id", None)
             row.done_at = utcnow()
+            row.return_note = ""
+            row.returned_by_id = None
+            row.returned_at = None
+            audit(
+                getattr(user, "id", None),
+                "human",
+                "update",
+                "unit_task",
+                row.id,
+                before,
+                {
+                    "status": "done",
+                    "return_note": "",
+                    "title": row.title,
+                    "done_by_id": row.done_by_id,
+                    "unit_id": unit.id,
+                    "property_id": unit.property_id,
+                    "unit_number": unit.unit_number,
+                },
+            )
         return {"ok": True, "reply": f"{title} is done on unit {unit.unit_number}.", "unit_id": unit.id}
     if row is None:
         return add_ready_job(user, unit, slug or title, "human")
     if row.status == "done":
+        before = {
+            "status": row.status,
+            "title": row.title,
+            "done_by_id": row.done_by_id,
+            "unit_id": unit.id,
+            "property_id": unit.property_id,
+        }
         unit.rentable = False
         row.status = "vendored" if (row.kind or "") == "vendor" or (row.vendor or "").strip() else "needed"
-        row.done_by_id = None
-        row.done_at = None
+        audit(
+            getattr(user, "id", None),
+            "human",
+            "update",
+            "unit_task",
+            row.id,
+            before,
+            {
+                "status": row.status,
+                "title": row.title,
+                "done_by_id": row.done_by_id,
+                "unit_id": unit.id,
+                "property_id": unit.property_id,
+                "unit_number": unit.unit_number,
+            },
+        )
     return {"ok": True, "reply": f"{title} is open again on unit {unit.unit_number}.", "unit_id": unit.id}
+
+
+def reopen_turn(user, unit: Unit) -> None:
+    """A unit marked ready to rent goes back on the make-ready list."""
+    if (unit.occupancy or "") == "occupied":
+        return
+    if (unit.occupancy or "") != "make_ready":
+        from app.services.board import set_occupancy
+
+        set_occupancy(user, unit, "make_ready", "human")
+        return
+    if unit.rentable:
+        before = {"occupancy": unit.occupancy or "", "rentable": True, "unit_number": unit.unit_number, "property_id": unit.property_id}
+        unit.rentable = False
+        audit(
+            getattr(user, "id", None),
+            "human",
+            "update",
+            "unit",
+            unit.id,
+            before,
+            {"occupancy": unit.occupancy or "", "rentable": False, "unit_number": unit.unit_number, "property_id": unit.property_id},
+        )
+
+
+def send_back_task(user, task: UnitTask, note: str) -> dict:
+    """Office sends finished make-ready work back, with what is still left."""
+    text = " ".join((note or "").split())
+    if not text:
+        return {"ok": False, "reply": "Say what still needs doing."}
+    unit = task.unit or db.session.get(Unit, task.unit_id)
+    if not unit or unit.deleted_at:
+        return {"ok": False, "reply": "That unit is gone."}
+    if (unit.occupancy or "") == "occupied":
+        return {"ok": False, "reply": f"Mark unit {unit.unit_number} vacant before sending work back."}
+    before_status = task.status or ""
+    before = {
+        "status": before_status,
+        "return_note": task.return_note or "",
+        "returned_by_id": task.returned_by_id,
+        "title": task.title,
+        "unit_id": unit.id,
+        "property_id": unit.property_id,
+    }
+    task.return_note = text[:2000]
+    task.returned_by_id = getattr(user, "id", None)
+    task.returned_at = utcnow()
+    if task.status == "done":
+        task.status = "vendored" if (task.kind or "") == "vendor" or (task.vendor or "").strip() else "needed"
+    reopen_turn(user, unit)
+    audit(
+        getattr(user, "id", None),
+        "human",
+        "update",
+        "unit_task",
+        task.id,
+        before,
+        {
+            "status": task.status,
+            "return_note": task.return_note,
+            "returned_by_id": task.returned_by_id,
+            "title": task.title,
+            "unit_id": unit.id,
+            "property_id": unit.property_id,
+            "unit_number": unit.unit_number,
+        },
+    )
+    who = person_label(getattr(user, "id", None))
+    if before_status == "done":
+        reply = f"{task.title} is open again on unit {unit.unit_number}: {text}"
+    else:
+        reply = f"{task.title} on unit {unit.unit_number} still needs: {text}"
+    if who:
+        reply += f" Sent back by {who}."
+    from app.services.access import announce
+
+    announce(
+        unit.property_id,
+        getattr(user, "id", None),
+        f"{who or 'Someone'} sent {task.title} back on unit {unit.unit_number}: {text}",
+        f"/units/{unit.id}",
+    )
+    return {"ok": True, "reply": reply, "unit_id": unit.id}
 
 
 def ready_checklist(tasks) -> list[dict]:
@@ -222,6 +353,14 @@ def ready_checklist(tasks) -> list[dict]:
             prefix = label.lower() + " "
             dashed = label.lower() + "-"
             row = next((candidate for key, candidate in by_title.items() if key.startswith(prefix) or key.startswith(dashed)), None)
+        actor_id = None
+        if row:
+            if row.status == "done" and row.done_by_id:
+                actor_id = row.done_by_id
+            elif (row.return_note or "").strip() and row.returned_by_id:
+                actor_id = row.returned_by_id
+            else:
+                actor_id = row.created_by_id
         checks.append(
             {
                 "slug": slug,
@@ -230,6 +369,8 @@ def ready_checklist(tasks) -> list[dict]:
                 "open": bool(row and row.status in ("needed", "vendored")),
                 "task_id": row.id if row else None,
                 "vendor": ((row.vendor or "").strip() if row else ""),
+                "return_note": (row.return_note or "").strip() if row and row.status != "done" else "",
+                "actor": person_label(actor_id) if actor_id else "",
             }
         )
     return checks

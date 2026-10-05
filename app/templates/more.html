@@ -9,7 +9,7 @@
   <div class="menu">
     <a href="/ready">Make ready <span>→</span></a>
     <a href="/contractors">Contractors <span>→</span></a>
-    <a href="/pm">Preventive maintenance <span>→</span></a>
+    <a href="/pm"><span>Preventive maintenance <span class="count-pill">{{ pm_n }}</span></span><span>→</span></a>
     <a href="/inventory">Equipment inventory <span>→</span></a>
     <a href="/miles">Miles <span>→</span></a>
     <a href="/expenses">Gas and receipts <span>→</span></a>
@@ -22,8 +22,10 @@
     {% if can_manage_regions %}
     <a href="/regions">Regions <span>→</span></a>
     {% endif %}
-    {% if current_user.role == 'owner' %}
+    {% if not current_user.is_viewer %}
     <a href="/settings">Settings <span>→</span></a>
+    {% endif %}
+    {% if current_user.role == 'owner' %}
     <a href="/security">Security console <span>→</span></a>
     {% endif %}
   </div>

@@ -464,8 +464,8 @@ def _user_offer(user, text, match, key, source) -> dict:
 def _set_key_rank(user, label: str, order: int) -> dict:
     from app.services.providers import PROVIDERS
 
-    if getattr(user, "role", "") != "owner":
-        return {"ok": False, "reply": "Only the owner sets which key is 1st, 2nd, or 3rd."}
+    if getattr(user, "role", "") == "viewer":
+        return {"ok": False, "reply": "This login does not set keys."}
     rows = ApiCredential.query.filter_by(user_id=user.id).all()
     want = label.lower()
     match = None

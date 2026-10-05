@@ -32,6 +32,7 @@
       {% if item.serial_number %} · Serial {{ item.serial_number }}{% endif %}
     </p>
     {% if item.notes %}<p>{{ item.notes }}</p>{% endif %}
+    {% if item.how_to %}<p class="how-to">{{ item.how_to }}</p>{% endif %}
   </article>
   {% endfor %}
 </section>

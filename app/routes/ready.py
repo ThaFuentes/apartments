@@ -105,15 +105,14 @@ def _field_next(fallback: str, allowed: str) -> str:
 def pm_board():
     if not _history_ok():
         abort(403)
-    from app.services.appliers_field import pm_due_rows
     from app.services.access import can_edit_property
     from app.services.context import property_picker
+    from app.services.equipment import kind_choices
+    from app.services.upkeep import pm_items
 
     properties, default_property_id = property_picker(current_user)
     property_param = request.args.get("property")
-    if property_param is None:
-        selected_id = default_property_id
-    elif property_param == "":
+    if property_param in (None, ""):
         selected_id = None
     else:
         try:
@@ -123,8 +122,8 @@ def pm_board():
     property_ids = {prop.id for prop in properties}
     if selected_id is not None and selected_id not in property_ids:
         selected_id = -1
-    reminders = pm_due_rows(current_user)
-    reminders = [item for item in reminders if selected_id is None or item["property"].id == selected_id]
+    reminders = pm_items(current_user)
+    reminders = [item for item in reminders if selected_id is None or (item["property"] and item["property"].id == selected_id)]
     properties_by_id = {prop.id: prop for prop in properties}
     if selected_id == -1:
         reminders = []
@@ -135,9 +134,13 @@ def pm_board():
     return render_template(
         "pm.html",
         reminders=reminders,
+        due_count=sum(1 for item in reminders if item.get("due")),
         property_choices=properties,
+        editable_properties=[prop for prop in properties if can_edit_property(current_user, prop.id)],
+        gear_kinds=kind_choices(),
+        default_property_id=default_property_id,
         selected_property_id=selected_id if selected_id != -1 else None,
-        show_all_properties=request.args.get("property") == "" and selected_id is None,
+        show_all_properties=selected_id is None,
     )
 
 
@@ -185,6 +188,7 @@ def equipment_pm_save(equipment_id):
     from app.models import Equipment, Property, Unit
     from app.services.appliers import apply_tool
     from app.services.access import require_edit
+    from app.services.upkeep import chosen_days
 
     gear = db.session.get(Equipment, equipment_id)
     if not gear or gear.deleted_at:
@@ -201,7 +205,7 @@ def equipment_pm_save(equipment_id):
         {
             "equipment_id": gear.id,
             "task": request.form.get("task") or "",
-            "every_days": request.form.get("every_days") or "90",
+            "every_days": chosen_days(request.form),
             "property_id": gear.property_id,
         },
         "human",

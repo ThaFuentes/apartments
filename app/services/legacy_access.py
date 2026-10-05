@@ -10,26 +10,34 @@ ROLE_CAPABILITIES = {
         "manage_roles", "log_personal_expenses", "view_map", "delete_records",
     },
     "regional_manager": {
-        "read_region", "read_assigned_properties", "create_properties_region", "edit_properties",
+        "read_region", "read_assigned_properties", "read_reports", "manage_reports",
+        "create_properties_region", "edit_properties",
         "write_maintenance", "manage_region_people", "manage_team", "log_personal_expenses", "view_map", "delete_records",
     },
     "regional_property_manager": {
-        "read_region", "read_assigned_properties", "create_properties_region", "edit_properties",
+        "read_region", "read_assigned_properties", "read_reports", "manage_reports",
+        "create_properties_region", "edit_properties",
         "write_maintenance", "manage_region_people", "manage_property_people", "manage_team",
         "log_personal_expenses", "view_map", "delete_records",
     },
     "maintenance_regional": {
-        "read_region", "read_assigned_properties", "manage_region_people", "manage_team",
+        "read_region", "read_assigned_properties", "read_reports", "manage_reports",
+        "manage_region_people", "manage_team",
         "write_maintenance", "log_personal_expenses", "view_map", "delete_records",
     },
     "property_manager": {
-        "read_assigned_properties", "manage_properties", "edit_properties", "write_maintenance",
+        "read_assigned_properties", "read_reports", "manage_reports",
+        "manage_properties", "edit_properties", "write_maintenance",
         "manage_property_people", "manage_team", "log_personal_expenses", "view_map", "delete_records",
     },
-    "assistant_manager": {"read_assigned_properties", "write_maintenance", "log_personal_expenses", "view_map", "delete_records"},
+    "assistant_manager": {
+        "read_assigned_properties", "read_reports", "manage_reports",
+        "write_maintenance", "log_personal_expenses", "view_map", "delete_records",
+    },
     "maintenance_supervisor": {"read_assigned_properties", "manage_team", "write_maintenance", "log_personal_expenses", "view_map", "delete_records"},
     "maintenance_manager": {
-        "read_assigned_properties", "write_maintenance", "manage_team", "log_personal_expenses", "view_map", "delete_records",
+        "read_assigned_properties", "read_reports", "manage_reports",
+        "write_maintenance", "manage_team", "log_personal_expenses", "view_map", "delete_records",
     },
     "maintenance_person": {"read_assigned_properties", "write_maintenance", "log_personal_expenses", "delete_records"},
     # Office works the units from the desk: make readies, move-in dates, keys, and
@@ -85,9 +93,12 @@ def baseline_decision(role: str, tool: str, payload: dict | None = None, active:
     if tool == "read_reports":
         allowed = has_default_capability(role, "read_reports")
         return {"ok": allowed, "reply": "Reports are not available to this role."}
-    if tool in {"draft_report", "send_report"}:
-        allowed = has_default_capability(role, "manage_reports")
-        return {"ok": allowed, "reply": "Report changes are not available to this role."}
+    if tool == "send_report":
+        allowed = role in ("owner", "admin")
+        return {"ok": allowed, "reply": "" if allowed else "Only an owner or admin sends a report."}
+    if tool == "draft_report":
+        allowed = has_default_capability(role, "manage_reports") or has_default_capability(role, "write_maintenance") or has_default_capability(role, "log_personal_expenses")
+        return {"ok": allowed, "reply": "" if allowed else "Report changes are not available to this role."}
     if tool == "update_settings":
         allowed = has_default_capability(role, "manage_settings")
         return {"ok": allowed, "reply": "This login cannot manage that company setting."}

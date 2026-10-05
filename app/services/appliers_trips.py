@@ -654,10 +654,17 @@ def apply_update_settings(user, payload, source) -> dict:
         "smtp_host",
         "smtp_user",
         "smtp_from",
+        "platform_instructions",
     )
     before = {name: getattr(profile, name) for name in fields}
     changed = []
     for name in fields:
+        if name == "platform_instructions":
+            if payload.get(name) is None:
+                continue
+            profile.platform_instructions = str(payload.get(name) or "").strip()[:4000]
+            changed.append(name)
+            continue
         if payload.get(name) is not None and str(payload.get(name)).strip() != "":
             setattr(profile, name, str(payload[name]).strip()[:200] if name != "always_ask" else str(payload[name]).strip())
             changed.append(name)

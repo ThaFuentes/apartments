@@ -68,13 +68,10 @@ def interpret(user, text: str, key: str, source: str) -> dict:
     if going:
         return _plan_from_phrase(user, going, key, source)
     if re.search(r"\b(?:csv|spreadsheet)\b", text, re.I) and not UNIT_JOB.search(text):
-        from app.models import Report
+        from app.services.report_scope import reports_for
 
-        latest = (
-            Report.query.filter(Report.deleted_at.is_(None), Report.status.in_(("ready", "sent")))
-            .order_by(Report.id.desc())
-            .first()
-        )
+        saved = reports_for(user)
+        latest = saved[0] if saved else None
         if latest:
             return {"ok": True, "reply": f"CSV for {latest.title}: /reports/{latest.id}/csv"}
         return {"ok": True, "reply": "No saved report yet. This week is at /reports/preview.csv"}

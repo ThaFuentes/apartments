@@ -57,12 +57,32 @@ def expense_save():
 def reports():
     if not _reports_ok():
         abort(403)
-    saved = Report.query.filter(Report.deleted_at.is_(None), Report.status.in_(("ready", "sent"))).order_by(Report.id.desc()).all()
+    from app.services.report_scope import manages_team_report, people_choices, reports_for, scope_for
+
+    saved = reports_for(current_user)
     if current_user.is_viewer:
         preview = None
+        scope = {}
     else:
-        preview = build_snapshot(kind="weekly", author=current_user.label())
-    return render_template("reports.html", saved=saved, preview=preview, money=money, msg_key=_new_key())
+        scope = scope_for(current_user)
+        preview = build_snapshot(
+            kind="weekly",
+            author=current_user.label(),
+            property_ids=scope.get("property_ids"),
+            person_id=scope.get("person_id"),
+            audience=scope.get("audience") or "",
+            subject=scope.get("subject") or "",
+            audience_line=scope.get("audience_line") or "",
+        )
+    return render_template(
+        "reports.html",
+        saved=saved,
+        preview=preview,
+        money=money,
+        msg_key=_new_key(),
+        team_report=manages_team_report(current_user),
+        people=people_choices(current_user) if not current_user.is_viewer else [],
+    )
 
 @bp.post("/reports/build")
 @login_required
@@ -72,10 +92,13 @@ def reports_build():
     from app.services.pending import commit_apply
 
     kind = request.form.get("kind") or "weekly"
+    payload = {"kind": kind, "force_new": request.form.get("force_new") == "1"}
+    if request.form.get("person_id"):
+        payload["person_id"] = request.form.get("person_id")
     result = commit_apply(
         current_user,
         "draft_report",
-        {"kind": kind, "force_new": request.form.get("force_new") == "1"},
+        payload,
         "human",
         _key() or f"report-{kind}-{_new_key()}",
     )
@@ -91,6 +114,10 @@ def report_detail(report_id):
         abort(403)
     report = db.session.get(Report, report_id)
     if not report or report.deleted_at:
+        abort(404)
+    from app.services.report_scope import can_open_report
+
+    if not can_open_report(current_user, report):
         abort(404)
     viewers = User.query.filter_by(role="viewer", active=True, can_see_reports=True).order_by(User.username.asc()).all()
     return render_template(
@@ -108,7 +135,13 @@ def report_edit(report_id):
     if current_user.is_viewer:
         abort(403)
     report = db.session.get(Report, report_id)
-    if not report or report.status == "sent":
+    from app.services.report_scope import can_open_report
+
+    if not report or report.deleted_at or not can_open_report(current_user, report):
+        abort(404)
+    if current_user.role not in ("owner", "admin") and report.created_by_id != current_user.id:
+        abort(403)
+    if report.status == "sent":
         flash("A sent report stays as the copy your bosses already have.", "warn")
         return redirect(f"/reports/{report_id}")
     body = request.form.get("body_md") or ""
@@ -131,6 +164,10 @@ def report_pdf(report_id):
     if not signed:
         if not getattr(current_user, "is_authenticated", False) or not _reports_ok():
             abort(403)
+        from app.services.report_scope import can_open_report
+
+        if not can_open_report(current_user, report):
+            abort(404)
     data = render_pdf(load_snapshot(report))
     name = f"apt-report-{report.id}.pdf"
     return send_bytes(data, "application/pdf", name, as_attachment=request.args.get("dl") == "1")
@@ -140,7 +177,20 @@ def report_pdf(report_id):
 def report_preview_csv():
     if not _reports_ok() or current_user.is_viewer:
         abort(403)
-    snapshot = build_snapshot(kind=request.args.get("kind") or "weekly", author=current_user.label())
+    from app.services.report_scope import scope_for
+
+    scope = scope_for(current_user, person_id=request.args.get("person_id"))
+    if not scope.get("ok"):
+        abort(403)
+    snapshot = build_snapshot(
+        kind=request.args.get("kind") or "weekly",
+        author=current_user.label(),
+        property_ids=scope.get("property_ids"),
+        person_id=scope.get("person_id"),
+        audience=scope.get("audience") or "",
+        subject=scope.get("subject") or "",
+        audience_line=scope.get("audience_line") or "",
+    )
     return send_bytes(render_csv(snapshot), "text/csv", "apt-report-this-week.csv", as_attachment=True)
 
 @bp.get("/reports/<int:report_id>/csv")
@@ -151,7 +201,11 @@ def report_csv(report_id):
     report = db.session.get(Report, report_id)
     if not report or report.deleted_at:
         abort(404)
+    from app.services.report_scope import can_open_report
     from app.services.reports import render_csv
+
+    if not can_open_report(current_user, report):
+        abort(404)
 
     data = render_csv(load_snapshot(report))
     return send_bytes(data, "text/csv", f"apt-report-{report.id}.csv", as_attachment=True)
