@@ -258,7 +258,7 @@ def _staff_from_sentence(actor, text: str, key: str, source: str):
             "password": (PASSWORD.search(raw).group(1) if PASSWORD.search(raw) else ""),
             "can_see_reports": bool(re.search(r"\breports?\b", raw, re.I)),
             "can_see_history": True,
-            "can_see_live_map": bool(re.search(r"\b(live map|the map)\b", raw, re.I)),
+            "can_see_live_map": False,
             "_say": f"Add {spoken_name or named} as {title}.",
         }
         if clauses:

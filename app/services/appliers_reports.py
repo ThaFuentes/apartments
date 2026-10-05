@@ -366,7 +366,7 @@ def apply_invite_viewer(user, payload, source) -> dict:
             created_by=user,
             can_see_reports=payload.get("can_see_reports", True),
             can_see_history=payload.get("can_see_history", role != "viewer" or payload.get("can_see_history", True)),
-            can_see_live_map=bool(payload.get("can_see_live_map", False)),
+            can_see_live_map=False,
             is_bot=bool(payload.get("is_bot")),
             security_email=payload.get("security_email") or None,
             reset_email=payload.get("reset_email") or None,
@@ -566,9 +566,10 @@ def apply_update_viewer(user, payload, source) -> dict:
             target.email = clean_email(payload.get("email"))
         except ValueError as exc:
             return {"ok": False, "reply": str(exc)}
-    for flag in ("can_see_reports", "can_see_history", "can_see_live_map", "active"):
+    for flag in ("can_see_reports", "can_see_history", "active"):
         if flag in payload and payload[flag] is not None:
             setattr(target, flag, bool(payload[flag]))
+    target.can_see_live_map = False
     if payload.get("display_name"):
         target.display_name = str(payload["display_name"])[:150]
     if payload.get("phone") is not None:

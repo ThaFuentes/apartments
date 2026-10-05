@@ -72,10 +72,7 @@ def refresh_notices(user) -> None:
         _clear(user.id, "weekly_due")
 
     shift = open_shift(user)
-    if shift and shift.sharing_on:
-        _ensure(user.id, "share_on", "Location sharing is on. It turns itself off if you leave or the day rolls over.", "/map")
-    else:
-        _clear(user.id, "share_on")
+    _clear(user.id, "share_on")
     if shift and not shift.ended_at and shift.started_at and shift.started_at < now - timedelta(hours=8):
         _ensure(user.id, "end_visit", "This visit has been open for hours. End it when you leave.", "/")
     else:

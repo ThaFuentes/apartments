@@ -651,28 +651,6 @@
   window.addEventListener("online", flush);
   flush();
 
-  const sharing = document.body.getAttribute("data-share") === "1";
-  let pingWarned = false;
-  async function ping() {
-    if (!sharing || !navigator.onLine || !navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(function (pos) {
-      fetch("/api/ping", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": token, Accept: "application/json" },
-        body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-      }).then(function (resp) {
-        if (sessionGone(resp) && !pingWarned) {
-          pingWarned = true;
-          addBubble("assistant", SESSION_EXPIRED);
-        }
-      }).catch(function () {});
-    });
-  }
-  if (sharing) {
-    ping();
-    window.setInterval(ping, 5 * 60 * 1000);
-  }
-
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(function () {});
   }
@@ -730,36 +708,6 @@
       storeSet("apt-install-hide", "1");
       install.hidden = true;
     });
-  }
-
-  const mapBox = document.getElementById("map");
-  const mapDataEl = document.getElementById("apt-map-data");
-  if (mapBox && mapDataEl && window.L) {
-    let data = { pins: [], home: null };
-    try { data = JSON.parse(mapDataEl.textContent || "{}"); } catch (err) {}
-    if (L.Icon && L.Icon.Default) {
-      L.Icon.Default.imagePath = "/static/vendor/leaflet/images/";
-    }
-    const map = L.map("map");
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, attribution: "&copy; OpenStreetMap" }).addTo(map);
-    const bounds = [];
-    (data.pins || []).forEach(function (pin) {
-      const marker = L.marker([pin.lat, pin.lng]).addTo(map);
-      const wrap = document.createElement("span");
-      const link = document.createElement("a");
-      link.setAttribute("href", pin.href || "#");
-      link.textContent = pin.name || "";
-      wrap.appendChild(link);
-      wrap.appendChild(document.createTextNode(" · " + (pin.city || "")));
-      marker.bindPopup(wrap);
-      bounds.push([pin.lat, pin.lng]);
-    });
-    if (data.home) {
-      L.circleMarker([data.home.lat, data.home.lng], { radius: 8 }).addTo(map).bindPopup(data.home.label || "");
-      bounds.push([data.home.lat, data.home.lng]);
-    }
-    if (bounds.length) map.fitBounds(bounds, { padding: [24, 24] });
-    else map.setView([31.85, -102.37], 6);
   }
 
   const providerInfoEl = document.getElementById("provider-info");

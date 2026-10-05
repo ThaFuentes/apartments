@@ -7,44 +7,44 @@ ROLE_CAPABILITIES = {
         "read_company", "read_assigned_properties", "read_reports", "manage_reports",
         "manage_users", "manage_regions", "manage_properties", "create_properties", "edit_properties",
         "write_maintenance", "manage_property_people", "manage_region_people", "manage_team",
-        "manage_roles", "log_personal_expenses", "view_map", "delete_records",
+        "manage_roles", "log_personal_expenses", "delete_records",
     },
     "regional_manager": {
         "read_region", "read_assigned_properties", "read_reports", "manage_reports",
         "create_properties_region", "edit_properties",
-        "write_maintenance", "manage_region_people", "manage_team", "log_personal_expenses", "view_map", "delete_records",
+        "write_maintenance", "manage_region_people", "manage_team", "log_personal_expenses", "delete_records",
     },
     "regional_property_manager": {
         "read_region", "read_assigned_properties", "read_reports", "manage_reports",
         "create_properties_region", "edit_properties",
         "write_maintenance", "manage_region_people", "manage_property_people", "manage_team",
-        "log_personal_expenses", "view_map", "delete_records",
+        "log_personal_expenses", "delete_records",
     },
     "maintenance_regional": {
         "read_region", "read_assigned_properties", "read_reports", "manage_reports",
         "manage_region_people", "manage_team",
-        "write_maintenance", "log_personal_expenses", "view_map", "delete_records",
+        "write_maintenance", "log_personal_expenses", "delete_records",
     },
     "property_manager": {
         "read_assigned_properties", "read_reports", "manage_reports",
         "manage_properties", "edit_properties", "write_maintenance",
-        "manage_property_people", "manage_team", "log_personal_expenses", "view_map", "delete_records",
+        "manage_property_people", "manage_team", "log_personal_expenses", "delete_records",
     },
     "assistant_manager": {
         "read_assigned_properties", "read_reports", "manage_reports",
-        "write_maintenance", "log_personal_expenses", "view_map", "delete_records",
+        "write_maintenance", "log_personal_expenses", "delete_records",
     },
-    "maintenance_supervisor": {"read_assigned_properties", "manage_team", "write_maintenance", "log_personal_expenses", "view_map", "delete_records"},
+    "maintenance_supervisor": {"read_assigned_properties", "manage_team", "write_maintenance", "log_personal_expenses", "delete_records"},
     "maintenance_manager": {
         "read_assigned_properties", "read_reports", "manage_reports",
-        "write_maintenance", "manage_team", "log_personal_expenses", "view_map", "delete_records",
+        "write_maintenance", "manage_team", "log_personal_expenses", "delete_records",
     },
     "maintenance_person": {"read_assigned_properties", "write_maintenance", "log_personal_expenses", "delete_records"},
     # Office works the units from the desk: make readies, move-in dates, keys, and
     # contractors all land on the record with their name on the change.
-    "office": {"read_company", "read_reports", "write_maintenance", "view_map"},
+    "office": {"read_company", "read_reports", "write_maintenance"},
     # A legacy read-only login. It sees the records and changes nothing.
-    "viewer": {"read_company", "read_reports", "view_map"},
+    "viewer": {"read_company", "read_reports"},
 }
 LEGACY_ROLE_MAP = {"field": "maintenance_person", "employee": "maintenance_person", "viewer": "viewer", "boss": "viewer"}
 PERSONAL_TOOLS = {"estimate_miles", "log_expense", "log_miles", "log_odometer"}

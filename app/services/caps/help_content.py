@@ -118,7 +118,7 @@ def role_intro(role: str) -> str:
         "maintenance_manager": "You manage maintenance. You can see work orders, equipment, and coordinate with your maintenance team.",
         "maintenance_person": "You do maintenance work. You can log work at units, record equipment, and update work orders.",
         "office": "You work in the office. You can see properties, log work, and update unit status.",
-        "viewer": "You can view reports and the map, but cannot change anything.",
+        "viewer": "You can view reports, but cannot change anything.",
     }
     return intros.get(role, "You can see the help topics below.")
 
@@ -156,7 +156,6 @@ def role_summary(role: str, user=None) -> str:
         "manage_team": "Coordinate maintenance team",
         "manage_roles": "Create extra job titles",
         "log_personal_expenses": "Log your own mileage and expenses",
-        "view_map": "View map and live location tools",
         "delete_records": "Remove or restore maintenance records",
     }
 

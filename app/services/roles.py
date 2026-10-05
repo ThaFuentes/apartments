@@ -48,7 +48,7 @@ ROLE_HINTS = {
     "maintenance_supervisor": "Supervises maintenance staff at assigned properties.",
     "maintenance_manager": "Coordinates the maintenance team at assigned properties.",
     "maintenance_person": "Logs work at assigned units.",
-    "viewer": "Sees reports and the map. Changes nothing.",
+    "viewer": "Sees reports. Changes nothing.",
 }
 
 # Who a login may hire. Owner is handled separately as "any known role".

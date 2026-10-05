@@ -608,7 +608,6 @@ body.gate .gate-actions { display: flex; flex-direction: column; gap: 0.55rem; m
   border-radius: 14px;
   padding: 0.7rem 0.85rem;
 }
-.map { height: 62vh; border-radius: var(--radius); border: 1px solid var(--line); }
 .note { white-space: pre-wrap; font: inherit; background: #f8fafb; padding: 0.8rem; border-radius: 14px; color: var(--ink); }
 .kicker { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 details summary { cursor: pointer; font-weight: 700; color: var(--accent); padding: 0.2rem 0; }

@@ -43,7 +43,6 @@ CAPABILITY_LABELS = {
     "manage_roles": "Create extra job titles",
     "manage_security": "Change security settings, 2FA, and API keys",
     "log_personal_expenses": "Log own mileage and expenses",
-    "view_map": "View map and live location tools",
     "delete_records": "Remove or restore maintenance records",
     "delete_expenses": "Remove or restore own expenses",
 }
@@ -183,10 +182,6 @@ def _company_scope(user) -> bool:
 
 def can_read_history(user) -> bool:
     return any(has_capability(user, c) for c in ("read_company", "read_assigned_properties", "read_region"))
-
-
-def can_view_map(user) -> bool:
-    return has_capability(user, "view_map")
 
 
 def region_ids(user) -> set[int]:

@@ -1,87 +1,16 @@
-"""Map, sharing, offline property pack, and photo routes."""
+"""Offline property pack and photo routes."""
 from __future__ import annotations
 
-from flask import abort, flash, jsonify, redirect, render_template, request
+from flask import abort, flash, jsonify, redirect, request
 from flask_login import current_user
 
 from app.builddb.builddb import db
 from app.models import Job, Media, PendingAction, Property, Unit
 from app.services.clock import utcnow
 from app.services.files import read_blob, save_blob, send_bytes
-from app.services.records import loads, site_profile
+from app.services.records import loads
 from app.services.talk import handle_message
 from app.routes.common import bp, login_required, _history_ok, _key, _new_key
-
-
-@bp.get("/map")
-@login_required
-def map_page():
-    if current_user.is_viewer and not current_user.can_see_live_map and not current_user.can_see_history:
-        abort(403)
-    from app.services.access import visible_property_ids
-
-    allowed = visible_property_ids(current_user)
-    props = Property.query.filter(Property.deleted_at.is_(None), Property.lat.isnot(None), Property.id.in_(allowed or {-1})).all()
-    pins = [
-        {
-            "name": p.name,
-            "city": p.city.name if p.city else "",
-            "lat": p.lat,
-            "lng": p.lng,
-            "href": f"/properties/{p.id}",
-        }
-        for p in props
-    ]
-    profile = site_profile()
-    home = None
-    if profile and profile.home_lat is not None:
-        home = {"lat": profile.home_lat, "lng": profile.home_lng, "label": profile.home_label or "Home"}
-    from app.services.share import share_state
-
-    return render_template("map.html", pins=pins, home=home, state=share_state(current_user))
-
-
-@bp.post("/share")
-@login_required
-def share_toggle():
-    if current_user.is_viewer:
-        abort(403)
-    from app.services.share import start_share, stop_share
-    from app.services.records import open_shift
-
-    shift = open_shift(current_user)
-    if request.form.get("on") == "1":
-        result = start_share(current_user)
-    else:
-        if shift and shift.sharing_on:
-            stop_share(shift, "manual")
-            db.session.commit()
-        result = {"ok": True, "reply": "Sharing is off."}
-    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return redirect("/map")
-
-
-@bp.post("/api/ping")
-@login_required
-def ping():
-    if current_user.is_viewer:
-        abort(403)
-    from app.services.share import add_ping
-
-    data = request.get_json(silent=True) or request.form
-    try:
-        lat = float(data.get("lat"))
-        lng = float(data.get("lng"))
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "error": "Need a latitude and longitude."}), 400
-    result = add_ping(
-        current_user,
-        lat,
-        lng,
-        offline_queue=request.headers.get("X-Apt-Offline-Queue") == "1",
-    )
-    code = 200 if result.get("ok") else 409
-    return jsonify(result), code
 
 
 @bp.get("/api/pack/<int:property_id>")

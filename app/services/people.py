@@ -157,7 +157,7 @@ def create_user(
         active=bool(active),
         can_see_reports=bool(can_see_reports) if role in ("viewer", "office") else True,
         can_see_history=bool(can_see_history) if role in ("viewer", "office") else True,
-        can_see_live_map=bool(can_see_live_map) if role in ("viewer", "office") else False,
+        can_see_live_map=False,
         created_by_id=created_by.id if created_by else None,
         created_at=utcnow(),
         updated_at=utcnow(),
