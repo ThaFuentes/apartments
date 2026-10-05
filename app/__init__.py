@@ -224,6 +224,9 @@ def create_app() -> Flask:
         notices = []
         pending_n = 0
         pm_n = 0
+        ready_n = 0
+        saved_property_id = None
+        can_pick_property = False
         chat_lines = []
         chat_cards = []
         can_manage_people = False
@@ -243,11 +246,15 @@ def create_app() -> Flask:
                 confirmed = bool(shift.confirmed)
                 header_property_id = shift.property.id
             try:
-                from app.services.context import property_picker
+                from app.services.access.management import can_choose_own_default_property
+                from app.services.context import current_property, property_picker, remembered_property
 
                 property_choices, default_property_id = property_picker(current_user)
+                focus = remembered_property(current_user)
+                saved_property_id = focus.id if focus else None
+                can_pick_property = can_choose_own_default_property(current_user) and current_user.role != "viewer"
                 here = current_property(current_user)
-                if here:
+                if here and not place:
                     place = here.name
                     city = here.city.name if here.city else city
                     header_property_id = here.id
@@ -275,12 +282,15 @@ def create_app() -> Flask:
             )
             pending_n = PendingAction.query.filter_by(user_id=current_user.id, status="pending").count()
             try:
+                from app.services.ready import ready_open_count
                 from app.services.upkeep import pm_count
 
                 pm_n = pm_count(current_user)
+                ready_n = ready_open_count(current_user)
             except Exception:
                 db.session.rollback()
                 pm_n = 0
+                ready_n = 0
             if getattr(current_user, "role", "") != "viewer":
                 from app.models import ChatMessage
                 from app.services.records import loads as _loads
@@ -376,12 +386,15 @@ def create_app() -> Flask:
             "header_property": place or "Property",
             "header_property_id": header_property_id or default_property_id,
             "default_property_id": default_property_id,
+            "saved_property_id": saved_property_id,
+            "can_pick_property": can_pick_property,
             "header_confirmed": confirmed,
             "property_choices": property_choices,
             "share": share,
             "notices": notices,
             "pending_n": pending_n,
             "pm_n": pm_n,
+            "ready_n": ready_n,
             "chat_lines": chat_lines,
             "chat_cards": chat_cards,
             "chat_key": chat_key,

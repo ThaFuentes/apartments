@@ -7,21 +7,26 @@
     <h1>Upkeep</h1>
     <p class="lead">{{ reminders|length }} reminder{% if reminders|length != 1 %}s{% endif %}{% if due_count %} · {{ due_count }} need doing now{% endif %}.</p>
     <p class="hint">Marking one done resets it for a month, two months, or whatever you set. The number is the list. There is no calendar.</p>
+    {% if selected_name %}<p class="hint">Showing {{ selected_name }}. Change the property at the top to see another.</p>{% endif %}
     <p><a href="/inventory">Equipment inventory</a></p>
   </div>
   {% if property_choices|length > 1 %}
   <details class="change-extra">
     <summary>Which property</summary>
-    <form method="get" class="stack">
-      <label>Property
-        <select name="property">
-          <option value="" {% if show_all_properties %}selected{% endif %}>All assigned properties</option>
+    <form method="post" action="/property/default" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="/pm">
+      <label>This property
+        <select name="property_id" required>
+          {% if not selected_property_id %}
+          <option value="" selected>Choose your property</option>
+          {% endif %}
           {% for prop in property_choices %}
           <option value="{{ prop.id }}" {% if selected_property_id == prop.id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
           {% endfor %}
         </select>
       </label>
-      <button type="submit" class="quiet">Show reminders</button>
+      <button type="submit" class="quiet">Use this property</button>
     </form>
   </details>
   {% endif %}

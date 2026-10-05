@@ -116,7 +116,7 @@
     {% if item.notes %}<p>{{ item.notes }}</p>{% endif %}
     {% if editable and unit.occupancy != 'occupied' and (item.status == 'done' or item.return_note) %}
     <details class="change-extra">
-      <summary>{{ 'Send back' if item.status == 'done' else "What's left" }}</summary>
+      <summary>{{ 'Why they need to go back' if item.status == 'done' else "What's left" }}</summary>
       {% with task_id=item.id, next='/units/' ~ unit.id, note=(item.return_note if item.status != 'done' else ''), button=('Send back' if item.status == 'done' else "Save what's left") %}
       {% include "_send_back.html" %}
       {% endwith %}
@@ -184,7 +184,7 @@
     {% if item.notes %}<p>{{ item.notes }}</p>{% endif %}
     {% if editable and unit.occupancy != 'occupied' and (item.status == 'done' or item.return_note) %}
     <details class="change-extra">
-      <summary>{{ 'Send back' if item.status == 'done' else "What's left" }}</summary>
+      <summary>{{ 'Why they need to go back' if item.status == 'done' else "What's left" }}</summary>
       {% with task_id=item.id, next='/units/' ~ unit.id, note=(item.return_note if item.status != 'done' else ''), button=('Send back' if item.status == 'done' else "Save what's left") %}
       {% include "_send_back.html" %}
       {% endwith %}

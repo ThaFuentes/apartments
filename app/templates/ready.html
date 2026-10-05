@@ -7,6 +7,7 @@
     <p class="kicker">Turn</p>
     <h1>Make ready</h1>
     <p class="lead">Units that still need trashout, paint, carpet, and the rest. Call a saved contractor onto another unit from here.</p>
+    {% if focus_name %}<p class="hint">Showing {{ focus_name }}. Change the property at the top to see another.</p>{% endif %}
     <p><a href="/contractors">Contractor list</a></p>
     {% if editable and available_units %}
     <details class="change-extra">
@@ -113,7 +114,7 @@
       {% endfor %}
       {% for item in card.checklist if item.done and item.task_id %}
       <details class="change-extra">
-        <summary>Send {{ item.label }} back</summary>
+        <summary>Why they need to go back</summary>
         {% with task_id=item.task_id, next='/ready', note='', button='Send back' %}
         {% include "_send_back.html" %}
         {% endwith %}

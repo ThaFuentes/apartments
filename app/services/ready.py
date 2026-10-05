@@ -376,10 +376,41 @@ def ready_checklist(tasks) -> list[dict]:
     return checks
 
 
+def _focus_id(user) -> int | None:
+    from app.services.context import remembered_property
+
+    prop = remembered_property(user)
+    return prop.id if prop else None
+
+
+def ready_open_count(user) -> int:
+    """Make-ready units at the saved property, or every property they can see."""
+    if getattr(user, "role", "") == "viewer":
+        return 0
+    from app.services.parse import property_catalog
+
+    props = {prop.id for prop in property_catalog(user)}
+    focus = _focus_id(user)
+    if focus is not None:
+        props = {focus} & props
+    if not props:
+        return 0
+    return (
+        Unit.query.filter(
+            Unit.deleted_at.is_(None),
+            Unit.occupancy == "make_ready",
+            Unit.property_id.in_(props),
+        ).count()
+    )
+
+
 def ready_cards(user) -> list[dict]:
     from app.services.parse import property_catalog
 
     props = {prop.id: prop for prop in property_catalog(user)}
+    focus = _focus_id(user)
+    if focus is not None:
+        props = {focus: props[focus]} if focus in props else {}
     if not props:
         return []
     units = (

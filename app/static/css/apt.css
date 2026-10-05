@@ -50,6 +50,9 @@ p { margin: 0; }
 .brand span, .where { color: var(--muted); font-size: 0.95rem; }
 .where { display: flex; gap: 0.4rem; align-items: center; margin-top: 0.35rem; color: var(--ink); font-weight: 650; }
 .where a { color: inherit; text-decoration: none; }
+.property-switch { display: flex; margin-top: 0.55rem; }
+.property-switch label { width: 100%; }
+.property-switch select { width: 100%; }
 .confirm-place { margin-top: 0.65rem; }
 .confirm-place button { width: 100%; }
 .share-banner {
@@ -565,6 +568,7 @@ body.intro-on { overflow: hidden; }
   font-weight: 700;
 }
 .nav a[aria-current="page"] { background: var(--soft); color: var(--accent); }
+.nav .count-pill { margin-left: 0.2rem; min-width: 1.15rem; height: 1.15rem; font-size: 0.68rem; }
 .nav .mobile-signout { flex: 0 0 auto; margin: 0; }
 .nav .mobile-signout button { min-height: 44px; padding: 0.55rem 0.7rem; font-size: 0.82rem; }
 .header-signout { display: none; }

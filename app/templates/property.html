@@ -122,7 +122,7 @@
       {% if editable and row.record == 'task' and row.task_id and row.occupancy != 'occupied' %}
       {% if row.status == 'done' or row.note %}
       <details class="change-extra">
-        <summary>{{ 'Send back' if row.status == 'done' else "What's left" }}</summary>
+        <summary>{{ 'Why they need to go back' if row.status == 'done' else "What's left" }}</summary>
         {% with task_id=row.task_id, next=request.full_path, note=(row.note if row.status != 'done' else ''), button=('Send back' if row.status == 'done' else "Save what's left") %}
         {% include "_send_back.html" %}
         {% endwith %}

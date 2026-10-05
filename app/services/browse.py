@@ -114,16 +114,22 @@ def home_board(user_id: int, user=None) -> dict:
     for group in groups:
         if group.get("pinned"):
             pinned.extend({**place, "city_label": "Pinned"} for place in group["places"])
+    focus = None
+    if user is not None:
+        from app.services.context import remembered_property
+
+        focus = remembered_property(user)
+    if focus is not None:
+        places = [row for row in places if row["id"] == focus.id]
+        pinned = [row for row in pinned if row["id"] == focus.id]
     been = (pinned + [row for row in places if row["last"]])[:5]
     allowed = None if user is None or sees_all(user) else set(access_map(user))
-    open_items = (
-        PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial")))
-        .order_by(PlanItem.id.desc())
-        .limit(6)
-        .all()
-    )
+    if focus is not None:
+        allowed = {focus.id}
+    open_base = PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial")))
     if allowed is not None:
-        open_items = [item for item in open_items if item.property_id in allowed]
+        open_base = open_base.filter(PlanItem.property_id.in_(allowed or {0}))
+    open_items = open_base.order_by(PlanItem.id.desc()).limit(6).all()
     plan = []
     for item in open_items:
         prop = item.property
@@ -156,6 +162,7 @@ def home_board(user_id: int, user=None) -> dict:
     initials = "A"
     role_name = ""
     site_bound = False
+    focused = False
     home_id = None
     home_name = ""
     home_city = ""
@@ -176,14 +183,16 @@ def home_board(user_id: int, user=None) -> dict:
         role_name = role_label(user.role)
         site_bound = role_of(user) in SITE_BOUND_ROLES
         here = current_property(user)
-        working = property_place(here) if here else ""
-        if here:
-            home_id = here.id
-            home_name = here.name
-            home_city = here.city.name if here.city else ""
-            people = _people_here(here.id, user.id)
+        panel = focus or here
+        focused = focus is not None
+        working = property_place(panel) if panel else ""
+        if panel:
+            home_id = panel.id
+            home_name = panel.name
+            home_city = panel.city.name if panel.city else ""
+            people = _people_here(panel.id, user.id)
             ready_rows = (
-                Unit.query.filter_by(property_id=here.id, occupancy="make_ready")
+                Unit.query.filter_by(property_id=panel.id, occupancy="make_ready")
                 .filter(Unit.deleted_at.is_(None))
                 .order_by(Unit.unit_number.asc())
                 .limit(6)
@@ -196,7 +205,7 @@ def home_board(user_id: int, user=None) -> dict:
     return {
         "today": today,
         "place_count": len(places) + len(pinned),
-        "open_count": len(open_items) if allowed is not None else PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial"))).count(),
+        "open_count": open_base.count(),
         "miles": int(miles) if float(miles).is_integer() else miles,
         "places": been or places[:8],
         "plan": plan,
@@ -210,6 +219,7 @@ def home_board(user_id: int, user=None) -> dict:
         "initials": initials,
         "role_label": role_name,
         "site_bound": site_bound,
+        "focused": focused,
         "home_id": home_id,
         "home_name": home_name,
         "home_city": home_city,

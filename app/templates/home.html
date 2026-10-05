@@ -34,7 +34,7 @@
   </div>
 
   <div class="stats">
-    {% if not board.site_bound %}
+    {% if not board.site_bound and not board.focused %}
     <a class="stat" href="/places"><strong>{{ board.place_count }}</strong><span>Properties</span></a>
     {% endif %}
     <a class="stat" href="/ready"><strong>{{ board.ready_count }}</strong><span>Make ready</span></a>
@@ -49,7 +49,7 @@
     {% endif %}
   </div>
   <div class="dash-grid">
-    {% if board.site_bound %}
+    {% if board.site_bound or board.focused %}
     <section class="card stack dashboard-building">
       <h2>Your building today</h2>
       {% if board.ready_units %}
@@ -124,7 +124,7 @@
     {% endif %}
   </div>
 
-  {% if not board.site_bound %}
+  {% if not board.site_bound and not board.focused %}
   <h2 class="phone-only">Where you’ve been</h2>
   {% if not board.places %}
   <p class="empty phone-only">No properties yet.</p>

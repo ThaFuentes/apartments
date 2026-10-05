@@ -17,10 +17,11 @@ def ready_board():
         abort(403)
     from app.services.appliers_field import contractor_board
     from app.services.contractors import list_contractors
-    from app.services.context import property_picker
+    from app.services.context import property_picker, remembered_property
     from app.services.ready import job_choices, ready_cards
 
     properties, default_property_id = property_picker(current_user)
+    focus = remembered_property(current_user)
     board = contractor_board(current_user)
     cards = ready_cards(current_user)
     turning = {card["unit"].id for card in cards if (card["unit"].occupancy or "") == "make_ready"}
@@ -33,17 +34,20 @@ def ready_board():
         .order_by(Unit.property_id.asc(), Unit.unit_number.asc())
         .all()
     )
+    if focus is not None:
+        available_units = [unit for unit in available_units if unit.property_id == focus.id]
     available_units.sort(key=lambda unit: (unit.property_id != default_property_id, unit.property.name.lower() if unit.property else "", unit.unit_number.lower()))
     return render_template(
         "ready.html",
         cards=cards,
+        focus_name=focus.name if focus else "",
         available_units=[unit for unit in available_units if unit.id not in turning],
         contractors=list_contractors(),
         properties=properties,
         default_property_id=default_property_id,
         jobs=job_choices(),
-        on_site=board["on_site"],
-        over_estimate=board["over"],
+        on_site=[row for row in board["on_site"] if focus is None or row.get("property_id") == focus.id],
+        over_estimate=[row for row in board["over"] if focus is None or row.get("property_id") == focus.id],
         editable=current_user.role != "viewer",
     )
 
@@ -106,13 +110,16 @@ def pm_board():
     if not _history_ok():
         abort(403)
     from app.services.access import can_edit_property
-    from app.services.context import property_picker
+    from app.services.context import property_picker, remembered_property
     from app.services.equipment import kind_choices
     from app.services.upkeep import pm_items
 
     properties, default_property_id = property_picker(current_user)
+    focus = remembered_property(current_user)
     property_param = request.args.get("property")
-    if property_param in (None, ""):
+    if property_param is None:
+        selected_id = focus.id if focus else None
+    elif property_param == "":
         selected_id = None
     else:
         try:
@@ -140,6 +147,7 @@ def pm_board():
         gear_kinds=kind_choices(),
         default_property_id=default_property_id,
         selected_property_id=selected_id if selected_id != -1 else None,
+        selected_name=properties_by_id[selected_id].name if selected_id not in (None, -1) and selected_id in properties_by_id else "",
         show_all_properties=selected_id is None,
     )
 

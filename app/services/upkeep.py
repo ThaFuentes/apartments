@@ -77,7 +77,13 @@ def pm_count(user) -> int:
     """How many upkeep reminders this person has. Not a calendar."""
     if getattr(user, "role", "") == "viewer":
         return 0
-    return _active_query(user).count()
+    query = _active_query(user)
+    from app.services.context import remembered_property
+
+    focus = remembered_property(user)
+    if focus is not None:
+        query = query.filter(Equipment.property_id == focus.id)
+    return query.count()
 
 
 def pm_items(user) -> list[dict]:

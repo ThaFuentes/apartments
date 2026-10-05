@@ -395,6 +395,7 @@ def contractor_board(user) -> dict:
                 "contractor": row.contractor.name if row.contractor else "",
                 "company": (row.contractor.company if row.contractor else "") or "",
                 "unit": row.unit.unit_number if row.unit else "",
+                "property_id": row.property_id,
                 "property": row.property.name if row.property else "",
                 "check_in": row.check_in,
                 "minutes": minutes,
@@ -421,6 +422,7 @@ def contractor_board(user) -> dict:
             over_today.append(
                 {
                     "contractor": row.contractor.name if row.contractor else "",
+                    "property_id": row.property_id,
                     "unit": row.unit.unit_number if row.unit else "",
                     "minutes": minutes,
                     "estimated_hours": row.estimated_hours,
