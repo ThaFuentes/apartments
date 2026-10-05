@@ -1,7 +1,7 @@
 """Offline property pack and photo routes."""
 from __future__ import annotations
 
-from flask import abort, flash, jsonify, redirect, request
+from flask import abort, flash, jsonify, redirect, render_template, request
 from flask_login import current_user
 
 from app.builddb.builddb import db
@@ -55,9 +55,14 @@ def upload():
         flash("That photo was empty.", "warn")
         return redirect("/")
     name = save_blob(raw)
+    from app.services.site_map import MAP_KIND
+
+    kind = (request.form.get("kind") or "photo").strip()[:24] or "photo"
+    if kind == MAP_KIND:
+        kind = "photo"
     media = Media(
         user_id=current_user.id,
-        kind=request.form.get("kind") or "photo",
+        kind=kind,
         storage_name=name,
         mime=blob.mimetype or "image/jpeg",
         caption=(request.form.get("message") or "")[:300],
@@ -163,6 +168,65 @@ def media_file(media_id):
     if not data:
         abort(404)
     return send_bytes(data, media.mime or "image/jpeg")
+
+
+@bp.get("/map")
+@login_required
+def property_map():
+    from app.services.site_map import can_upload_map, map_for, pick_property
+
+    choices, prop = pick_property(current_user, request.args.get("property") or "")
+    uploaded = map_for(prop.id) if prop else None
+    return render_template(
+        "map.html",
+        choices=choices,
+        prop=prop,
+        site_map=uploaded,
+        can_upload=bool(prop and can_upload_map(current_user, prop.id)),
+    )
+
+
+@bp.post("/map")
+@login_required
+def property_map_upload():
+    from app.services.site_map import can_upload_map, pick_property, replace_map
+
+    _choices, prop = pick_property(current_user, request.form.get("property_id") or "")
+    if not prop or not can_upload_map(current_user, prop.id):
+        abort(403)
+    blob = request.files.get("map")
+    raw = blob.read() if blob else b""
+    ok, message = replace_map(current_user, prop, raw)
+    flash(message, "ok" if ok else "warn")
+    return redirect(f"/map?property={prop.id}")
+
+
+@bp.post("/map/remove")
+@login_required
+def property_map_remove():
+    from app.services.site_map import can_upload_map, pick_property, remove_map
+
+    _choices, prop = pick_property(current_user, request.form.get("property_id") or "")
+    if not prop or not can_upload_map(current_user, prop.id):
+        abort(403)
+    flash(remove_map(current_user, prop), "ok")
+    return redirect(f"/map?property={prop.id}")
+
+
+@bp.get("/map/file/<int:property_id>")
+@login_required
+def property_map_file(property_id):
+    from app.services.access import require_see
+    from app.services.site_map import download_name, map_for
+
+    prop = require_see(current_user, db.session.get(Property, property_id))
+    media = map_for(prop.id)
+    if not media:
+        abort(404)
+    data = read_blob(media.storage_name)
+    if not data:
+        abort(404)
+    return send_bytes(data, media.mime or "application/octet-stream", download_name(prop, media.mime or ""))
 
 
 from app.routes import auth as _auth_routes

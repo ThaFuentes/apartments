@@ -6,6 +6,7 @@
   <p><a href="/places{% if prop.city_id %}/{{ prop.city_id }}{% endif %}">{{ city_name }}{% if state_name %}, {{ state_name }}{% endif %}</a></p>
   <h1>{{ place_name }}</h1>
   <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} here.</p>
+  <p><a href="/map?property={{ prop.id }}">Property map</a></p>
   <p class="hint">Green units need make-ready work · Blue units are occupied · Search records across equipment, jobs, vendors, and notes.</p>
   {% if editable %}
   <p class="rare-actions">

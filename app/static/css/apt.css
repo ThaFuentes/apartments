@@ -789,3 +789,5 @@ button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 3px sol
   font-weight: 800;
 }
 .how-to { white-space: pre-wrap; margin: 0.35rem 0 0; }
+.site-map { display: block; width: 100%; height: auto; border-radius: 16px; background: #fff; }
+.site-map-pdf { width: 100%; height: 70vh; border: 0; border-radius: 16px; background: #fff; }

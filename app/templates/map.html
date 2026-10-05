@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Property map{% endblock %}
+{% block main %}
+<section class="sheet">
+  <h1>Property map</h1>
+  <p class="lead">A map the office already has for one property, so the team can open it.</p>
+  {% if choices|length > 1 %}
+  <form method="get" action="/map" class="property-switch card stack">
+    <label>Property
+      <select name="property">
+        {% if not prop %}
+        <option value="" selected>Choose a property</option>
+        {% endif %}
+        {% for choice in choices %}
+        <option value="{{ choice.id }}" {% if prop and prop.id == choice.id %}selected{% endif %}>{{ choice.name }}{% if choice.city %} · {{ choice.city.name }}{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="quiet">Show this property</button>
+  </form>
+  {% elif prop %}
+  <p class="lead">{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</p>
+  {% endif %}
+  {% if not choices %}
+  <p class="empty">No properties are on this login yet.</p>
+  {% elif not prop %}
+  <p class="empty">Choose one property. This page shows only that property's map.</p>
+  {% elif site_map %}
+  <article class="card stack">
+    {% if site_map.mime == 'application/pdf' %}
+    <iframe class="site-map-pdf" src="/map/file/{{ prop.id }}" title="{{ prop.name }} map"></iframe>
+    {% else %}
+    <img class="site-map" src="/map/file/{{ prop.id }}" alt="{{ prop.name }} map">
+    {% endif %}
+    <a href="/map/file/{{ prop.id }}">Open the map</a>
+  </article>
+  {% else %}
+  <p class="empty">No map for {{ prop.name }} yet.</p>
+  {% endif %}
+  {% if prop and can_upload %}
+  <form method="post" action="/map" enctype="multipart/form-data" class="card stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="property_id" value="{{ prop.id }}">
+    <label>{{ 'Replace the map' if site_map else 'Property map' }}
+      <input type="file" name="map" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" required>
+    </label>
+    <p class="lead">A picture or PDF of this property only.</p>
+    <button type="submit">{{ 'Replace map' if site_map else 'Upload map' }}</button>
+  </form>
+  {% if site_map %}
+  <form method="post" action="/map/remove" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="property_id" value="{{ prop.id }}">
+    <button type="submit" class="quiet">Remove map</button>
+  </form>
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

@@ -41,6 +41,7 @@
       <a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Home</a>
       <a href="/trips" {% if request.path.startswith('/trips') %}aria-current="page"{% endif %}>Plan</a>
       <a href="/places" {% if request.path.startswith('/places') or request.path.startswith('/properties') %}aria-current="page"{% endif %}>Properties</a>
+      <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
       <a href="/ready" {% if request.path == '/ready' or request.path.startswith('/contractors') %}aria-current="page"{% endif %}>Make ready <span class="count-pill">{{ ready_n }}</span></a>
       <a href="/pm" {% if request.path.startswith('/pm') %}aria-current="page"{% endif %}>Upkeep <span class="count-pill">{{ pm_n }}</span></a>
       <a href="/inventory" {% if request.path.startswith('/inventory') %}aria-current="page"{% endif %}>Inventory</a>
@@ -52,6 +53,7 @@
       <a href="/help" {% if request.path == '/help' %}aria-current="page"{% endif %}>Help</a>
       <a href="/more" {% if request.path == '/more' %}aria-current="page"{% endif %}>More</a>
       {% else %}
+      <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
       <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>
       {% endif %}
       <form method="post" action="/logout" class="desk-signout">
@@ -128,6 +130,7 @@
     <a href="/help" {% if request.path == '/help' %}aria-current="page"{% endif %}>Help</a>
     <a href="/more" {% if request.path == '/more' %}aria-current="page"{% endif %}>More</a>
     {% else %}
+    <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
     <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>
     <a href="/help" {% if request.path == '/help' %}aria-current="page"{% endif %}>Help</a>
     {% endif %}

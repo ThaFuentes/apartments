@@ -38,6 +38,14 @@ def read_blob(name: str) -> bytes:
             return b""
 
 
+def delete_blob(name: str) -> None:
+    if not name or not str(name).isalnum():
+        return
+    path = os.path.join(UPLOADS, name + ".enc")
+    if os.path.isfile(path):
+        os.remove(path)
+
+
 def send_bytes(data: bytes, mimetype: str, download_name: str = "", as_attachment: bool = False):
     resp = Response(data or b"", mimetype=mimetype or "application/octet-stream")
     if download_name:
