@@ -24,7 +24,7 @@
     <div class="sec-main">
       <header class="sec-top">
         <h1>{{ page_title or "Security" }}</h1>
-        <span>{{ current_user.label() }} · owner</span>
+        <span>{{ current_user.label() }}{% if current_user.is_bot %} · bot{% endif %} · {{ current_user.role_line() }}</span>
       </header>
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}

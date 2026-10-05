@@ -10,10 +10,10 @@ from flask_login import current_user
 
 from app.builddb.builddb import db
 from app.models import AuditLog, User
-from app.routes.common import bp, owner_required
+from app.routes.common import bp, owner_required, security_required
 from app.services.clock import utcnow
 from app.services.records import loads
-from app.services.security_queries import list_bans, list_security_events, summary_stats
+from app.services.security_queries import list_bans, list_device_bans, list_security_events, summary_stats
 
 
 def _window():
@@ -53,20 +53,24 @@ def security_assets(name):
 
 
 @bp.get("/security")
-@owner_required
+@security_required
 def security_home():
+    from app.services.security_ops import site_status
+
     stats = summary_stats()
     return render_template(
         "security/dashboard.html",
         stats=stats,
+        site=site_status(),
         events=list_security_events(16),
         bans=list_bans(12),
+        device_bans=list_device_bans(12),
         page_title="Security",
     )
 
 
 @bp.get("/security/events")
-@owner_required
+@security_required
 def security_events():
     return render_template(
         "security/events.html",
@@ -76,7 +80,7 @@ def security_events():
 
 
 @bp.get("/security/audit")
-@owner_required
+@security_required
 def security_audit():
     days = 14
     try:
@@ -122,8 +126,52 @@ def security_reverse(audit_id):
     return redirect("/security/audit")
 
 
+def _ban_result(result: dict):
+    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    return redirect("/security")
+
+
+@bp.post("/security/ban")
+@security_required
+def security_ban():
+    from app.services.security_ops import temp_ban_ip
+
+    return _ban_result(temp_ban_ip(current_user, request.form.get("ip") or "", request.form.get("hours"), request.form.get("reason") or ""))
+
+
+@bp.post("/security/unban")
+@security_required
+def security_unban():
+    from app.services.security_ops import lift_ip_ban
+
+    return _ban_result(lift_ip_ban(current_user, request.form.get("ip") or ""))
+
+
+@bp.post("/security/device-ban")
+@security_required
+def security_device_ban():
+    from app.services.security_ops import temp_ban_device
+
+    return _ban_result(
+        temp_ban_device(
+            current_user,
+            request.form.get("device_fp") or "",
+            request.form.get("hours"),
+            request.form.get("reason") or "",
+        )
+    )
+
+
+@bp.post("/security/device-unban")
+@security_required
+def security_device_unban():
+    from app.services.security_ops import lift_device_ban
+
+    return _ban_result(lift_device_ban(current_user, request.form.get("device_fp") or ""))
+
+
 @bp.get("/security/threat-map")
-@owner_required
+@security_required
 def threat_map():
     _ensure_geo()
     return render_template("security/threat_map.html", page_title="Threat map", alert_url="")
@@ -162,19 +210,19 @@ def _json_window_payload(kind: str):
 
 
 @bp.get("/security/threat-map/summary")
-@owner_required
+@security_required
 def threat_map_summary():
     return _json_window_payload("summary")
 
 
 @bp.get("/security/threat-map/countries")
-@owner_required
+@security_required
 def threat_map_countries():
     return _json_window_payload("countries")
 
 
 @bp.get("/security/threat-map/recent")
-@owner_required
+@security_required
 def threat_map_recent():
     resp = _json_window_payload("recent")
     resp.headers["Cache-Control"] = "no-store"
@@ -182,13 +230,13 @@ def threat_map_recent():
 
 
 @bp.get("/security/threat-map/replay")
-@owner_required
+@security_required
 def threat_map_replay():
     return _json_window_payload("replay")
 
 
 @bp.get("/security/threat-map/live")
-@owner_required
+@security_required
 def threat_map_live():
     from app.services import threat_queries as tq
 
@@ -205,7 +253,7 @@ def threat_map_live():
 
 
 @bp.get("/security/threat-map/country/<iso2>")
-@owner_required
+@security_required
 def threat_map_country(iso2):
     from app.services import threat_queries as tq
 

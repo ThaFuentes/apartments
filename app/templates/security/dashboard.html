@@ -1,6 +1,12 @@
 {% extends "security/base.html" %}
 {% block security_content %}
-<p class="sec-lead">Live wrapper signals plus the product audit. Reverse a change from Full audit. The threat map is the same live globe used on AX.</p>
+<p class="sec-lead">
+  {% if site.ok %}The site is okay. The database and the security log both answered.
+  {% elif not site.database %}The site needs a look. The database did not answer.
+  {% else %}The site needs a look. The security log did not answer.
+  {% endif %}
+  A security-watch bot can use this page, place a temporary ban, and lift one.
+</p>
 <div class="sec-kpis">
   <div class="sec-kpi"><strong>{{ stats.events_24h }}</strong><span>Events 24h</span></div>
   <div class="sec-kpi"><strong>{{ stats.events_total }}</strong><span>Events total</span></div>
@@ -35,7 +41,7 @@
     <h2>Active bans</h2>
     {% if not bans %}<p class="sec-muted">No IP bans on the reputation table.</p>{% endif %}
     <table class="sec-table">
-      <thead><tr><th>IP</th><th>Grade</th><th>Score</th><th>Until</th></tr></thead>
+      <thead><tr><th>IP</th><th>Grade</th><th>Score</th><th>Until</th><th></th></tr></thead>
       <tbody>
       {% for row in bans %}
         <tr>
@@ -43,11 +49,66 @@
           <td>{{ row.grade }}</td>
           <td>{{ row.score }}</td>
           <td>{{ row.ban_until or "—" }}</td>
+          <td>
+            <form method="post" action="/security/unban">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="ip" value="{{ row.ip }}">
+              <button class="ghost" type="submit">Unban</button>
+            </form>
+          </td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
+    <form method="post" action="/security/ban" class="sec-filters">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>IP <input name="ip" required maxlength="45" autocomplete="off" placeholder="203.0.113.10"></label>
+      <label>Hours
+        <select name="hours">
+          {% for span in [1, 6, 24, 48, 72, 168] %}
+          <option value="{{ span }}" {% if span == 24 %}selected{% endif %}>{{ span }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Why <input name="reason" required maxlength="200" autocomplete="off" placeholder="Probing the login"></label>
+      <button type="submit">Temp ban</button>
+    </form>
     <p><a href="/security/threat-map">Open threat map →</a></p>
   </section>
 </div>
+<section class="sec-panel">
+  <h2>Device bans</h2>
+  {% if not device_bans %}<p class="sec-muted">No device bans right now.</p>{% endif %}
+  <table class="sec-table">
+    <thead><tr><th>Device</th><th>Until</th><th></th></tr></thead>
+    <tbody>
+    {% for row in device_bans %}
+      <tr>
+        <td class="mono">{{ row.device_fp }}</td>
+        <td>{% if row.permanent %}Until lifted{% else %}{{ row.ban_until or "—" }}{% endif %}</td>
+        <td>
+          <form method="post" action="/security/device-unban">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="device_fp" value="{{ row.device_fp }}">
+            <button class="ghost" type="submit">Unban</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="/security/device-ban" class="sec-filters">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Device print <input name="device_fp" required minlength="40" maxlength="40" autocomplete="off" placeholder="40-character print"></label>
+    <label>Hours
+      <select name="hours">
+        {% for span in [1, 6, 24, 48, 72, 168] %}
+        <option value="{{ span }}" {% if span == 24 %}selected{% endif %}>{{ span }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Why <input name="reason" required maxlength="200" autocomplete="off" placeholder="Repeated login probes"></label>
+    <button type="submit">Temp ban device</button>
+  </form>
+</section>
 {% endblock %}

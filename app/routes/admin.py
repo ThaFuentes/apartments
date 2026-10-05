@@ -295,6 +295,7 @@ def users():
             "phone": request.form.get("phone") or "",
             "password": request.form.get("password") or "",
             "is_bot": request.form.get("is_bot") == "1",
+            "security_watch": request.form.get("security_watch") == "1",
             "security_email": request.form.get("security_email") or "",
             "reset_email": request.form.get("reset_email") or "",
             "can_see_reports": True,
@@ -509,9 +510,33 @@ def user_bot(user_id):
     person.is_bot = make
     if not make:
         turn_off(person)
+        from app.services.security_ops import set_security_watch
+
+        set_security_watch(person, False)
     db.session.commit()
     flash(f"{person.label()} is {'a bot login' if make else 'a regular login'} now.", "ok")
     return redirect("/users")
+
+
+@bp.post("/users/<int:user_id>/security-watch")
+@owner_required
+def user_security_watch(user_id):
+    from app.services.records import audit
+    from app.services.security_ops import set_security_watch
+
+    person = db.session.get(User, user_id)
+    if not person:
+        abort(404)
+    if not person.is_bot or person.role == "owner":
+        flash("Security watch is for a bot login.", "warn")
+        return redirect("/users")
+    on = (request.form.get("security_watch") or "") in ("1", "true", "on", "yes")
+    before = bool((person.extra_data or {}).get("security_watch")) if isinstance(person.extra_data, dict) else False
+    set_security_watch(person, on)
+    audit(current_user.id, "human", "update", "user", person.id, {"security_watch": before}, {"security_watch": on})
+    db.session.commit()
+    flash(f"{person.label()} {'can watch the site' if on else 'no longer watches the site'}.", "ok")
+    return redirect(f"/users/{person.id}")
 
 
 @bp.post("/users/<int:user_id>/hat")

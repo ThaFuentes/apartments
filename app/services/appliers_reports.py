@@ -393,6 +393,13 @@ def apply_invite_viewer(user, payload, source) -> dict:
     bot_note = ""
     if created.is_bot:
         bot_note = " Marked as a bot: first sign-in must turn on 2FA. The reset address can match the 2FA address, or it can be different."
+        if payload.get("security_watch"):
+            from app.services.access.core import role_of
+            from app.services.security_ops import set_security_watch
+
+            if role_of(user) == "owner":
+                set_security_watch(created, True)
+                bot_note += " Security watch is on: this bot can check the site and temp-ban or unban."
     granted = []
     for grant in payload.get("_grants") or []:
         if not isinstance(grant, dict):

@@ -204,7 +204,6 @@ _SETUP_OK_PREFIXES = (
     "/logout",
     "/bot-setup",
     "/2fa",
-    "/security",
     "/healthz",
     "/offline",
     "/sw.js",

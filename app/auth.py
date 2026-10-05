@@ -109,6 +109,10 @@ def home_for(user) -> str:
 
     if bot_setup_remaining(user):
         return "/bot-setup"
+    from app.services.security_ops import watches_security
+
+    if watches_security(user):
+        return "/security"
     if getattr(user, "role", "") == "viewer":
         return "/reports"
     return "/"

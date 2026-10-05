@@ -174,6 +174,11 @@ def create_app() -> Flask:
             return None
         if request.path in ("/logout",):
             return None
+        if (request.path or "").startswith("/security"):
+            from app.services.security_ops import watches_security
+
+            if watches_security(current_user):
+                return None
         if request.path.startswith("/api/") or "application/json" in (request.headers.get("Accept") or ""):
             return jsonify({"ok": False, "error": "Viewers cannot change the record."}), 403
         abort(403)
@@ -227,6 +232,7 @@ def create_app() -> Flask:
         ready_n = 0
         saved_property_id = None
         can_pick_property = False
+        security_watch = False
         chat_lines = []
         chat_cards = []
         can_manage_people = False
@@ -237,7 +243,10 @@ def create_app() -> Flask:
         if getattr(current_user, "is_authenticated", False):
             from app.models import Notice, PendingAction
             from app.services.records import open_shift
+            from app.services.security_ops import watches_security
             from app.services.share import share_state
+
+            security_watch = watches_security(current_user)
 
             shift = open_shift(current_user)
             if shift and shift.property:
@@ -388,6 +397,7 @@ def create_app() -> Flask:
             "default_property_id": default_property_id,
             "saved_property_id": saved_property_id,
             "can_pick_property": can_pick_property,
+            "security_watch": security_watch,
             "header_confirmed": confirmed,
             "property_choices": property_choices,
             "share": share,

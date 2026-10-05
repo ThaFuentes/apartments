@@ -88,7 +88,7 @@
       </label>
     </form>
     {% endif %}
-    {% if current_user.is_authenticated and current_user.role == 'owner' %}
+    {% if current_user.is_authenticated and (current_user.role == 'owner' or security_watch) %}
     <a class="sec-switch" href="/security">Security console</a>
     {% endif %}
     {% if share.on %}

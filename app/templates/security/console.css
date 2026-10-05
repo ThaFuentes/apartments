@@ -111,6 +111,13 @@ html, body.sec-body {
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
 .sec-filters { display: flex; gap: 0.6rem; align-items: end; margin: 0 0 1rem; }
 .sec-filters label { color: #8ea0b5; font-size: 0.82rem; font-weight: 700; }
+.sec-filters select {
+  background: #10161e;
+  color: #e8edf3;
+  border: 1px solid #2a3648;
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+}
 .sec-filters input {
   background: #10161e;
   color: #e8edf3;

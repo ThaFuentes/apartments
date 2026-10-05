@@ -38,6 +38,25 @@ def owner_required(fn):
     return wrapped
 
 
+def security_required(fn):
+    """Owner, or a bot the owner marked to watch the site."""
+
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if not getattr(current_user, "is_authenticated", False):
+            return _login_redirect()
+        from app.services.security_ops import can_open_security
+        from app.services.twofa import bot_setup_remaining
+
+        if bot_setup_remaining(current_user):
+            return redirect("/bot-setup")
+        if not can_open_security(current_user):
+            abort(403)
+        return fn(*args, **kwargs)
+
+    return wrapped
+
+
 def people_admin(fn):
     """Owner, admin, and anyone who hires people may work the people page."""
 

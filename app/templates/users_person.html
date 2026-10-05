@@ -150,6 +150,13 @@
         <input type="hidden" name="is_bot" value="{{ '0' if person.is_bot else '1' }}">
         <button class="quiet" type="submit">{% if person.is_bot %}Unmark bot{% else %}Mark as bot{% endif %}</button>
       </form>
+      {% if current_user.role == 'owner' and person.is_bot %}
+      <form method="post" action="/users/{{ person.id }}/security-watch">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="security_watch" value="{{ '0' if person.extra_data and person.extra_data.get('security_watch') else '1' }}">
+        <button class="quiet" type="submit">{% if person.extra_data and person.extra_data.get('security_watch') %}Turn security watch off{% else %}Security watch{% endif %}</button>
+      </form>
+      {% endif %}
       <form method="post" action="/users/{{ person.id }}/reset">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="quiet" type="submit">Send password reset</button>

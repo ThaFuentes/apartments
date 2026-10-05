@@ -47,6 +47,9 @@
           <label>2FA email <input name="security_email" placeholder="codes@…"></label>
           <label>Password-reset email <input name="reset_email" placeholder="resets@…"></label>
           <label class="check"><input type="checkbox" name="is_bot" value="1"> This is a bot</label>
+          {% if current_user.role == 'owner' %}
+          <label class="check"><input type="checkbox" name="security_watch" value="1"> Security watch — site check, temp ban, and unban</label>
+          {% endif %}
           <label class="check"><input type="checkbox" name="can_see_live_map" value="1"> Live map</label>
         </div>
       </details>

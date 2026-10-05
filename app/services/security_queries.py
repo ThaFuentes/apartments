@@ -202,6 +202,90 @@ def list_security_events(limit: int = 40) -> list[dict]:
     return rows
 
 
+def reputation_for(ip: str) -> dict | None:
+    conn = _sec()
+    if conn is None or not ip:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ip, grade, score, ban_until, ban_reason FROM pbt_reputation WHERE ip = %s",
+            (ip,),
+        )
+        row = cur.fetchone()
+        return dict(row) if isinstance(row, dict) else None
+    except Exception:
+        return None
+    finally:
+        _close(conn)
+
+
+def _device_still_banned(row: dict) -> bool:
+    """Match the wrapper: it stores the app clock, and the database clock can differ."""
+    if int(row.get("permanent") or 0):
+        return True
+    until = row.get("ban_until")
+    if until is None:
+        return True
+    try:
+        return until > datetime.now()
+    except TypeError:
+        return False
+
+
+def device_ban_for(device_fp: str) -> dict | None:
+    conn = _sec()
+    if conn is None or not device_fp:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT device_fp, ban_until, ban_reason, permanent
+            FROM pbt_device_bans
+            WHERE device_fp = %s
+            """,
+            (device_fp,),
+        )
+        row = cur.fetchone()
+        if not isinstance(row, dict) or not _device_still_banned(row):
+            return None
+        return dict(row)
+    except Exception:
+        return None
+    finally:
+        _close(conn)
+
+
+def list_device_bans(limit: int = 20) -> list[dict]:
+    conn = _sec()
+    if conn is None:
+        return []
+    rows = []
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT device_fp, ban_until, ban_reason, permanent
+            FROM pbt_device_bans
+            WHERE permanent = 1
+               OR ban_until IS NULL
+               OR ban_until > DATE_SUB(NOW(), INTERVAL 18 HOUR)
+            ORDER BY device_fp ASC
+            LIMIT %s
+            """,
+            (max(int(limit) * 5, int(limit)),),
+        )
+        for row in cur.fetchall() or []:
+            if isinstance(row, dict) and _device_still_banned(row):
+                rows.append(row)
+    except Exception as exc:
+        print(f"[apt-security] device bans: {exc}", flush=True)
+    finally:
+        _close(conn)
+    return rows[: int(limit)]
+
+
 def list_bans(limit: int = 20) -> list[dict]:
     conn = _sec()
     if conn is None:
