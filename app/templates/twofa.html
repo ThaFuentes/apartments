@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Two-factor{% endblock %}
+{% block body_class %}gate{% endblock %}
 {% block main %}
 <section class="hero narrow">
+  <img class="gate-mark" src="{{ url_for('static', filename='favicon.svg') }}?v=2" alt="">
   <h1>Second step</h1>
   {% if method == 'email' %}
   <p class="lead">Enter the code sent to {% if inbox %}<strong>{{ inbox }}</strong>{% else %}the 2FA inbox{% endif %}.</p>
@@ -14,19 +16,21 @@
     <label>Code <input name="code" inputmode="numeric" maxlength="7" autocomplete="one-time-code" placeholder="123456" required autofocus></label>
     <button type="submit">Continue</button>
   </form>
-  {% if method == 'email' %}
-  <form method="post" action="/2fa" class="stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">
-    <input type="hidden" name="do" value="resend">
-    <button class="quiet" type="submit">Send a new code</button>
-  </form>
-  {% endif %}
-  <form method="post" action="/2fa">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">
-    <input type="hidden" name="do" value="cancel">
-    <button class="ghost" type="submit">Back to sign in</button>
-  </form>
+  <div class="gate-actions">
+    {% if method == 'email' %}
+    <form method="post" action="/2fa">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">
+      <input type="hidden" name="do" value="resend">
+      <button class="quiet" type="submit">Send a new code</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/2fa">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ request.values.get('next', '') }}">
+      <input type="hidden" name="do" value="cancel">
+      <button class="ghost" type="submit">Back to sign in</button>
+    </form>
+  </div>
 </section>
 {% endblock %}

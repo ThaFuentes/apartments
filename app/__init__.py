@@ -390,7 +390,7 @@ def create_app() -> Flask:
         return {
             "csrf_token": token,
             "SITE_MODE": "apt",
-            "SITE_NAME": "Apt",
+            "SITE_NAME": "Apartments",
             "header_city": city or "City",
             "header_property": place or "Property",
             "header_property_id": header_property_id or default_property_id,

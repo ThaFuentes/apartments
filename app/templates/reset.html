@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}New password{% endblock %}
+{% block body_class %}gate{% endblock %}
 {% block main %}
 <section class="hero narrow">
+  <img class="gate-mark" src="{{ url_for('static', filename='favicon.svg') }}?v=2" alt="">
   <h1>Choose a new password</h1>
   <form method="post" action="/reset/{{ token }}" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

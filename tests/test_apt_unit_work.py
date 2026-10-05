@@ -429,7 +429,7 @@ class AptTest04(AptTestBase):
         self.assertIn("Woodview", note.body)
         page = boss_client.get("/")
         self.assertIn(b"apt-install", page.data)
-        self.assertIn(b"Install Apt", page.data)
+        self.assertIn(b"Install Apartments", page.data)
         elsewhere = boss_client.get("/places")
         self.assertNotIn(b"apt-install", elsewhere.data)
         manifest = APP.test_client().get("/manifest.webmanifest")

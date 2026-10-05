@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}{% if setup %}Welcome{% else %}Sign in{% endif %}{% endblock %}
+{% block body_class %}gate{% endblock %}
 {% block main %}
 <section class="hero narrow">
+  <img class="gate-mark" src="{{ url_for('static', filename='favicon.svg') }}?v=2" alt="">
   {% if setup %}
-  <p class="kicker">APT · PROPERTY OPERATIONS</p>
   <h1>Set up your owner account</h1>
   <p class="lead">Create the primary login. Email is optional; you can add office and field logins later.</p>
   {% else %}
@@ -24,7 +25,7 @@
     <button type="submit">{% if setup %}Create owner account{% else %}Sign in{% endif %}</button>
   </form>
   {% if not setup %}
-  <p><a href="/forgot">Forgot password</a></p>
+  <p class="gate-foot"><a href="/forgot">Forgot password</a></p>
   {% endif %}
 </section>
 {% endblock %}

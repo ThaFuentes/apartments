@@ -5,25 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0f6e66">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Apt">
+  <meta name="apple-mobile-web-app-title" content="Apartments">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-  <link rel="apple-touch-startup-image" href="/static/intro/poster.jpg">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png?v=2">
+  <link rel="apple-touch-startup-image" href="/static/intro/poster.jpg?v=5">
   <meta name="csrf-token" content="{{ csrf_token }}">
-  <title>{% block title %}Apt{% endblock %}</title>
+  <title>{% block title %}Apartments{% endblock %}</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}?v=2" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/apt.css') }}?v={{ asset_v }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/apt-desk.css') }}?v={{ asset_v }}">
 </head>
 <body class="ops warm {% if drive %}drive{% endif %} {% block body_class %}{% endblock %}" data-share="{{ '1' if share.on else '0' }}">
   <div class="intro" id="apt-intro" hidden>
-    <video id="apt-intro-video" playsinline muted preload="none" aria-hidden="true" poster="/static/intro/poster.jpg?v=3" data-src="/static/intro/open.mp4?v=3"></video>
+    <video id="apt-intro-video" playsinline muted preload="none" aria-hidden="true" poster="/static/intro/poster.jpg?v=5" data-src="/static/intro/open.mp4?v=4"></video>
+    <img class="intro-mark" src="{{ url_for('static', filename='favicon.svg') }}?v=2" alt="">
+    <p class="intro-name">Apartments</p>
+    <p class="intro-line">Properties, units, and the day.</p>
     <button type="button" id="apt-intro-skip">Skip</button>
   </div>
   <header class="top">
     <div class="brand">
-      <strong>Apt</strong>
+      <strong>Apartments</strong>
       {% if current_user.is_authenticated %}
       <span>{{ current_user.label() }}{% if current_user.is_bot %} · BOT{% endif %} · {{ current_user.role_line() }}</span>
       <form method="post" action="/logout" class="header-signout">

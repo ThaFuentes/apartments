@@ -35,34 +35,22 @@
   }
 
   const intro = document.getElementById("apt-intro");
-  const introVideo = document.getElementById("apt-intro-video");
   const introSkip = document.getElementById("apt-intro-skip");
-  if (intro && introVideo && introSkip) {
+  if (intro && introSkip) {
     let seen = false;
-    try { seen = localStorage.getItem("apt-intro-hwy") === "1"; } catch (err) { seen = true; }
+    try { seen = localStorage.getItem("apt-intro-mark") === "1"; } catch (err) { seen = true; }
     function closeIntro() {
       intro.hidden = true;
       document.body.classList.remove("intro-on");
-      introVideo.pause();
-      try { localStorage.setItem("apt-intro-hwy", "1"); } catch (err) {}
+      try { localStorage.setItem("apt-intro-mark", "1"); } catch (err) {}
     }
     if (!seen) {
       intro.hidden = false;
       document.body.classList.add("intro-on");
-      const clip = introVideo.getAttribute("data-src") || "/static/intro/open.mp4?v=3";
-      if (!introVideo.getAttribute("src")) introVideo.setAttribute("src", clip);
-      const giveUp = window.setTimeout(closeIntro, 9000);
-      introVideo.addEventListener("ended", function () {
-        window.clearTimeout(giveUp);
-        closeIntro();
-      });
+      const giveUp = window.setTimeout(closeIntro, 2200);
       introSkip.addEventListener("click", function () {
         window.clearTimeout(giveUp);
         closeIntro();
-      });
-      introVideo.play().catch(function () {
-        window.clearTimeout(giveUp);
-        window.setTimeout(closeIntro, 1600);
       });
     }
   }
@@ -710,7 +698,7 @@
   if (install && !alreadyInstalled() && storeGet("apt-install-hide") !== "1") {
     const ios = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
     if (ios) {
-      install.querySelector("p").textContent = "Install Apt: tap Share, then Add to Home Screen.";
+      install.querySelector("p").textContent = "Install Apartments: tap Share, then Add to Home Screen.";
       const go = document.getElementById("apt-install-go");
       if (go) go.hidden = true;
       install.hidden = false;
