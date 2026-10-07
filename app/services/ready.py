@@ -121,6 +121,37 @@ def set_ready_by(user, unit: Unit, raw: str) -> dict:
     return {"ok": True, "reply": reply, "unit_id": unit.id}
 
 
+def set_rentable(user, unit: Unit, rentable: bool) -> dict:
+    """Same rules as the make-ready page: occupied units and open work stay off the rent list."""
+    requested = bool(rentable)
+    if requested and (unit.occupancy or "") == "occupied":
+        return {"ok": False, "reply": f"Unit {unit.unit_number} is occupied and cannot be marked ready to rent."}
+    if requested and UnitTask.query.filter_by(unit_id=unit.id).filter(
+        UnitTask.deleted_at.is_(None), UnitTask.status.in_(("needed", "vendored"))
+    ).first():
+        return {"ok": False, "reply": f"Finish the open make-ready items on unit {unit.unit_number} before marking it ready to rent."}
+    if requested and (unit.occupancy or "") != "make_ready":
+        return {"ok": False, "reply": f"Start and finish the make-ready turn on unit {unit.unit_number} before marking it ready to rent."}
+    before = bool(unit.rentable)
+    before_occupancy = unit.occupancy or ""
+    unit.rentable = requested
+    if unit.rentable:
+        unit.occupancy = ""
+    elif before:
+        unit.occupancy = "make_ready"
+    audit(
+        getattr(user, "id", None),
+        "human",
+        "update",
+        "unit",
+        unit.id,
+        {"rentable": before, "occupancy": before_occupancy, "unit_number": unit.unit_number, "property_id": unit.property_id},
+        {"rentable": bool(unit.rentable), "occupancy": unit.occupancy or "", "unit_number": unit.unit_number, "property_id": unit.property_id},
+    )
+    word = "ready to be rented" if unit.rentable else "not marked rentable"
+    return {"ok": True, "reply": f"Unit {unit.unit_number} is {word}.", "unit_id": unit.id}
+
+
 def set_move_out_date(user, unit: Unit, raw: str) -> dict:
     text = (raw or "").strip()
     if not text:

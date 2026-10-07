@@ -8,12 +8,23 @@ import os
 from cryptography.fernet import Fernet
 
 
+_DEV_SECRETS = {"", "apt-dev", "apt-local-development-only-change-me"}
+
+
+def _debug_mode() -> bool:
+    return os.getenv("DEBUG_MODE", "false").lower() in {"1", "true", "yes"}
+
+
 def fernet() -> Fernet:
     raw = (os.getenv("APT_DATA_KEY") or "").strip()
     if raw:
         key = raw.encode("utf-8")
     else:
-        secret = os.getenv("SECRET_KEY") or "apt-dev"
+        secret = (os.getenv("SECRET_KEY") or "").strip()
+        if not _debug_mode() and secret in _DEV_SECRETS:
+            raise RuntimeError("SECRET_KEY must be configured before encrypting Apt data.")
+        if not secret:
+            secret = "apt-dev"
         key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
     return Fernet(key)
 

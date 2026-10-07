@@ -48,6 +48,11 @@ def handle_message(user, text: str, *, idempotency_key: str, source: str = "ai")
     text = (text or "").strip()
     if not text:
         return {"ok": False, "reply": "Say where you are headed, or what you just did."}
+    from app.services.talk.office import secret_leak
+
+    leaked = secret_leak(text)
+    if leaked:
+        return {"ok": False, "reply": leaked}
     _save_chat(user, "user", text)
     result = route(user, text, idempotency_key, source)
     reply = result.get("reply") or ""
@@ -58,6 +63,25 @@ def handle_message(user, text: str, *, idempotency_key: str, source: str = "ai")
 
 def handle_photo(user, text, raw: bytes, mime: str, *, idempotency_key: str, source: str = "ai") -> dict:
     """A photo in the thread is filed, and the reading comes back in the thread."""
+    from app.services.site_map import MAX_BYTES, sniff_map, sniff_photo
+    from app.services.talk.office import map_property_name, secret_leak
+
+    leaked = secret_leak(text or "")
+    if leaked:
+        return {"ok": False, "reply": leaked}
+    if not raw:
+        return {"ok": False, "reply": "That photo was empty."}
+    if len(raw) > MAX_BYTES:
+        return {"ok": False, "reply": "That file is too large. Keep it under 12 MB."}
+    property_name = map_property_name(text or "")
+    if property_name:
+        if not sniff_map(raw):
+            return {"ok": False, "reply": "Use a JPEG, PNG, WEBP, GIF, or PDF of this property."}
+        return _file_property_map(user, property_name, raw, text or "")
+    found = sniff_photo(raw)
+    if not found:
+        return {"ok": False, "reply": "Send a JPEG, PNG, WEBP, or GIF. A PDF is only for a property map."}
+    mime = found[0]
     from app.models import Media
     from app.services.equipment import describe, merge_equipment, parse_equipment, read_photo
     from app.services.files import save_blob
@@ -133,6 +157,29 @@ def handle_photo(user, text, raw: bytes, mime: str, *, idempotency_key: str, sou
         reply = f"Photo kept. {extra}"
     _save_chat(user, "assistant", reply)
     return {"ok": True, "reply": reply, "media_id": media.id}
+
+
+def _file_property_map(user, property_name: str, raw: bytes, caption: str) -> dict:
+    """A caption that names the site map replaces that property's uploaded plan."""
+    from app.services.parse import resolve_property
+    from app.services.site_map import can_upload_map, replace_map
+
+    _save_chat(user, "user", (caption or "").strip() or f"Map for {property_name}")
+    verdict = resolve_property(property_name, "", "", user=user)
+    if verdict.get("state") != "resolved":
+        reply = verdict.get("message") or "Which property?"
+        _save_chat(user, "assistant", reply)
+        return {"ok": False, "reply": reply}
+    prop = verdict["property"]
+    if not can_upload_map(user, prop.id):
+        reply = "This login cannot change that property's map."
+        _save_chat(user, "assistant", reply)
+        return {"ok": False, "reply": reply}
+    saved, message = replace_map(user, prop, raw)
+    link = f"/map?property={prop.id}"
+    reply = f"{message} {link}" if saved else message
+    _save_chat(user, "assistant", reply)
+    return {"ok": bool(saved), "reply": reply, "property_id": prop.id}
 
 
 def _stick_photo(user, media, merged, key, result) -> None:

@@ -60,7 +60,7 @@ OWNER_PROTECTED_TOOLS = {"transfer_ownership", "delete_owner", "promote_owner"}
 PERSONAL_TOOLS = {"estimate_miles", "log_expense", "log_miles", "log_odometer"}
 
 
-PROPERTY_WRITE_TOOLS = {"add_plan_card", "attach_media", "clear_plan", "log_job_event", "log_work", "move_equipment", "note_equipment", "plan_day", "plan_outcome", "plan_trip", "record_unit_visit", "unit_board", "update_trip", "set_ready_by", "ready_check", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used"}
+PROPERTY_WRITE_TOOLS = {"add_plan_card", "attach_media", "clear_plan", "log_job_event", "log_work", "move_equipment", "note_equipment", "plan_day", "plan_outcome", "plan_trip", "record_unit_visit", "unit_board", "update_trip", "set_ready_by", "ready_check", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used", "send_back", "mark_rentable", "set_move_out", "save_how_to", "add_place_gear"}
 
 
 TOOL_CAPABILITY = {"read_reports": "read_reports", "draft_report": "manage_reports", "send_report": "manage_reports", "update_settings": "manage_settings", "invite_viewer": "manage_users", "update_viewer": "manage_users", "upsert_property": "create_properties", "update_property": "manage_properties", "delete_property": "manage_properties", "lookup_address": "read_assigned_properties"}

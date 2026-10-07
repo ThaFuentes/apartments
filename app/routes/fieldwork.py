@@ -21,6 +21,19 @@ def _back_to(default: str = "/") -> str:
     return sanitize_next(target, default)
 
 
+def _drive_cookie(resp, result):
+    """Driving view is a cookie, the same one the page form sets."""
+    drive = (result or {}).get("drive")
+    if drive not in {"on", "off"}:
+        return resp
+    secure = bool(request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https")
+    if drive == "on":
+        resp.set_cookie("apt_drive", "1", max_age=60 * 60 * 12, samesite="Lax", httponly=True, secure=secure, path="/")
+    else:
+        resp.set_cookie("apt_drive", "", expires=0, samesite="Lax", httponly=True, secure=secure, path="/")
+    return resp
+
+
 @bp.route("/")
 @login_required
 def home():
@@ -270,13 +283,13 @@ def chat():
     # If the help system wants to open the help page, redirect there
     if result.get("help_page_url"):
         if request.is_json or request.headers.get("Accept") == "application/json":
-            return jsonify(result)
+            return _drive_cookie(jsonify(result), result)
         flash(result.get("reply") or "", "ok")
-        return redirect(result["help_page_url"])
+        return _drive_cookie(redirect(result["help_page_url"]), result)
     if request.is_json or request.headers.get("Accept") == "application/json":
-        return jsonify(result)
+        return _drive_cookie(jsonify(result), result)
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return redirect("/")
+    return _drive_cookie(redirect("/"), result)
 
 @bp.post("/chat/new")
 @login_required

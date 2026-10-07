@@ -522,6 +522,138 @@ TOOL_DECLS = [
             "required": ["property_name"],
         },
     },
+    {
+        "name": "show_property_map",
+        "description": "Show the uploaded picture or PDF map for one property. Not a street map and not unit pins.",
+        "parameters": {
+            "type": "object",
+            "properties": {"property_name": {"type": "string"}},
+            "required": ["property_name"],
+        },
+    },
+    {
+        "name": "remove_property_map",
+        "description": "Remove the uploaded property map. Use when she says remove, delete, or clear the map for a property.",
+        "parameters": {
+            "type": "object",
+            "properties": {"property_name": {"type": "string"}},
+            "required": ["property_name"],
+        },
+    },
+    {
+        "name": "list_regions",
+        "description": "List company regions. Read only.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "manage_region",
+        "description": "Create, rename, or delete a region, add or remove one saved city, assign or remove a regional person, or allow or deny one property manager's default-property choice in that region. Adding a city or person keeps the ones already on it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "create, rename, delete, add_city, remove_city, add_person, remove_person, allow_default, or deny_default"},
+                "name": {"type": "string"},
+                "new_name": {"type": "string"},
+                "city": {"type": "string"},
+                "person": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "send_back",
+        "description": "Send one finished make-ready item back. A note is required. Occupied units stay refused.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "job": {"type": "string"},
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "note": {"type": "string"},
+            },
+            "required": ["job", "unit_number", "note"],
+        },
+    },
+    {
+        "name": "mark_rentable",
+        "description": "Mark a unit ready to rent, or take that mark off. Occupied units and open make-ready work cannot be marked rentable.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "rentable": {"type": "boolean"},
+            },
+            "required": ["unit_number", "rentable"],
+        },
+    },
+    {
+        "name": "set_move_out",
+        "description": "Set or clear a unit move-out date. Pass YYYY-MM-DD, today, or tomorrow. Empty move_out_date clears it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "move_out_date": {"type": "string"},
+            },
+            "required": ["unit_number"],
+        },
+    },
+    {
+        "name": "restore_inventory",
+        "description": "Put back inventory one person removed. days is 1 to 30 and defaults to 30.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "person": {"type": "string"},
+                "days": {"type": "integer"},
+            },
+            "required": ["person"],
+        },
+    },
+    {
+        "name": "reverse_audit",
+        "description": "Undo one audit-log row by its number.",
+        "parameters": {
+            "type": "object",
+            "properties": {"audit_id": {"type": "integer"}},
+            "required": ["audit_id"],
+        },
+    },
+    {
+        "name": "unlock_login",
+        "description": "Unlock one person's sign-in after too many failures. Do not use this to ban an address or a device.",
+        "parameters": {
+            "type": "object",
+            "properties": {"person": {"type": "string"}},
+            "required": ["person"],
+        },
+    },
+    {
+        "name": "remove_contractor",
+        "description": "Take a contractor off the list.",
+        "parameters": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "save_how_to",
+        "description": "Save how-to instructions on one existing piece of equipment.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "gear": {"type": "string"},
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "how_to": {"type": "string"},
+                "equipment_id": {"type": "integer"},
+            },
+            "required": ["how_to"],
+        },
+    },
 ]
 
 
@@ -548,6 +680,10 @@ CHAT_RULES = (
     "Ready-by dates are set_ready_by; a trade marked done is ready_check with one of trashout, paint, carpet, clean, punch, appliances, keys. "
     "A recurring reminder like a filter change every 90 days is pm_save. Parts she used are parts_used. "
     "When the apartment name and the city are both in the thread, call upsert_property once and include any street she already typed. "
-    "Do not say there is no matching job unless she asked about a job."
+    "Do not say there is no matching job unless she asked about a job. "
+    "A property map is one uploaded picture or PDF. Show it with show_property_map and remove it with remove_property_map. It is not a street map. "
+    "Regions use manage_region. Sending finished make-ready work back uses send_back with a note. Marking a unit ready to rent uses mark_rentable. A move-out date uses set_move_out. "
+    "Putting inventory back uses restore_inventory. One audit row uses reverse_audit. Unlocking a sign-in uses unlock_login. Removing a contractor uses remove_contractor. Equipment instructions use save_how_to. "
+    "Do not ban an address, change two-factor, or reset a password from chat."
 )
 

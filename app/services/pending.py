@@ -11,7 +11,7 @@ from app.services.clock import utcnow
 from app.services.records import audit, dumps, loads, open_shift
 
 # Reads answer right away. Every other write waits for a yes.
-READ_ONLY = {"query_record", "lookup_address"}
+READ_ONLY = {"query_record", "lookup_address", "show_property_map", "list_regions"}
 
 
 def _authorized(user, tool: str, payload: dict) -> dict | None:

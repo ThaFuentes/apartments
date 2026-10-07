@@ -289,40 +289,16 @@ def job_parts(job_id):
 @bp.post("/units/<int:unit_id>/rentable")
 @login_required
 def unit_rentable(unit_id):
-    from app.models import UnitTask
-    from app.services.records import audit
+    from app.services.ready import set_rentable
 
     unit = _editable_unit(unit_id)
-    before = bool(unit.rentable)
-    before_occupancy = unit.occupancy or ""
-    requested_rentable = (request.form.get("rentable") or "0").strip() in {"1", "true", "yes", "on"}
-    if requested_rentable and unit.occupancy == "occupied":
-        flash(f"Unit {unit.unit_number} is occupied and cannot be marked ready to rent.", "warn")
-        return redirect(_field_next(f"/units/{unit.id}", "/ready"))
-    if requested_rentable and UnitTask.query.filter_by(unit_id=unit.id).filter(
-        UnitTask.deleted_at.is_(None), UnitTask.status.in_(("needed", "vendored"))
-    ).first():
-        flash(f"Finish the open make-ready items on unit {unit.unit_number} before marking it ready to rent.", "warn")
-        return redirect(_field_next(f"/units/{unit.id}", "/ready"))
-    if requested_rentable and unit.occupancy != "make_ready":
-        flash(f"Start and finish the make-ready turn on unit {unit.unit_number} before marking it ready to rent.", "warn")
-        return redirect(_field_next(f"/units/{unit.id}", "/ready"))
-    unit.rentable = requested_rentable
-    if unit.rentable:
-        unit.occupancy = ""
-    elif before:
-        unit.occupancy = "make_ready"
-    audit(
-        current_user.id,
-        "human",
-        "update",
-        "unit",
-        unit.id,
-        {"rentable": before, "occupancy": before_occupancy, "unit_number": unit.unit_number, "property_id": unit.property_id},
-        {"rentable": bool(unit.rentable), "occupancy": unit.occupancy or "", "unit_number": unit.unit_number, "property_id": unit.property_id},
-    )
-    db.session.commit()
-    flash(f"Unit {unit.unit_number} is {'ready to be rented' if unit.rentable else 'not marked rentable' }.", "ok")
+    requested = (request.form.get("rentable") or "0").strip() in {"1", "true", "yes", "on"}
+    result = set_rentable(current_user, unit, requested)
+    if result.get("ok"):
+        db.session.commit()
+    else:
+        db.session.rollback()
+    flash(result.get("reply") or "Saved.", "ok" if result.get("ok") else "warn")
     return redirect(_field_next(f"/units/{unit.id}", "/ready"))
 
 

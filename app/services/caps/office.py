@@ -1,0 +1,181 @@
+"""Office pages that chat can do: maps, regions, closeout, audit, and logins."""
+from app.services.caps.schema import Capability
+
+CAPS = [
+    Capability(
+        tool="show_property_map",
+        label="show a property map",
+        says=(
+            "show the map for oakwood",
+            "what's the property map",
+            "this is the map for oakwood",
+        ),
+        howto="Say show the map for the property. It is the uploaded picture or PDF, not a street map. Send the picture and say this is the map for that property to replace it.",
+    ),
+    Capability(
+        tool="remove_property_map",
+        label="remove a property map",
+        says=("remove the map for oakwood", "clear the property map for oakwood"),
+        howto="Say remove the map for the property.",
+    ),
+    Capability(
+        tool="manage_region",
+        label="set up a region",
+        says=(
+            "create region Permian",
+            "put Odessa in region Permian",
+            "assign Jane Doe to region Permian",
+        ),
+        howto="Say create region, put a saved city in a region, or assign a regional login to a region. Adding keeps the cities and people already on it.",
+    ),
+    Capability(
+        tool="list_regions",
+        label="list regions",
+        says=("list regions", "what regions do we have"),
+        howto="Say list regions.",
+    ),
+    Capability(
+        tool="send_back",
+        label="send make-ready work back",
+        says=("send back paint on unit 210 because the edges are rough",),
+        howto="Say send back, the item, the unit, and why. Occupied units have to be marked vacant first.",
+    ),
+    Capability(
+        tool="mark_rentable",
+        label="mark a unit ready to rent",
+        says=("mark unit 210 ready to rent", "unit 210 is not rentable"),
+        howto="Say mark the unit ready to rent after the make-ready work is finished. Occupied units and open items stay off the rent list.",
+    ),
+    Capability(
+        tool="set_move_out",
+        label="set a move-out date",
+        says=("set the move-out date for unit 210 to 2026-10-15", "move-out for unit 210 is tomorrow"),
+        howto="Say the unit and the date. Today and tomorrow work. A blank date clears it.",
+    ),
+    Capability(
+        tool="restore_inventory",
+        label="put inventory back",
+        says=("put back the inventory Jane deleted", "restore the inventory by Sam for 7 days"),
+        howto="Say put back the inventory and who removed it. The window is 1 to 30 days.",
+    ),
+    Capability(
+        tool="reverse_audit",
+        label="reverse one audit row",
+        says=("reverse audit 12",),
+        howto="Say reverse audit and the number from the audit log.",
+    ),
+    Capability(
+        tool="unlock_login",
+        label="unlock a sign-in",
+        says=("unlock the login for Jane Doe", "unlock jane"),
+        howto="Say unlock the login for that person. A ban needs the full sentence. Two-factor stays on its setup page.",
+    ),
+    Capability(
+        tool="remove_contractor",
+        label="remove a contractor",
+        says=("remove contractor Ace Plumbing",),
+        howto="Say remove contractor and the saved name.",
+    ),
+    Capability(
+        tool="save_how_to",
+        label="save equipment instructions",
+        says=("how-to for the pool pump at Oakwood: turn the valve slowly",),
+        howto="Say how-to for the piece, the unit or property, and the instructions.",
+    ),
+    Capability(
+        tool="add_place_gear",
+        label="add property equipment",
+        says=("add a pool pump at Oakwood: skim at 8", "add a pool pump named South pool at Oakwood every 30 days"),
+        howto="Say add the piece at the property. Named sets the label. Every N days adds the reminder. A colon adds the team instructions.",
+    ),
+    Capability(
+        tool="create_job_title",
+        label="add a job title",
+        says=("add a job title Leasing Agent based on office",),
+        howto="Say add a job title and the on-the-ground role it starts from, like office or maintenance person.",
+    ),
+    Capability(
+        tool="set_hat",
+        label="give an extra role",
+        says=("give Jane Doe a maintenance supervisor hat at Oakwood", "give Jane a property manager hat in region Permian"),
+        howto="Say give the person a role hat at a property or in a region. Owner, admin, and read-only are not hats.",
+    ),
+    Capability(
+        tool="clear_hat",
+        label="remove an extra role",
+        says=("remove the maintenance supervisor hat from Jane Doe at Oakwood",),
+        howto="Say remove the role hat from the person at that property or in that region.",
+    ),
+    Capability(
+        tool="mark_bot",
+        label="mark a bot login",
+        says=("mark Jane as a bot", "unmark Jane as a bot"),
+        howto="Say mark that person as a bot. Only an owner can unmark one, and that clears two-factor.",
+    ),
+    Capability(
+        tool="set_security_watch",
+        label="let a bot watch security",
+        says=("let Jane watch security", "stop Jane watching security"),
+        howto="An owner says let that bot watch security, or stop them watching security.",
+    ),
+    Capability(
+        tool="send_password_reset",
+        label="email a password reset",
+        says=("send a password reset to Jane Doe",),
+        howto="Say send a password reset to that person. The link goes to their reset inbox and is not shown in chat.",
+    ),
+    Capability(
+        tool="set_reset_email",
+        label="set your reset email",
+        says=("set my password-reset email to office@example.com", "clear my password-reset email"),
+        howto="Say set my password-reset email, or clear it to use the login email.",
+    ),
+    Capability(
+        tool="send_test_email",
+        label="send a test email",
+        says=("send a test email to office@example.com",),
+        howto="An owner says send a test email to that inbox.",
+    ),
+    Capability(
+        tool="ban_ip",
+        label="ban an address",
+        says=("ban ip 203.0.113.8 for 24 hours because repeated login failures",),
+        howto="Say ban ip, the address, the hours (1, 6, 24, 48, 72, or 168), and because. A short or vague sentence does not ban anyone.",
+    ),
+    Capability(
+        tool="unban_ip",
+        label="lift an address ban",
+        says=("unban ip 203.0.113.8", "lift the ban on ip 203.0.113.8"),
+        howto="Say unban ip and the address.",
+    ),
+    Capability(
+        tool="ban_device",
+        label="ban a device",
+        says=("ban device and the 40-character print for 24 hours because the kiosk was shared",),
+        howto="Say ban device, the 40-character print, the hours, and because.",
+    ),
+    Capability(
+        tool="unban_device",
+        label="lift a device ban",
+        says=("unban device and the 40-character print",),
+        howto="Say unban device and the 40-character print.",
+    ),
+    Capability(
+        tool="pin_property",
+        label="pin a property",
+        says=("pin Oakwood", "unpin Oakwood"),
+        howto="Say pin or unpin the property. It moves that property on your list.",
+    ),
+    Capability(
+        tool="drive_view",
+        label="turn driving view on",
+        says=("I'm driving", "I'm not driving"),
+        howto="Say I'm driving or I'm not driving. That only sets the driving view on this browser.",
+    ),
+    Capability(
+        tool="stay_on_page",
+        label="what stays off chat",
+        says=("where do I turn on two-factor",),
+        howto="Sign-in, join, forgot-password, the reset link, and two-factor enrollment stay on their pages. API keys stay in Settings. Chat refuses a pasted key and does not save it.",
+    ),
+]

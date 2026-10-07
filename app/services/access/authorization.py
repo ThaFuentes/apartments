@@ -27,7 +27,7 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
 
     if not getattr(user, "active", True) or not known_role(role):
         return {"ok": False, "reply": "This login is inactive or has no configured role."}
-    known = PROPERTY_WRITE_TOOLS | set(TOOL_CAPABILITY) | set(PERSONAL_TOOLS) | {"query_record", "soft_delete", "restore", "grant_access", "set_default_property"} | OWNER_PROTECTED_TOOLS
+    known = PROPERTY_WRITE_TOOLS | set(TOOL_CAPABILITY) | set(PERSONAL_TOOLS) | {"query_record", "soft_delete", "restore", "grant_access", "set_default_property", "show_property_map", "list_regions", "remove_property_map", "manage_region", "unlock_login", "restore_inventory", "reverse_audit", "remove_contractor", "ban_ip", "unban_ip", "ban_device", "unban_device", "send_password_reset", "set_security_watch", "mark_bot", "create_job_title", "set_hat", "clear_hat", "pin_property", "send_test_email", "set_reset_email"} | OWNER_PROTECTED_TOOLS
     if tool not in known:
         return {"ok": False, "reply": "This action is not available to this role."}
     if tool in OWNER_PROTECTED_TOOLS and role != "owner":
@@ -130,6 +130,95 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
         if error:
             return {"ok": False, "reply": error}
         return {"ok": bool(ids) and all(_can_edit_for_tool(user, i, tool) for i in ids), "reply": "Which assigned property is this for?" if not ids else "That property is outside your assigned edit scope."}
+    if tool == "show_property_map":
+        return {"ok": True, "reply": ""}
+    if tool in {"list_regions", "manage_region"}:
+        from app.services.access.management import can_manage_regions
+
+        allowed = can_manage_regions(user)
+        return {"ok": allowed, "reply": "" if allowed else "Only an owner or an admin can set up a region."}
+    if tool == "remove_property_map":
+        from app.services.site_map import can_upload_map
+
+        name = (payload.get("property_name") or "").strip()
+        if not name:
+            return {"ok": False, "reply": "Which property?"}
+        prop_id, error = _resolve_payload_place(user, name, (payload.get("city") or "").strip(), payload.get("region") or "")
+        if not prop_id:
+            return {"ok": False, "reply": error or "Which property?"}
+        if not can_upload_map(user, prop_id):
+            return {"ok": False, "reply": "This login cannot change that property's map."}
+        return {"ok": True, "reply": ""}
+    if tool == "unlock_login":
+        from app.services.access.management import can_manage_user
+        from app.services.people import find_person
+
+        person = find_person(payload.get("person") or payload.get("username") or "")
+        if person is None:
+            return {"ok": False, "reply": "I can't find that login."}
+        if not can_manage_user(user, person):
+            return {"ok": False, "reply": "This login cannot unlock that person."}
+        return {"ok": True, "reply": ""}
+    if tool in {"restore_inventory", "reverse_audit"}:
+        from app.services.reversals import can_reverse
+
+        allowed = can_reverse(user)
+        return {"ok": allowed, "reply": "" if allowed else "This login cannot undo that."}
+    if tool == "remove_contractor":
+        if not has_capability(user, "write_maintenance"):
+            return {"ok": False, "reply": "This login cannot make maintenance changes."}
+        return {"ok": True, "reply": ""}
+    if tool in {"ban_ip", "unban_ip", "ban_device", "unban_device"}:
+        from app.services.security_ops import can_open_security
+
+        allowed = can_open_security(user)
+        return {"ok": allowed, "reply": "" if allowed else "Only the owner, or a bot marked to watch the site, can do that."}
+    if tool == "send_password_reset":
+        from app.services.access.management import can_manage_user
+        from app.services.people import find_person
+
+        person = find_person(payload.get("person") or "")
+        if person is None:
+            return {"ok": False, "reply": "I can't find that login."}
+        if person.role == "owner" and getattr(user, "id", None) != person.id:
+            return {"ok": False, "reply": "Another owner is not reset from here."}
+        allowed = getattr(user, "id", None) == person.id or role == "owner" or can_manage_user(user, person)
+        return {"ok": allowed, "reply": "" if allowed else "This login cannot reset that person."}
+    if tool == "set_security_watch":
+        return {"ok": role == "owner", "reply": "" if role == "owner" else "Only an owner can choose who watches security."}
+    if tool == "mark_bot":
+        from app.services.access.management import can_manage_user
+        from app.services.people import find_person
+
+        person = find_person(payload.get("person") or "")
+        if person is None:
+            return {"ok": False, "reply": "I can't find that login."}
+        if person.role == "owner":
+            return {"ok": False, "reply": "An owner login is not a bot."}
+        if not payload.get("on") and role != "owner":
+            return {"ok": False, "reply": "Only an owner can unmark a bot."}
+        allowed = role == "owner" or can_manage_user(user, person)
+        return {"ok": allowed, "reply": "" if allowed else "This login cannot change that person."}
+    if tool == "create_job_title":
+        from app.services.access.management import can_create_custom_role
+
+        allowed = can_create_custom_role(user)
+        return {"ok": allowed, "reply": "" if allowed else "Only an owner or an admin can add an extra job title."}
+    if tool in {"set_hat", "clear_hat"}:
+        from app.services.hats import can_assign_hat
+        from app.services.people import find_person
+
+        person = find_person(payload.get("person") or "")
+        if person is None:
+            return {"ok": False, "reply": "I can't find that login."}
+        allowed = can_assign_hat(user, person)
+        return {"ok": allowed, "reply": "" if allowed else "You cannot assign that extra role."}
+    if tool == "pin_property":
+        return {"ok": True, "reply": ""}
+    if tool == "send_test_email":
+        return {"ok": role == "owner", "reply": "" if role == "owner" else "Only an owner can send a test email."}
+    if tool == "set_reset_email":
+        return {"ok": True, "reply": ""}
     if not has_capability(user, "write_maintenance"):
         return {"ok": False, "reply": "This login cannot make maintenance changes."}
     ids, error = _resource_property_ids(user, tool, payload)
@@ -336,12 +425,12 @@ def _resource_property_ids(user, tool: str, payload: dict) -> tuple[set[int], st
                 return set(), f"Unit {row.unit_number} is already active. Rename that unit before restoring this one."
         ids.add(row.property_id)
     hint = (payload.get("property_hint") or payload.get("record_property") or "").strip()
-    if hint and tool in {"unit_board", "soft_delete", "restore"}:
+    if hint and tool in {"unit_board", "soft_delete", "restore", "send_back", "mark_rentable", "set_move_out", "save_how_to"}:
         pid, error = _resolve_payload_place(user, hint, (payload.get("city") or "").strip(), payload.get("region") or "")
         if not pid:
             return set(), error
         ids.add(pid)
-    if tool == "unit_board" and not ids and payload.get("unit_number"):
+    if tool in {"unit_board", "send_back", "mark_rentable", "set_move_out", "save_how_to"} and not ids and payload.get("unit_number"):
         from app.services.records import normalize_unit
         number = normalize_unit(payload.get("unit_number") or "")
         matches = Unit.query.filter(db.func.lower(Unit.unit_number) == number.lower(), Unit.deleted_at.is_(None)).all() if number else []

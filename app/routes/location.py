@@ -54,8 +54,22 @@ def upload():
     if not raw:
         flash("That photo was empty.", "warn")
         return redirect("/")
+    from app.services.site_map import MAP_KIND, MAX_BYTES, sniff_photo
+    from app.services.talk.office import secret_leak
+
+    note = (request.form.get("message") or "").strip()
+    leaked = secret_leak(note)
+    if leaked:
+        flash(leaked, "warn")
+        return redirect("/")
+    if len(raw) > MAX_BYTES:
+        flash("That file is too large. Keep it under 12 MB.", "warn")
+        return redirect("/")
+    found = sniff_photo(raw)
+    if not found:
+        flash("Send a JPEG, PNG, WEBP, or GIF. A PDF is only for a property map.", "warn")
+        return redirect("/")
     name = save_blob(raw)
-    from app.services.site_map import MAP_KIND
 
     kind = (request.form.get("kind") or "photo").strip()[:24] or "photo"
     if kind == MAP_KIND:
@@ -64,13 +78,12 @@ def upload():
         user_id=current_user.id,
         kind=kind,
         storage_name=name,
-        mime=blob.mimetype or "image/jpeg",
-        caption=(request.form.get("message") or "")[:300],
+        mime=found[0],
+        caption=note[:300],
         created_at=utcnow(),
     )
     db.session.add(media)
     db.session.commit()
-    note = (request.form.get("message") or "").strip()
     from app.services.equipment import describe, merge_equipment, parse_equipment, read_photo
     from app.services.records import dumps
 

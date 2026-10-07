@@ -16,10 +16,15 @@ from app.services.talk.textutil import _place_ready
 def _from_model(user, text: str, key: str, source: str):
     """The saved key answers first. Local chat runs only when this returns failed.
 
-    Make-ready, contractor, reminder, and parts sentences are exact. They stage
-    their own confirm card and do not go to the model, which reads "filter
-    change" as a property edit.
+    Office sentences (map, regions, send-back, rentable, move-out, inventory,
+    audit, unlock) and field sentences are exact. They stage their own confirm
+    card and do not go to the model.
     """
+    from app.services.talk.office import office_sentence
+
+    staged = office_sentence(user, text, key, source)
+    if staged:
+        return staged
     from app.services.talk.field_chat import field_sentence
 
     staged = field_sentence(user, text, key, source)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 
 from flask import Response
@@ -46,10 +47,15 @@ def delete_blob(name: str) -> None:
         os.remove(path)
 
 
+def _safe_filename(name: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", name or "").strip(".-")[:80]
+    return cleaned or "download"
+
+
 def send_bytes(data: bytes, mimetype: str, download_name: str = "", as_attachment: bool = False):
     resp = Response(data or b"", mimetype=mimetype or "application/octet-stream")
     if download_name:
         disp = "attachment" if as_attachment else "inline"
-        resp.headers["Content-Disposition"] = f'{disp}; filename="{download_name}"'
+        resp.headers["Content-Disposition"] = f'{disp}; filename="{_safe_filename(download_name)}"'
     resp.headers["Cache-Control"] = "private, no-store"
     return resp

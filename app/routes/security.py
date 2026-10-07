@@ -39,14 +39,16 @@ def _ensure_geo() -> None:
 
 
 @bp.get("/security/console.css")
+@security_required
 def security_console_css():
     css = render_template("security/console.css")
     resp = current_app.response_class(css, mimetype="text/css; charset=utf-8")
-    resp.headers["Cache-Control"] = "public, max-age=3600"
+    resp.headers["Cache-Control"] = "private, max-age=3600"
     return resp
 
 
 @bp.get("/security/assets/<path:name>")
+@security_required
 def security_assets(name):
     root = os.path.join(current_app.static_folder, "security", "threat-map")
     return send_from_directory(root, name)

@@ -46,6 +46,14 @@ def sniff_map(raw: bytes) -> tuple[str, str] | None:
     return None
 
 
+def sniff_photo(raw: bytes) -> tuple[str, str] | None:
+    """A chat photo. A PDF is a property map, not a nameplate."""
+    found = sniff_map(raw)
+    if not found or found[0] == "application/pdf":
+        return None
+    return found
+
+
 def map_for(property_id: int) -> Media | None:
     return (
         Media.query.filter_by(property_id=int(property_id), kind=MAP_KIND)

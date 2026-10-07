@@ -35,7 +35,7 @@ def roles_below(role: str) -> set[str]:
 
 def role_help_topics(role: str, user=None) -> list[tuple[str, list[Capability]]]:
     """Return permitted help plus the defaults of subordinate roles for training."""
-    from app.services.caps import money, people, places, reports, trips, units
+    from app.services.caps import money, office, people, places, reports, trips, units
     from app.services.access import normalize_role
 
     role = normalize_role(role)
@@ -47,6 +47,7 @@ def role_help_topics(role: str, user=None) -> list[tuple[str, list[Capability]]]
         ("Gas, food, and miles", money.CAPS),
         ("Questions and reports", reports.CAPS),
         ("People and permissions", people.CAPS),
+        ("Office", office.CAPS),
     ]
     result: list[tuple[str, list[Capability]]] = []
     for label, caps in all_topics:
@@ -97,6 +98,32 @@ def _role_can_explain(cap: Capability, role: str, user=None) -> bool:
         return has_any("write_maintenance")
     if cap.tool in {"plan_trip", "update_trip", "clear_plan"}:
         return has_any("write_maintenance", "read_assigned_properties", "read_region")
+    if cap.tool == "show_property_map":
+        return has_any("read_company", "read_assigned_properties", "read_region")
+    if cap.tool in {"list_regions", "manage_region"}:
+        return has_any("manage_regions")
+    if cap.tool == "remove_property_map":
+        return has_any("write_maintenance", "edit_properties", "manage_properties")
+    if cap.tool in {"send_back", "mark_rentable", "set_move_out", "save_how_to", "remove_contractor", "add_place_gear"}:
+        return has_any("write_maintenance")
+    if cap.tool in {"restore_inventory", "reverse_audit"}:
+        return role in {"admin", "regional_manager", "regional_property_manager", "maintenance_regional"}
+    if cap.tool == "unlock_login":
+        return has_any("manage_users", "manage_region_people", "manage_property_people")
+    if cap.tool == "create_job_title":
+        return has_any("manage_roles")
+    if cap.tool in {"set_hat", "clear_hat", "mark_bot", "send_password_reset"}:
+        return has_any("manage_users", "manage_region_people", "manage_property_people")
+    if cap.tool in {"set_security_watch", "send_test_email"}:
+        return False
+    if cap.tool in {"ban_ip", "unban_ip", "ban_device", "unban_device"}:
+        if user is not None:
+            from app.services.security_ops import can_open_security
+
+            return can_open_security(user)
+        return False
+    if cap.tool in {"pin_property", "set_reset_email", "drive_view", "stay_on_page"}:
+        return role != "viewer"
     return False
 
 

@@ -6,7 +6,7 @@ modules in this folder each hold one slice of the list.
 """
 from __future__ import annotations
 
-from app.services.caps import money, people, places, reports, trips, units
+from app.services.caps import money, office, people, places, reports, trips, units
 from app.services.caps.schema import Capability, lines, match
 
 TOPICS = (
@@ -16,6 +16,7 @@ TOPICS = (
     ("Gas, food, and miles", money.CAPS),
     ("Questions and reports", reports.CAPS),
     ("People and permissions", people.CAPS),
+    ("Office", office.CAPS),
 )
 
 ALL: list[Capability] = [cap for _topic, caps in TOPICS for cap in caps]
