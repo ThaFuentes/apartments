@@ -43,7 +43,18 @@
     background: var(--soft);
     color: var(--accent);
   }
-  .desk-nav .desk-signout { margin: 0 0 0 auto; }
+  .desk-nav .theme-desk { margin: 0 0 0 auto; position: relative; align-self: center; }
+  .desk-nav .desk-signout { margin: 0; }
+  .theme-desk.for-phone { display: none; }
+  .desk-nav .theme-desk .theme-pop {
+    position: absolute;
+    z-index: 40;
+    right: 0;
+    top: calc(100% + 0.4rem);
+    width: min(36rem, 72vw);
+    margin-top: 0;
+  }
+  .desk-nav .theme-desk .theme-grid { grid-template-columns: 1fr 1fr; }
   .desk-nav .desk-signout button {
     min-height: 40px;
     padding: 0.45rem 0.75rem;

@@ -863,6 +863,52 @@ button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 3px sol
 .swatch.grove { background: linear-gradient(135deg, #e7f0e4, #1f6b45); }
 .swatch.dusk { background: linear-gradient(135deg, #1b1520, #d28bd6); }
 .swatch.chalk { background: linear-gradient(135deg, #f4f1ea, #e24b3b); }
+.theme-desk { position: relative; margin-top: 0.55rem; }
+.theme-desk > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: fit-content;
+  min-height: 44px;
+  padding: 0.3rem 0.75rem 0.3rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 750;
+  font-size: 0.92rem;
+}
+.theme-desk > summary::-webkit-details-marker { display: none; }
+.theme-desk > summary::marker { content: ""; }
+.theme-desk > summary .swatch {
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+}
+.theme-desk > summary::after {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-left: 0.1rem;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg) translateY(-0.12rem);
+}
+.theme-desk[open] > summary::after { transform: rotate(225deg) translateY(-0.05rem); }
+.theme-pop {
+  margin-top: 0.45rem;
+  padding: 0.75rem;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.theme-pop-note { margin: 0 0 0.55rem; color: var(--muted); font-size: 0.85rem; }
+.theme-pop .hint { margin: 0.55rem 0 0; }
+.theme-desk .theme-grid button { min-height: 2.9rem; }
 @media (min-width: 700px) {
   .theme-grid { grid-template-columns: 1fr 1fr; }
 }
@@ -1056,6 +1102,8 @@ html[data-theme="contrast"] .unit-card,
 html[data-theme="contrast"] .menu a,
 html[data-theme="contrast"] .stat,
 html[data-theme="contrast"] .theme-fold,
+html[data-theme="contrast"] .theme-pop,
+html[data-theme="contrast"] .theme-desk > summary,
 html[data-theme="contrast"] .bubble,
 html[data-theme="contrast"] .nav {
   border: 2px solid #000;

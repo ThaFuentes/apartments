@@ -36,6 +36,9 @@
       {% endif %}
     </div>
     {% if current_user.is_authenticated %}
+    {% with theme_switch_class='for-phone' %}
+    {% include "theme_switch.html" %}
+    {% endwith %}
     <nav class="desk-nav" aria-label="Office">
       {% if current_user.role != 'viewer' %}
       <a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Home</a>
@@ -56,6 +59,7 @@
       <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
       <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>
       {% endif %}
+      {% include "theme_switch.html" %}
       <form method="post" action="/logout" class="desk-signout">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit" class="ghost">Sign out</button>

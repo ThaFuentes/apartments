@@ -37,4 +37,17 @@ if "--shadow: none" not in css:
     raise SystemExit("contrast should drop the soft shadow")
 if "import app" in office.split("def office_sentence", 1)[0]:
     raise SystemExit("office parser imported the app")
+base = (ROOT / "app" / "templates" / "base.html").read_text(encoding="utf-8")
+viewer_nav, _, after_viewer = base.partition("current_user.role != 'viewer'")
+# The desk nav's viewer branch is the second role check. Both copies of the
+# switch must exist: one for the phone header, one inside the desk bar.
+if base.count('include "theme_switch.html"') < 2:
+    raise SystemExit("phone and desktop both need the Look menu")
+desk_nav = base.split('<nav class="desk-nav"', 1)[1].split("</nav>", 1)[0]
+if 'include "theme_switch.html"' not in desk_nav:
+    raise SystemExit("desktop bar is missing the Look menu")
+if "for-phone" not in base:
+    raise SystemExit("phone header is missing the Look menu")
+if viewer_nav and after_viewer and "theme_switch.html" not in desk_nav:
+    raise SystemExit("viewers cannot open Look from the desk")
 print("themes ok")

@@ -1,30 +1,40 @@
-{% if theme_open is defined and not theme_open %}
-<div class="theme-picks" aria-label="Themes">
-{% else %}
-<section class="theme-picks card" aria-label="Themes">
-  <h3>Themes</h3>
-{% endif %}
-  <p class="lead">Ten looks for this desk. The security console keeps its own look.</p>
-  <div class="theme-grid">
-    {% for item in theme_choices %}
-    <form method="post" action="/appearance">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="next" value="{{ request.path }}">
-      <button type="submit" name="theme" value="{{ item.id }}" aria-pressed="{{ 'true' if appearance == item.id else 'false' }}">
-        <span class="swatch {{ item.id }}" aria-hidden="true"></span>
-        <span class="theme-copy">
-          <strong>{{ item.label }}</strong>
-          <span>{{ item.line }}</span>
-        </span>
-      </button>
-    </form>
-    {% endfor %}
-  </div>
+{% macro theme_buttons() %}
+<div class="theme-grid">
+  {% for item in theme_choices %}
+  <form method="post" action="/appearance">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <button type="submit" name="theme" value="{{ item.id }}" aria-pressed="{{ 'true' if appearance == item.id else 'false' }}">
+      <span class="swatch {{ item.id }}" aria-hidden="true"></span>
+      <span class="theme-copy">
+        <strong>{{ item.label }}</strong>
+        <span>{{ item.line }}</span>
+      </span>
+    </button>
+  </form>
+  {% endfor %}
+</div>
+{% endmacro %}
+{% if theme_menu %}
+<div class="theme-pop">
+  <p class="theme-pop-note">This look stays on your login. The security console keeps its own.</p>
+  {{ theme_buttons() }}
   {% if current_user.is_authenticated and current_user.role != 'viewer' %}
   <p class="hint">In chat: use the harbor theme. Or switch to field night.</p>
   {% endif %}
-{% if theme_open is defined and not theme_open %}
+</div>
+{% elif theme_open is defined and not theme_open %}
+<div class="theme-picks" aria-label="Themes">
+  <p class="lead">Ten looks for this desk. The security console keeps its own look.</p>
+  {{ theme_buttons() }}
 </div>
 {% else %}
+<section class="theme-picks card" aria-label="Themes">
+  <h3>Themes</h3>
+  <p class="lead">Ten looks for this desk. The security console keeps its own look.</p>
+  {{ theme_buttons() }}
+  {% if current_user.is_authenticated and current_user.role != 'viewer' %}
+  <p class="hint">In chat: use the harbor theme. Or switch to field night.</p>
+  {% endif %}
 </section>
 {% endif %}

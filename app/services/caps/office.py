@@ -176,7 +176,7 @@ CAPS = [
         tool="set_theme",
         label="change the theme",
         says=("use the harbor theme", "switch to field night", "theme high contrast"),
-        howto="Say use the harbor theme, switch to field night, or theme high contrast. Ten themes are also on More and the sign-in page. This does not change company records.",
+        howto="Say use the harbor theme, switch to field night, or theme high contrast. The Look menu in the header has the same ten themes, including for viewers. This does not change company records.",
     ),
     Capability(
         tool="stay_on_page",

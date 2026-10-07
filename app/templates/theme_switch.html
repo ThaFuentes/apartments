@@ -1,0 +1,13 @@
+{% set ns = namespace(label='Look') %}
+{% for item in theme_choices %}
+  {% if item.id == (appearance or 'paper') %}{% set ns.label = item.label %}{% endif %}
+{% endfor %}
+<details class="theme-desk {{ theme_switch_class|default('') }}">
+  <summary>
+    <span class="swatch {{ appearance or 'paper' }}" aria-hidden="true"></span>
+    <span class="theme-desk-name">{{ ns.label }}</span>
+  </summary>
+  {% with theme_menu=true %}
+  {% include "theme_picker.html" %}
+  {% endwith %}
+</details>
