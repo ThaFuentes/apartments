@@ -25,6 +25,13 @@ def _from_model(user, text: str, key: str, source: str):
     staged = office_sentence(user, text, key, source)
     if staged:
         return staged
+    # Vendor-on-a-make-ready is a local sentence. It has to run before the
+    # unit board, which would otherwise hear only "make ready for 403".
+    from app.services.talk.ready_vendor import ready_vendor_sentence
+
+    staged = ready_vendor_sentence(user, text, key, source)
+    if staged:
+        return staged
     from app.services.talk.field_chat import field_sentence
 
     staged = field_sentence(user, text, key, source)

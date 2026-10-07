@@ -362,6 +362,11 @@ def route(user, text: str, key: str, source: str) -> dict:
     details = _answer_person_details(user, text, key, source)
     if details:
         return details
+    from app.services.talk.ready_vendor import answer_ready_vendor
+
+    vendor_details = answer_ready_vendor(user, text, key, source)
+    if vendor_details:
+        return vendor_details
     bare = answer_bare_reply(user, text)
     if bare:
         return _finish_bare(user, bare, text, key, source)

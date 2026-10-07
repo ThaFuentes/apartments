@@ -102,6 +102,12 @@ def _apply_unit_board(user, payload: dict, source: str) -> dict:
     return apply_unit_board(user, payload, source)
 
 
+def _apply_ready_vendor(user, payload: dict, source: str) -> dict:
+    from app.services.talk.ready_vendor import apply_ready_vendor
+
+    return apply_ready_vendor(user, payload, source)
+
+
 APPLIERS = {
     "plan_trip": apply_plan_trip,
     "plan_day": apply_plan_day,
@@ -110,6 +116,7 @@ APPLIERS = {
     "note_equipment": apply_note_equipment,
     "move_equipment": apply_move_equipment,
     "unit_board": _apply_unit_board,
+    "ready_vendor": _apply_ready_vendor,
     "plan_outcome": apply_plan_outcome,
     "clear_plan": apply_clear_plan,
     "delete_property": apply_delete_property,

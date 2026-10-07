@@ -112,6 +112,12 @@ def _file_move_equipment(user, text: str, key: str, source: str):
 
 def _board_payload(text: str) -> dict | None:
     raw = (text or "").strip().rstrip(".")
+    from app.services.talk.ready_vendor import ready_vendor_intent
+
+    # "add fvs to my 403 make ready" names a vendor. The occupancy phrase
+    # inside it is not a unit-board change.
+    if ready_vendor_intent(raw):
+        return None
     unit_rename = re.search(r"\b(?:rename|renumber|change)\s+(?:unit\s*)?#?([a-z0-9-]+)\s+(?:to|as)\s+([a-z0-9-]+)\s+(?:at|in)\s+([a-z][a-z0-9' -]{2,60})$", raw, re.I)
     if unit_rename:
         return {"action": "set_unit_number", "unit_number": unit_rename.group(1), "new_number": unit_rename.group(2), "property_hint": unit_rename.group(3)}

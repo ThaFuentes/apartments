@@ -94,7 +94,7 @@ def _role_can_explain(cap: Capability, role: str, user=None) -> bool:
         return has_any("manage_settings")
     if cap.tool in {"log_expense", "log_miles", "log_odometer", "estimate_miles"}:
         return has_any("log_personal_expenses")
-    if cap.tool in {"move_equipment", "record_unit_visit", "unit_board", "log_job_event", "attach_media"}:
+    if cap.tool in {"move_equipment", "record_unit_visit", "unit_board", "ready_vendor", "log_job_event", "attach_media"}:
         return has_any("write_maintenance")
     if cap.tool in {"plan_trip", "update_trip", "clear_plan"}:
         return has_any("write_maintenance", "read_assigned_properties", "read_region")

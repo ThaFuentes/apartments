@@ -251,6 +251,12 @@ def _update_trip(payload: dict, user=None) -> list[dict]:
     if not blocked:
         rows.append(change("Blocked jobs", "0", "No follow-up jobs to roll forward"))
     return rows
+def _ready_vendor(payload: dict, user=None) -> list[dict]:
+    from app.services.talk.ready_vendor import ready_vendor_changes
+
+    return ready_vendor_changes(payload)
+
+
 def _unit_board(payload: dict, user=None) -> list[dict]:
     action = str(payload.get("action") or "").replace("_", " ")
     prop = _find_property(payload, user)
@@ -523,7 +529,7 @@ _DETAILS = {
     "invite_viewer": _invite, "update_viewer": _update_viewer, "grant_access": _grant_access,
     "upsert_property": _upsert_property, "update_property": _update_property, "delete_property": _delete_property,
     "plan_trip": _plan_trip, "plan_day": _plan_day, "plan_outcome": _plan_outcome,
-    "record_unit_visit": _record_unit_visit, "log_work": _record_unit_visit, "unit_board": _unit_board,
+    "record_unit_visit": _record_unit_visit, "log_work": _record_unit_visit, "unit_board": _unit_board, "ready_vendor": _ready_vendor,
     "log_job_event": _log_job_event, "update_trip": _update_trip,
     "soft_delete": lambda payload, user=None: _record_change("soft_delete", payload, user),
     "restore": lambda payload, user=None: _record_change("restore", payload, user),

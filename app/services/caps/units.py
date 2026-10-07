@@ -38,6 +38,15 @@ CAPS = [
         howto="Say the unit and the new status or building. Save contractor names once, then call that same name to another unit.",
     ),
     Capability(
+        tool="ready_vendor",
+        label="add a vendor to a make-ready",
+        says=(
+            "add a vendor, fvs to my 403 make ready",
+            "add fvs vending as my painters and get them in my make ready for 403",
+        ),
+        howto="If that name is not already a vendor, Apt asks for the full name, phone, and trade before it looks at the unit. If the unit is not a make-ready, the confirm card marks it as one and assigns the vendor to that trade. Nothing is saved until you save the card. An occupied unit has to be vacant first.",
+    ),
+    Capability(
         tool="log_job_event",
         label="add a note to a job",
         says=(

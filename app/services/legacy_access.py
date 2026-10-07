@@ -57,7 +57,7 @@ TOOL_CAPABILITIES = {
 }
 PROPERTY_WRITE_TOOLS = {
     "add_plan_card", "attach_media", "clear_plan", "log_job_event", "log_work", "move_equipment",
-    "note_equipment", "plan_day", "plan_outcome", "plan_trip", "record_unit_visit", "unit_board", "update_trip",
+    "note_equipment", "plan_day", "plan_outcome", "plan_trip", "record_unit_visit", "unit_board", "ready_vendor", "update_trip",
 }
 
 
