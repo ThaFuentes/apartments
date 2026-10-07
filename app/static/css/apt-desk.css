@@ -245,9 +245,15 @@
     min-height: 100vh;
     grid-template-rows: minmax(100vh, 1fr);
   }
-  html[data-layout="rail"] body.ops:not(.gate) { grid-template-columns: 16.5rem minmax(0, 1fr); }
-  html[data-layout="board"] body.ops:not(.gate) { grid-template-columns: 12rem minmax(0, 1fr); }
-  html[data-layout="ledger"] body.ops:not(.gate) { grid-template-columns: 13rem minmax(0, 1fr); }
+  html[data-layout="rail"] body.ops:not(.gate),
+  html[data-layout="rail"] body.ops:not(.gate):has(#chat-panel.is-open),
+  html[data-layout="rail"] body.ops.chat-open:not(.gate) { grid-template-columns: 16.5rem minmax(0, 1fr); }
+  html[data-layout="board"] body.ops:not(.gate),
+  html[data-layout="board"] body.ops:not(.gate):has(#chat-panel.is-open),
+  html[data-layout="board"] body.ops.chat-open:not(.gate) { grid-template-columns: 12rem minmax(0, 1fr); }
+  html[data-layout="ledger"] body.ops:not(.gate),
+  html[data-layout="ledger"] body.ops:not(.gate):has(#chat-panel.is-open),
+  html[data-layout="ledger"] body.ops.chat-open:not(.gate) { grid-template-columns: 13rem minmax(0, 1fr); }
 
   html[data-layout="rail"] body.ops:not(.gate) > .top,
   html[data-layout="board"] body.ops:not(.gate) > .top,
@@ -330,7 +336,9 @@
     justify-content: flex-start;
   }
 
-  html[data-layout="split"] body.ops:not(.gate) {
+  html[data-layout="split"] body.ops:not(.gate),
+  html[data-layout="split"] body.ops:not(.gate):has(#chat-panel.is-open),
+  html[data-layout="split"] body.ops.chat-open:not(.gate) {
     display: grid;
     grid-template-columns: 15rem minmax(0, 1fr) 20rem;
     grid-template-rows: minmax(100vh, 1fr);
@@ -383,7 +391,9 @@
   html[data-layout="split"] body.ops:not(.gate) .chat-panel.is-open { right: 20.6rem; }
   html[data-layout="split"] body.ops:not(.gate) .chat-fab { right: 21.2rem; }
 
-  html[data-layout="dock"] body.ops:not(.gate) {
+  html[data-layout="dock"] body.ops:not(.gate),
+  html[data-layout="dock"] body.ops:not(.gate):has(#chat-panel.is-open),
+  html[data-layout="dock"] body.ops.chat-open:not(.gate) {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 18.5rem;
     grid-template-rows: minmax(100vh, 1fr);
@@ -551,7 +561,9 @@
   html[data-layout="focus"] body.ops:not(.gate) main .hero { padding: 1.7rem 1.5rem 1.4rem; }
   html[data-layout="focus"] body.ops:not(.gate).property-office .building-cards { grid-template-columns: 1fr; }
 
-  html[data-layout="canvas"] body.ops:not(.gate) {
+  html[data-layout="canvas"] body.ops:not(.gate),
+  html[data-layout="canvas"] body.ops:not(.gate):has(#chat-panel.is-open),
+  html[data-layout="canvas"] body.ops.chat-open:not(.gate) {
     display: grid;
     grid-template-columns: 7.25rem minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
@@ -713,6 +725,19 @@
     grid-column: auto;
     grid-row: auto;
     z-index: 60;
+  }
+  html[data-layout="split"] body.ops:not(.gate) .chat-panel.is-open { right: 20.6rem; }
+  html[data-layout="dock"] body.ops:not(.gate) .chat-panel.is-open { right: auto; left: 0.7rem; }
+  html[data-layout="rail"] body.ops:not(.gate):has(#chat-panel.is-open) main,
+  html[data-layout="board"] body.ops:not(.gate):has(#chat-panel.is-open) main,
+  html[data-layout="ledger"] body.ops:not(.gate):has(#chat-panel.is-open) main,
+  html[data-layout="focus"] body.ops:not(.gate):has(#chat-panel.is-open) main,
+  html[data-layout="canvas"] body.ops:not(.gate):has(#chat-panel.is-open) main,
+  html[data-layout="split"] body.ops:not(.gate):has(#chat-panel.is-open) main {
+    padding-right: calc(min(24rem, 34vw) + 1.2rem);
+  }
+  html[data-layout="dock"] body.ops:not(.gate):has(#chat-panel.is-open) main {
+    padding-left: calc(min(24rem, 34vw) + 1.2rem);
   }
 }
 

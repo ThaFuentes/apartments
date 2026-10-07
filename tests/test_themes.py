@@ -61,6 +61,16 @@ if "max-width: 44rem" not in desk:
     raise SystemExit("focus column is missing")
 if "grid-template-columns: 7.25rem minmax(0, 1fr)" not in desk:
     raise SystemExit("full canvas is missing")
+for layout_id in ("rail", "split", "dock", "board", "ledger", "canvas"):
+    token = f'html[data-layout="{layout_id}"] body.ops:not(.gate):has(#chat-panel.is-open)'
+    if token not in desk:
+        raise SystemExit(f"open chat can still collapse the {layout_id} desk")
+asset_py = (ROOT / "app" / "assets.py").read_text(encoding="utf-8")
+shell_v = asset_py.split('ASSET_V = "', 1)[1].split('"', 1)[0]
+sw = (ROOT / "app" / "static" / "sw.js").read_text(encoding="utf-8")
+offline = (ROOT / "app" / "static" / "offline.html").read_text(encoding="utf-8")
+if f'const ASSET_V = "{shell_v}"' not in sw or f"apt.css?v={shell_v}" not in offline:
+    raise SystemExit(f"asset version {shell_v} is not on the shell")
 if "var(--glow)" not in desk or "var(--desk-a)" not in desk or "var(--desk-b)" not in desk:
     raise SystemExit("desk wash is still hardcoded")
 if ".sec-body" not in desk or "#0c1117" not in desk:
