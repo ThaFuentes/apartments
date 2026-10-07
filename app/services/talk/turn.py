@@ -55,6 +55,15 @@ def handle_message(user, text: str, *, idempotency_key: str, source: str = "ai")
         return {"ok": False, "reply": leaked}
     _save_chat(user, "user", text)
     result = route(user, text, idempotency_key, source)
+    theme_id = (result.get("theme") or "").strip()
+    if theme_id:
+        from app.services.themes import save_theme
+
+        try:
+            save_theme(user, theme_id)
+        except ValueError:
+            result = dict(result)
+            result.pop("theme", None)
     reply = result.get("reply") or ""
     if reply:
         _save_chat(user, "assistant", reply)

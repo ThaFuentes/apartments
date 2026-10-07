@@ -145,9 +145,16 @@ need("unpin property Oakwood", kind="pin_property", property="Oakwood", on=False
 need("I'm driving", kind="drive", on=True)
 need("I'm not driving", kind="drive", on=False)
 need("turn driving view off", kind="drive", on=False)
+need("use the harbor theme", kind="set_theme", theme="harbor", label="Harbor")
+need("switch to field night", kind="set_theme", theme="night", label="Field night")
+need("theme high contrast", kind="set_theme", theme="contrast", label="High contrast")
+need("use the dusk theme", kind="set_theme", theme="dusk", label="Dusk")
+need("set the chalk theme", kind="set_theme", theme="chalk", label="Chalk")
+need("please use office slate", kind="set_theme", theme="slate", label="Office slate")
 
 skip("pin the fridge in unit 12")
 skip("I'm driving to Oakwood")
+skip("use the night drop")
 
 
 def ask(sentence: str, snippet: str):

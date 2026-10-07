@@ -1,7 +1,7 @@
 """Login, invite, bot 2FA, and password-reset routes."""
 from __future__ import annotations
 
-from flask import flash, redirect, render_template, request
+from flask import flash, make_response, redirect, render_template, request
 from flask_login import current_user
 from werkzeug.security import generate_password_hash
 
@@ -69,6 +69,36 @@ def login():
 def logout():
     logout_person()
     return redirect("/login")
+
+
+@bp.post("/appearance")
+def appearance():
+    """Personal chrome. Guests get a cookie. Signed-in people also save it on the account."""
+    from app.auth import sanitize_next
+    from app.services.themes import save_theme, theme_by_id
+
+    chosen = (request.form.get("theme") or "").strip()
+    found = theme_by_id(chosen)
+    signed_in = bool(getattr(current_user, "is_authenticated", False))
+    target = sanitize_next(request.form.get("next") or "", "/more" if signed_in else "/login")
+    if not found:
+        flash("Pick a theme from the list.", "warn")
+        return redirect(target)
+    if signed_in:
+        save_theme(current_user, found["id"])
+    flash(f"{found['label']} is on.", "ok")
+    resp = make_response(redirect(target))
+    secure = bool(request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https")
+    resp.set_cookie(
+        "apt_theme",
+        found["id"],
+        max_age=60 * 60 * 24 * 400,
+        samesite="Lax",
+        httponly=True,
+        secure=secure,
+        path="/",
+    )
+    return resp
 
 
 @bp.post("/account/reset-email")

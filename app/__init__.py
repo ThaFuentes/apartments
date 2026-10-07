@@ -172,7 +172,7 @@ def create_app() -> Flask:
             return None
         if getattr(current_user, "role", "") != "viewer":
             return None
-        if request.path in ("/logout",):
+        if request.path in ("/logout", "/appearance"):
             return None
         if (request.path or "").startswith("/security"):
             from app.services.security_ops import watches_security
@@ -387,6 +387,29 @@ def create_app() -> Flask:
         except Exception:
             db.session.rollback()
             assistant_name = "Apt"
+        appearance = "paper"
+        theme_color = "#f6efe6"
+        theme_choices = ()
+        try:
+            from app.services.themes import THEMES, theme_by_id, theme_color as paint
+
+            theme_choices = THEMES
+            chosen = ""
+            if getattr(current_user, "is_authenticated", False):
+                extra = getattr(current_user, "extra_data", None)
+                if isinstance(extra, dict):
+                    chosen = (extra.get("theme") or "").strip()
+            if not theme_by_id(chosen):
+                chosen = (request.cookies.get("apt_theme") or "").strip()
+            if not theme_by_id(chosen):
+                chosen = "paper"
+            appearance = chosen
+            theme_color = paint(chosen)
+        except Exception:
+            db.session.rollback()
+            appearance = "paper"
+            theme_color = "#f6efe6"
+            theme_choices = ()
         return {
             "csrf_token": token,
             "SITE_MODE": "apt",
@@ -412,6 +435,9 @@ def create_app() -> Flask:
             "can_manage_regions": can_manage_regions,
             "assistant_name": assistant_name,
             "drive": bool(request.cookies.get("apt_drive") == "1"),
+            "appearance": appearance,
+            "theme_color": theme_color,
+            "theme_choices": theme_choices,
             "asset_v": ASSET_V,
         }
 

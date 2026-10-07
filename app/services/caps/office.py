@@ -173,6 +173,12 @@ CAPS = [
         howto="Say I'm driving or I'm not driving. That only sets the driving view on this browser.",
     ),
     Capability(
+        tool="set_theme",
+        label="change the theme",
+        says=("use the harbor theme", "switch to field night", "theme high contrast"),
+        howto="Say use the harbor theme, switch to field night, or theme high contrast. Ten themes are also on More and the sign-in page. This does not change company records.",
+    ),
+    Capability(
         tool="stay_on_page",
         label="what stays off chat",
         says=("where do I turn on two-factor",),

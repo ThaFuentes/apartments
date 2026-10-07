@@ -17,8 +17,8 @@ def _from_model(user, text: str, key: str, source: str):
     """The saved key answers first. Local chat runs only when this returns failed.
 
     Office sentences (map, regions, send-back, rentable, move-out, inventory,
-    audit, unlock) and field sentences are exact. They stage their own confirm
-    card and do not go to the model.
+    audit, unlock, theme) and field sentences are exact. They stage their own
+    confirm card, or apply at once, and do not go to the model.
     """
     from app.services.talk.office import office_sentence
 

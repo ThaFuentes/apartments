@@ -28,4 +28,9 @@
   <p class="gate-foot"><a href="/forgot">Forgot password</a></p>
   {% endif %}
 </section>
+<details class="card theme-fold">
+  <summary>Themes</summary>
+  {% set theme_open = false %}
+  {% include "theme_picker.html" %}
+</details>
 {% endblock %}

@@ -34,6 +34,33 @@ def _drive_cookie(resp, result):
     return resp
 
 
+def _theme_cookie(resp, result):
+    """A chat theme sticks on this browser the same way the More page does."""
+    theme_id = ((result or {}).get("theme") or "").strip()
+    if not theme_id:
+        return resp
+    from app.services.themes import theme_by_id
+
+    found = theme_by_id(theme_id)
+    if not found:
+        return resp
+    secure = bool(request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https")
+    resp.set_cookie(
+        "apt_theme",
+        found["id"],
+        max_age=60 * 60 * 24 * 400,
+        samesite="Lax",
+        httponly=True,
+        secure=secure,
+        path="/",
+    )
+    return resp
+
+
+def _chat_cookies(resp, result):
+    return _theme_cookie(_drive_cookie(resp, result), result)
+
+
 @bp.route("/")
 @login_required
 def home():
@@ -283,13 +310,13 @@ def chat():
     # If the help system wants to open the help page, redirect there
     if result.get("help_page_url"):
         if request.is_json or request.headers.get("Accept") == "application/json":
-            return _drive_cookie(jsonify(result), result)
+            return _chat_cookies(jsonify(result), result)
         flash(result.get("reply") or "", "ok")
-        return _drive_cookie(redirect(result["help_page_url"]), result)
+        return _chat_cookies(redirect(result["help_page_url"]), result)
     if request.is_json or request.headers.get("Accept") == "application/json":
-        return _drive_cookie(jsonify(result), result)
+        return _chat_cookies(jsonify(result), result)
     flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
-    return _drive_cookie(redirect("/"), result)
+    return _chat_cookies(redirect("/"), result)
 
 @bp.post("/chat/new")
 @login_required

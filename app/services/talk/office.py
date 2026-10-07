@@ -47,6 +47,25 @@ _PASSWORD_CHANGE = re.compile(
     re.I,
 )
 _FACTOR = re.compile(r"\b(?:two[- ]factor|2fa|authenticator)\b", re.I)
+_THEME_ALIASES = {
+    "paper": ("paper", "Warm paper"),
+    "field night": ("night", "Field night"),
+    "night": ("night", "Field night"),
+    "office slate": ("slate", "Office slate"),
+    "slate": ("slate", "Office slate"),
+    "high contrast": ("contrast", "High contrast"),
+    "contrast": ("contrast", "High contrast"),
+    "desert": ("desert", "Desert"),
+    "harbor": ("harbor", "Harbor"),
+    "ink": ("ink", "Ink"),
+    "grove": ("grove", "Grove"),
+    "dusk": ("dusk", "Dusk"),
+    "chalk": ("chalk", "Chalk"),
+}
+_THEMES = (
+    r"field night|office slate|high contrast|paper|night|slate|contrast|"
+    r"desert|harbor|ink|grove|dusk|chalk"
+)
 
 
 def secret_leak(text: str) -> str:
@@ -293,6 +312,17 @@ def office_intent(text: str) -> dict | None:
     if pinned and not re.search(r"\bunit\b", pinned.group(2) or "", re.I):
         return {"kind": "pin_property", "property": _tidy(pinned.group(2)), "on": not bool(pinned.group(1))}
 
+    theme = re.fullmatch(
+        rf"(?:please\s+)?(?:use|switch to|set)(?:\s+the)?\s+({_THEMES})(?:\s+theme)?",
+        raw,
+        re.I,
+    )
+    if not theme:
+        theme = re.fullmatch(rf"(?:please\s+)?theme\s+({_THEMES})", raw, re.I)
+    if theme:
+        theme_id, label = _THEME_ALIASES[theme.group(1).lower()]
+        return {"kind": "set_theme", "theme": theme_id, "label": label}
+
     if re.fullmatch(r"(?:please\s+)?(?:i(?:'m| am) driving|turn driving view on|driving view on)", raw, re.I):
         return {"kind": "drive", "on": True}
     if re.fullmatch(r"(?:please\s+)?(?:i(?:'m| am) not driving|i(?:'m| am) done driving|turn driving view off|driving view off)", raw, re.I):
@@ -350,6 +380,12 @@ def office_sentence(user, text: str, key: str, source: str) -> dict | None:
             "ok": True,
             "reply": "Driving view is on for 12 hours." if on else "Driving view is off.",
             "drive": "on" if on else "off",
+        }
+    if kind == "set_theme":
+        return {
+            "ok": True,
+            "reply": f"{intent.get('label') or 'That theme'} is on.",
+            "theme": intent.get("theme"),
         }
     if kind == "add_place_gear" and not intent.get("gear"):
         return {"ok": True, "reply": "What should I add, and at which property?"}
