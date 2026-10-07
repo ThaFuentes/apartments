@@ -410,6 +410,26 @@ def create_app() -> Flask:
             appearance = "paper"
             theme_color = "#f6efe6"
             theme_choices = ()
+        desk_layout = "bar"
+        layout_choices = ()
+        try:
+            from app.services.themes import LAYOUTS, layout_by_id
+
+            layout_choices = LAYOUTS
+            chosen_layout = ""
+            if getattr(current_user, "is_authenticated", False):
+                extra = getattr(current_user, "extra_data", None)
+                if isinstance(extra, dict):
+                    chosen_layout = (extra.get("layout") or "").strip()
+            if not layout_by_id(chosen_layout):
+                chosen_layout = (request.cookies.get("apt_layout") or "").strip()
+            if not layout_by_id(chosen_layout):
+                chosen_layout = "bar"
+            desk_layout = chosen_layout
+        except Exception:
+            db.session.rollback()
+            desk_layout = "bar"
+            layout_choices = ()
         return {
             "csrf_token": token,
             "SITE_MODE": "apt",
@@ -438,6 +458,8 @@ def create_app() -> Flask:
             "appearance": appearance,
             "theme_color": theme_color,
             "theme_choices": theme_choices,
+            "desk_layout": desk_layout,
+            "layout_choices": layout_choices,
             "asset_v": ASSET_V,
         }
 

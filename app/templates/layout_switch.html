@@ -1,0 +1,13 @@
+{% set ns = namespace(label='Arrange') %}
+{% for item in layout_choices %}
+  {% if item.id == (desk_layout or 'bar') %}{% set ns.label = item.label %}{% endif %}
+{% endfor %}
+<details class="layout-desk {{ layout_switch_class|default('') }}">
+  <summary>
+    <span class="layout-mark {{ desk_layout or 'bar' }}" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="layout-desk-name">{{ ns.label }}</span>
+  </summary>
+  {% with layout_menu=true %}
+  {% include "layout_picker.html" %}
+  {% endwith %}
+</details>

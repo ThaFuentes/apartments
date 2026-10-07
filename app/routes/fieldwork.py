@@ -57,8 +57,31 @@ def _theme_cookie(resp, result):
     return resp
 
 
+def _layout_cookie(resp, result):
+    """A chat layout sticks on this browser the same way the Arrange menu does."""
+    layout_id = ((result or {}).get("layout") or "").strip()
+    if not layout_id:
+        return resp
+    from app.services.themes import layout_by_id
+
+    found = layout_by_id(layout_id)
+    if not found:
+        return resp
+    secure = bool(request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https")
+    resp.set_cookie(
+        "apt_layout",
+        found["id"],
+        max_age=60 * 60 * 24 * 400,
+        samesite="Lax",
+        httponly=True,
+        secure=secure,
+        path="/",
+    )
+    return resp
+
+
 def _chat_cookies(resp, result):
-    return _theme_cookie(_drive_cookie(resp, result), result)
+    return _layout_cookie(_theme_cookie(_drive_cookie(resp, result), result), result)
 
 
 @bp.route("/")

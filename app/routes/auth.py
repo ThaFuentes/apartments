@@ -75,29 +75,51 @@ def logout():
 def appearance():
     """Personal chrome. Guests get a cookie. Signed-in people also save it on the account."""
     from app.auth import sanitize_next
-    from app.services.themes import save_theme, theme_by_id
+    from app.services.themes import layout_by_id, save_layout, save_theme, theme_by_id
 
-    chosen = (request.form.get("theme") or "").strip()
-    found = theme_by_id(chosen)
+    theme_id = (request.form.get("theme") or "").strip()
+    layout_id = (request.form.get("layout") or "").strip()
     signed_in = bool(getattr(current_user, "is_authenticated", False))
     target = sanitize_next(request.form.get("next") or "", "/more" if signed_in else "/login")
-    if not found:
+    theme_found = theme_by_id(theme_id) if theme_id else None
+    layout_found = layout_by_id(layout_id) if layout_id else None
+    if theme_id and not theme_found:
         flash("Pick a theme from the list.", "warn")
         return redirect(target)
-    if signed_in:
-        save_theme(current_user, found["id"])
-    flash(f"{found['label']} is on.", "ok")
+    if layout_id and not layout_found:
+        flash("Pick a layout from the list.", "warn")
+        return redirect(target)
+    if not theme_found and not layout_found:
+        flash("Pick a theme or a layout from the list.", "warn")
+        return redirect(target)
+    if signed_in and theme_found:
+        save_theme(current_user, theme_found["id"])
+    if signed_in and layout_found:
+        save_layout(current_user, layout_found["id"])
+    labels = [item["label"] for item in (theme_found, layout_found) if item]
+    flash(f"{labels[0]} is on." if len(labels) == 1 else f"{' and '.join(labels)} are on.", "ok")
     resp = make_response(redirect(target))
     secure = bool(request.is_secure or request.headers.get("X-Forwarded-Proto", "").lower() == "https")
-    resp.set_cookie(
-        "apt_theme",
-        found["id"],
-        max_age=60 * 60 * 24 * 400,
-        samesite="Lax",
-        httponly=True,
-        secure=secure,
-        path="/",
-    )
+    if theme_found:
+        resp.set_cookie(
+            "apt_theme",
+            theme_found["id"],
+            max_age=60 * 60 * 24 * 400,
+            samesite="Lax",
+            httponly=True,
+            secure=secure,
+            path="/",
+        )
+    if layout_found:
+        resp.set_cookie(
+            "apt_layout",
+            layout_found["id"],
+            max_age=60 * 60 * 24 * 400,
+            samesite="Lax",
+            httponly=True,
+            secure=secure,
+            path="/",
+        )
     return resp
 
 

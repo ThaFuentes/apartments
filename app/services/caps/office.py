@@ -179,6 +179,12 @@ CAPS = [
         howto="Say use the harbor theme, switch to field night, or theme high contrast. The Look menu in the header has the same ten themes, including for viewers. This does not change company records.",
     ),
     Capability(
+        tool="set_layout",
+        label="change the desk layout",
+        says=("use the split layout", "switch to the side rail", "layout ledger"),
+        howto="Say use the split layout, switch to the side rail, or layout ledger. The Arrange menu in the header has the same eight layouts, including for viewers. A phone keeps the bottom bar. This does not change company records.",
+    ),
+    Capability(
         tool="stay_on_page",
         label="what stays off chat",
         says=("where do I turn on two-factor",),

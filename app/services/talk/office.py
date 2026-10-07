@@ -66,6 +66,33 @@ _THEMES = (
     r"field night|office slate|high contrast|paper|night|slate|contrast|"
     r"desert|harbor|ink|grove|dusk|chalk"
 )
+_LAYOUT_ALIASES = {
+    "top bar": ("bar", "Top bar"),
+    "side rail": ("rail", "Side rail"),
+    "left rail": ("rail", "Side rail"),
+    "split desk": ("split", "Split desk"),
+    "three columns": ("split", "Split desk"),
+    "right dock": ("dock", "Right dock"),
+    "card board": ("board", "Card board"),
+    "dense ledger": ("ledger", "Ledger"),
+    "focus column": ("focus", "Focus column"),
+    "reading column": ("focus", "Focus column"),
+    "full canvas": ("canvas", "Full canvas"),
+    "edge canvas": ("canvas", "Full canvas"),
+    "rail": ("rail", "Side rail"),
+    "split": ("split", "Split desk"),
+    "dock": ("dock", "Right dock"),
+    "board": ("board", "Card board"),
+    "ledger": ("ledger", "Ledger"),
+    "focus": ("focus", "Focus column"),
+    "canvas": ("canvas", "Full canvas"),
+    "bar": ("bar", "Top bar"),
+}
+_LAYOUTS = (
+    r"side rail|left rail|split desk|three columns|right dock|card board|"
+    r"dense ledger|focus column|reading column|full canvas|edge canvas|top bar|"
+    r"rail|split|dock|board|ledger|focus|canvas|bar"
+)
 
 
 def secret_leak(text: str) -> str:
@@ -323,6 +350,17 @@ def office_intent(text: str) -> dict | None:
         theme_id, label = _THEME_ALIASES[theme.group(1).lower()]
         return {"kind": "set_theme", "theme": theme_id, "label": label}
 
+    layout = re.fullmatch(
+        rf"(?:please\s+)?(?:use|switch to|set)(?:\s+the)?\s+({_LAYOUTS})(?:\s+layout)?",
+        raw,
+        re.I,
+    )
+    if not layout:
+        layout = re.fullmatch(rf"(?:please\s+)?layout\s+({_LAYOUTS})", raw, re.I)
+    if layout:
+        layout_id, label = _LAYOUT_ALIASES[layout.group(1).lower()]
+        return {"kind": "set_layout", "layout": layout_id, "label": label}
+
     if re.fullmatch(r"(?:please\s+)?(?:i(?:'m| am) driving|turn driving view on|driving view on)", raw, re.I):
         return {"kind": "drive", "on": True}
     if re.fullmatch(r"(?:please\s+)?(?:i(?:'m| am) not driving|i(?:'m| am) done driving|turn driving view off|driving view off)", raw, re.I):
@@ -386,6 +424,12 @@ def office_sentence(user, text: str, key: str, source: str) -> dict | None:
             "ok": True,
             "reply": f"{intent.get('label') or 'That theme'} is on.",
             "theme": intent.get("theme"),
+        }
+    if kind == "set_layout":
+        return {
+            "ok": True,
+            "reply": f"{intent.get('label') or 'That layout'} is on.",
+            "layout": intent.get("layout"),
         }
     if kind == "add_place_gear" and not intent.get("gear"):
         return {"ok": True, "reply": "What should I add, and at which property?"}

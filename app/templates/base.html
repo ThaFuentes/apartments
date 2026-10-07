@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="{{ appearance or 'paper' }}">
+<html lang="en" data-theme="{{ appearance or 'paper' }}" data-layout="{{ desk_layout or 'bar' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -25,78 +25,89 @@
     <button type="button" id="apt-intro-skip">Skip</button>
   </div>
   <header class="top">
-    <div class="brand">
-      <strong>Apartments</strong>
+    <div class="desk-rail">
+      <div class="brand">
+        <strong>Apartments</strong>
+        {% if current_user.is_authenticated %}
+        <span>{{ current_user.label() }}{% if current_user.is_bot %} · BOT{% endif %} · {{ current_user.role_line() }}</span>
+        <form method="post" action="/logout" class="header-signout">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="ghost">Sign out</button>
+        </form>
+        {% endif %}
+      </div>
       {% if current_user.is_authenticated %}
-      <span>{{ current_user.label() }}{% if current_user.is_bot %} · BOT{% endif %} · {{ current_user.role_line() }}</span>
-      <form method="post" action="/logout" class="header-signout">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="ghost">Sign out</button>
-      </form>
+      {% with theme_switch_class='for-phone' %}
+      {% include "theme_switch.html" %}
+      {% endwith %}
+      {% with layout_switch_class='for-phone' %}
+      {% include "layout_switch.html" %}
+      {% endwith %}
+      <nav class="desk-nav" aria-label="Office">
+        {% if current_user.role != 'viewer' %}
+        <a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Home</a>
+        <a href="/trips" {% if request.path.startswith('/trips') %}aria-current="page"{% endif %}>Plan</a>
+        <a href="/places" {% if request.path.startswith('/places') or request.path.startswith('/properties') %}aria-current="page"{% endif %}>Properties</a>
+        <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
+        <a href="/ready" {% if request.path == '/ready' or request.path.startswith('/contractors') %}aria-current="page"{% endif %}>Make ready <span class="count-pill">{{ ready_n }}</span></a>
+        <a href="/pm" {% if request.path.startswith('/pm') %}aria-current="page"{% endif %}>Upkeep <span class="count-pill">{{ pm_n }}</span></a>
+        <a href="/inventory" {% if request.path.startswith('/inventory') %}aria-current="page"{% endif %}>Inventory</a>
+        {% if can_manage_people %}
+        <a href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>People</a>
+        {% endif %}
+        <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>
+        <a href="/audit" {% if request.path.startswith('/audit') %}aria-current="page"{% endif %}>Audit</a>
+        <a href="/help" {% if request.path == '/help' %}aria-current="page"{% endif %}>Help</a>
+        <a href="/more" {% if request.path == '/more' %}aria-current="page"{% endif %}>More</a>
+        {% else %}
+        <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
+        <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>
+        {% endif %}
+        {% include "theme_switch.html" %}
+        {% include "layout_switch.html" %}
+        <form method="post" action="/logout" class="desk-signout">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="ghost">Sign out</button>
+        </form>
+      </nav>
       {% endif %}
     </div>
     {% if current_user.is_authenticated %}
-    {% with theme_switch_class='for-phone' %}
-    {% include "theme_switch.html" %}
-    {% endwith %}
-    <nav class="desk-nav" aria-label="Office">
-      {% if current_user.role != 'viewer' %}
-      <a href="/" {% if request.path == '/' %}aria-current="page"{% endif %}>Home</a>
-      <a href="/trips" {% if request.path.startswith('/trips') %}aria-current="page"{% endif %}>Plan</a>
-      <a href="/places" {% if request.path.startswith('/places') or request.path.startswith('/properties') %}aria-current="page"{% endif %}>Properties</a>
-      <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
-      <a href="/ready" {% if request.path == '/ready' or request.path.startswith('/contractors') %}aria-current="page"{% endif %}>Make ready <span class="count-pill">{{ ready_n }}</span></a>
-      <a href="/pm" {% if request.path.startswith('/pm') %}aria-current="page"{% endif %}>Upkeep <span class="count-pill">{{ pm_n }}</span></a>
-      <a href="/inventory" {% if request.path.startswith('/inventory') %}aria-current="page"{% endif %}>Inventory</a>
-      {% if can_manage_people %}
-      <a href="/users" {% if request.path.startswith('/users') %}aria-current="page"{% endif %}>People</a>
-      {% endif %}
-      <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>
-      <a href="/audit" {% if request.path.startswith('/audit') %}aria-current="page"{% endif %}>Audit</a>
-      <a href="/help" {% if request.path == '/help' %}aria-current="page"{% endif %}>Help</a>
-      <a href="/more" {% if request.path == '/more' %}aria-current="page"{% endif %}>More</a>
-      {% else %}
-      <a href="/map" {% if request.path == '/map' %}aria-current="page"{% endif %}>Map</a>
-      <a href="/reports" {% if request.path.startswith('/reports') %}aria-current="page"{% endif %}>Reports</a>
-      {% endif %}
-      {% include "theme_switch.html" %}
-      <form method="post" action="/logout" class="desk-signout">
+    <aside class="desk-info" aria-label="Property">
+      {% if header_property != 'Property' %}
+      <div class="where">
+        <a href="/places">{{ header_city }}</a>
+        <span aria-hidden="true">·</span>
+        <span>{{ header_property }}</span>
+      </div>
+      {% if current_user.role != 'viewer' and not header_confirmed %}
+      <form method="post" action="/property/confirm" class="confirm-place">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="ghost">Sign out</button>
+        <button type="submit">Yes, I'm at {{ header_property }}</button>
       </form>
-    </nav>
-    {% endif %}
-    {% if current_user.is_authenticated and header_property != 'Property' %}
-    <div class="where">
-      <a href="/places">{{ header_city }}</a>
-      <span aria-hidden="true">·</span>
-      <span>{{ header_property }}</span>
-    </div>
-    {% if current_user.role != 'viewer' and not header_confirmed %}
-    <form method="post" action="/property/confirm" class="confirm-place">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit">Yes, I'm at {{ header_property }}</button>
-    </form>
-    {% endif %}
-    {% endif %}
-    {% if current_user.is_authenticated and can_pick_property and property_choices and property_choices|length > 1 %}
-    <form method="post" action="/property/default" class="property-switch">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="next" value="{{ request.path }}">
-      <label>This property
-        <select name="property_id" required>
-          {% if not saved_property_id %}
-          <option value="" selected>Choose your property</option>
-          {% endif %}
-          {% for prop in property_choices %}
-          <option value="{{ prop.id }}" {% if saved_property_id == prop.id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
-          {% endfor %}
-        </select>
-      </label>
-    </form>
-    {% endif %}
-    {% if current_user.is_authenticated and (current_user.role == 'owner' or security_watch) %}
-    <a class="sec-switch" href="/security">Security console</a>
+      {% endif %}
+      {% endif %}
+      {% if can_pick_property and property_choices and property_choices|length > 1 %}
+      <form method="post" action="/property/default" class="property-switch">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <label>This property
+          <select name="property_id" required>
+            {% if not saved_property_id %}
+            <option value="" selected>Choose your property</option>
+            {% endif %}
+            {% for prop in property_choices %}
+            <option value="{{ prop.id }}" {% if saved_property_id == prop.id %}selected{% endif %}>{{ prop.name }}{% if prop.city %} · {{ prop.city.name }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </form>
+      {% endif %}
+      {% if current_user.role == 'owner' or security_watch %}
+      <a class="sec-switch" href="/security">Security console</a>
+      {% endif %}
+      <p class="desk-info-only">Property and the security console sit in this panel on a wide desk.</p>
+    </aside>
     {% endif %}
   </header>
   <main>

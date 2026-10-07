@@ -64,6 +64,15 @@ def handle_message(user, text: str, *, idempotency_key: str, source: str = "ai")
         except ValueError:
             result = dict(result)
             result.pop("theme", None)
+    layout_id = (result.get("layout") or "").strip()
+    if layout_id:
+        from app.services.themes import save_layout
+
+        try:
+            save_layout(user, layout_id)
+        except ValueError:
+            result = dict(result)
+            result.pop("layout", None)
     reply = result.get("reply") or ""
     if reply:
         _save_chat(user, "assistant", reply)

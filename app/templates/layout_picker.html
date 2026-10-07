@@ -1,0 +1,40 @@
+{% macro layout_buttons() %}
+<div class="layout-grid">
+  {% for item in layout_choices %}
+  <form method="post" action="/appearance">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ request.path }}">
+    <button type="submit" name="layout" value="{{ item.id }}" aria-pressed="{{ 'true' if desk_layout == item.id else 'false' }}">
+      <span class="layout-mark {{ item.id }}" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="theme-copy">
+        <strong>{{ item.label }}</strong>
+        <span>{{ item.line }}</span>
+      </span>
+    </button>
+  </form>
+  {% endfor %}
+</div>
+{% endmacro %}
+{% if layout_menu %}
+<div class="layout-pop">
+  <p class="layout-pop-note">These arrangements show on a wide desk. A phone keeps the bottom bar. Colors stay on Look.</p>
+  {{ layout_buttons() }}
+  {% if current_user.is_authenticated and current_user.role != 'viewer' %}
+  <p class="hint">In chat: use the split layout. Or switch to the side rail.</p>
+  {% endif %}
+</div>
+{% elif layout_open is defined and not layout_open %}
+<div class="layout-picks" aria-label="Layouts">
+  <p class="lead">Eight ways to arrange this desk. A phone keeps the bottom bar.</p>
+  {{ layout_buttons() }}
+</div>
+{% else %}
+<section class="layout-picks card" aria-label="Layouts">
+  <h3>Arrange the desk</h3>
+  <p class="lead">Eight ways to arrange this desk. A phone keeps the bottom bar. The security console keeps its own screen.</p>
+  {{ layout_buttons() }}
+  {% if current_user.is_authenticated and current_user.role != 'viewer' %}
+  <p class="hint">In chat: use the split layout. Or switch to the side rail.</p>
+  {% endif %}
+</section>
+{% endif %}

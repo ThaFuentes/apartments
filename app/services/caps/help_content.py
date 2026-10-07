@@ -122,7 +122,7 @@ def _role_can_explain(cap: Capability, role: str, user=None) -> bool:
 
             return can_open_security(user)
         return False
-    if cap.tool in {"pin_property", "set_reset_email", "drive_view", "stay_on_page", "set_theme"}:
+    if cap.tool in {"pin_property", "set_reset_email", "drive_view", "stay_on_page", "set_theme", "set_layout"}:
         return role != "viewer"
     return False
 

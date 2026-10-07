@@ -32,16 +32,49 @@ def save_theme(user, theme_id: str) -> str:
     found = theme_by_id(theme_id)
     if not found:
         raise ValueError("That theme is not on the list.")
+    extra = dict(user.extra_data) if isinstance(getattr(user, "extra_data", None), dict) else {}
+    extra["theme"] = found["id"]
+    return _save_extra(user, extra, found["label"])
+
+
+LAYOUTS = (
+    {"id": "bar", "label": "Top bar", "line": "The menu stays across the top."},
+    {"id": "rail", "label": "Side rail", "line": "A left panel for the menu. The work fills the rest."},
+    {"id": "split", "label": "Split desk", "line": "Menu on the left. Work in the center. Property info on the right."},
+    {"id": "dock", "label": "Right dock", "line": "Work on the left. Menu and property in a dock on the right."},
+    {"id": "board", "label": "Card board", "line": "A short left index, and the work laid out as cards."},
+    {"id": "ledger", "label": "Ledger", "line": "Dense rows, a left index, and almost no decoration."},
+    {"id": "focus", "label": "Focus column", "line": "One centered column. The menu is a quiet line."},
+    {"id": "canvas", "label": "Full canvas", "line": "Work runs edge to edge beside a slim index."},
+)
+
+LAYOUT_IDS = {item["id"] for item in LAYOUTS}
+_LAYOUT_BY_ID = {item["id"]: item for item in LAYOUTS}
+
+
+def layout_by_id(layout_id: str) -> dict | None:
+    return _LAYOUT_BY_ID.get((layout_id or "").strip())
+
+
+def save_layout(user, layout_id: str) -> str:
+    """Store the account layout. Returns the label. Unknown ids raise ValueError."""
+    found = layout_by_id(layout_id)
+    if not found:
+        raise ValueError("That layout is not on the list.")
+    extra = dict(user.extra_data) if isinstance(getattr(user, "extra_data", None), dict) else {}
+    extra["layout"] = found["id"]
+    return _save_extra(user, extra, found["label"])
+
+
+def _save_extra(user, extra: dict, label: str) -> str:
     from sqlalchemy.orm.attributes import flag_modified
 
     from app.builddb.builddb import db
 
-    extra = dict(user.extra_data) if isinstance(getattr(user, "extra_data", None), dict) else {}
-    extra["theme"] = found["id"]
     user.extra_data = extra
     try:
         flag_modified(user, "extra_data")
     except Exception:
         pass
     db.session.commit()
-    return found["label"]
+    return label
