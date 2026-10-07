@@ -15,6 +15,20 @@
       event.stopPropagation();
       return;
     }
+    // Disabling the clicked button drops its name and value from the POST.
+    // Theme, report kind, and other button values are copied first.
+    const submitter = event.submitter;
+    if (submitter && submitter.name) {
+      let carried = form.querySelector("input[data-apt-submitter]");
+      if (!carried) {
+        carried = document.createElement("input");
+        carried.type = "hidden";
+        carried.setAttribute("data-apt-submitter", "1");
+        form.appendChild(carried);
+      }
+      carried.name = submitter.name;
+      carried.value = submitter.value;
+    }
     form.dataset.aptBusy = "1";
     const cardSave = form.classList.contains("approve-form") || form.classList.contains("discard-form");
     form.querySelectorAll("button").forEach(function (button) {

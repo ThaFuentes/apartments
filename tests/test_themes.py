@@ -48,6 +48,10 @@ if 'include "theme_switch.html"' not in desk_nav:
     raise SystemExit("desktop bar is missing the Look menu")
 if "for-phone" not in base:
     raise SystemExit("phone header is missing the Look menu")
+js = (ROOT / "app" / "static" / "js" / "apt.js").read_text(encoding="utf-8")
+guard = js.split("button.disabled = true", 1)[0]
+if "event.submitter" not in guard or "data-apt-submitter" not in guard:
+    raise SystemExit("theme button value is dropped when the submit guard disables it")
 if viewer_nav and after_viewer and "theme_switch.html" not in desk_nav:
     raise SystemExit("viewers cannot open Look from the desk")
 print("themes ok")
