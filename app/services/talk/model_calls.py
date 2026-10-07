@@ -30,6 +30,11 @@ def _from_model(user, text: str, key: str, source: str):
     staged = field_sentence(user, text, key, source)
     if staged:
         return staged
+    from app.services.talk.turn import _local_exact
+
+    exact = _local_exact(user, text, key, source, "")
+    if exact:
+        return exact
     from app.services.providers import collect_tool_calls
 
     heard = collect_tool_calls(user, text)

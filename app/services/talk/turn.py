@@ -511,7 +511,8 @@ def _one_turn(user, text: str, key: str, source: str) -> dict:
     return _local_fallback(user, text, key, source, (model or {}).get("note") or "")
 
 
-def _local_fallback(user, text: str, key: str, source: str, note: str, *, split: bool = True) -> dict:
+def _local_exact(user, text: str, key: str, source: str, note: str, *, split: bool = True):
+    """Sentences the pages already understand. None means the model may try."""
     if split:
         ranked = _key_rank_sentence(text)
         if ranked:
@@ -567,8 +568,8 @@ def _local_fallback(user, text: str, key: str, source: str, note: str, *, split:
         if len(parts) > 1:
             replies = []
             for index, part in enumerate(parts, start=1):
-                result = _local_fallback(user, part, f"{key}-{index}", source, "", split=False)
-                if result.get("reply"):
+                result = _local_exact(user, part, f"{key}-{index}", source, "", split=False)
+                if result and result.get("reply"):
                     replies.append(result["reply"])
             if replies:
                 reply = " ".join(replies)
@@ -700,7 +701,20 @@ def _local_fallback(user, text: str, key: str, source: str, note: str, *, split:
                 result = outing
             else:
                 arrived = _start_here(user, text, key, source)
-                result = arrived or interpret(user, text, key, source)
+                if not arrived:
+                    return None
+                result = arrived
+    if note:
+        result["reply"] = note + " " + (result.get("reply") or "")
+        result["quota"] = True
+    return result
+
+
+def _local_fallback(user, text: str, key: str, source: str, note: str, *, split: bool = True) -> dict:
+    exact = _local_exact(user, text, key, source, note, split=split)
+    if exact:
+        return exact
+    result = interpret(user, text, key, source)
     if note:
         result["reply"] = note + " " + (result.get("reply") or "")
         result["quota"] = True
