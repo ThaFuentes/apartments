@@ -127,34 +127,100 @@ def describe_contractor(row: Contractor) -> str:
     return " · ".join(bits)
 
 
-def call_to_unit(user, contractor: Contractor, unit, title: str = "", source: str = "human"):
+def assign_trade_vendor(user, unit, job: str, vendor: str, source: str = "human") -> dict:
+    """Put this contractor on one trade. Other open work on the unit stays put."""
+    from app.models import UnitTask
     from app.services.board import add_needed, set_occupancy
-    from app.services.ready import job_label, match_job
+    from app.services.ready import job_label, trades_in
 
+    name = clean_name(vendor)
+    if not name:
+        return {"ok": False, "reply": "Which contractor?"}
     if (unit.occupancy or "") == "occupied":
         return {"ok": False, "reply": f"Mark unit {unit.unit_number} vacant before sending make-ready work."}
-    job = (title or "").strip()
-    slug = match_job(job) if job else ""
-    if slug:
-        job = job_label(slug)
-    if not job:
-        job = contractor.trade or contractor.name
-    remember_contractor(user, contractor.name, phone=contractor.phone, trade=contractor.trade)
-    if (unit.occupancy or "") != "occupied" and (unit.occupancy or "") != "make_ready":
+    spoken = (job or "").strip()
+    slugs = trades_in(spoken)
+    if len(slugs) > 1:
+        return {
+            "ok": False,
+            "reply": (
+                f"Name one trade for {name}. Trash out, paint, floors, spray, and resurfacing "
+                "stay separate. Maintenance keeps whatever you do not assign."
+            ),
+        }
+    if len(slugs) == 1:
+        title = job_label(slugs[0])
+    else:
+        title = clean_name(spoken)[:200]
+        if not title or title.lower() == name.lower():
+            return {
+                "ok": False,
+                "reply": (
+                    f"Which trade is {name} doing on unit {unit.unit_number}? "
+                    "Other work on that unit stays with whoever already has it."
+                ),
+            }
+    if (unit.occupancy or "") != "make_ready":
         set_occupancy(user, unit, "make_ready", source)
     unit.rentable = False
-    rows = add_needed(user, unit, [job[:200]], source, kind="vendor", vendor=contractor.name)
-    who = person_label(getattr(user, "id", None))
-    reply = f"Called {contractor.name} to unit {unit.unit_number}"
+    row = (
+        UnitTask.query.filter(
+            UnitTask.unit_id == unit.id,
+            UnitTask.deleted_at.is_(None),
+            db.func.lower(UnitTask.title) == title.lower(),
+            UnitTask.status.in_(("needed", "vendored")),
+        )
+        .order_by(UnitTask.id.asc())
+        .first()
+    )
+    if row and (row.vendor or "").strip() and row.vendor.strip().lower() != name.lower():
+        return {
+            "ok": False,
+            "reply": f"{title} on unit {unit.unit_number} is already with {row.vendor}. It was not given to {name}.",
+        }
+    remember_contractor(user, name)
+    if row:
+        before = {"vendor": row.vendor or "", "kind": row.kind or "", "status": row.status or "", "title": row.title}
+        row.vendor = name[:160]
+        row.kind = "vendor"
+        if row.status == "needed":
+            row.status = "vendored"
+        after = {"vendor": row.vendor, "kind": row.kind, "status": row.status, "title": row.title}
+        if before != after:
+            audit(getattr(user, "id", None), source, "update", "unit_task", row.id, before, {**after, "unit_id": unit.id, "property_id": unit.property_id})
+        task_id = row.id
+    else:
+        created = add_needed(user, unit, [title], source, kind="vendor", vendor=name)
+        task_id = created[0].id if created else None
+    reply = f"{title} on unit {unit.unit_number} is with {name}. Other work on this unit was left as it is."
+    return {"ok": True, "reply": reply, "unit_id": unit.id, "task_id": task_id, "title": title}
+
+
+def call_to_unit(user, contractor: Contractor, unit, title: str = "", source: str = "human"):
+    job = (title or "").strip() or (contractor.trade or "").strip()
+    if not job:
+        return {
+            "ok": False,
+            "reply": (
+                f"Which trade is {contractor.name} doing on unit {unit.unit_number}? "
+                "Paint, floors, trash out, spray, and resurfacing stay separate. Maintenance keeps the rest."
+            ),
+        }
+    result = assign_trade_vendor(user, unit, job, contractor.name, source)
+    if not result.get("ok"):
+        return result
+    reply = result.get("reply") or ""
     prop = getattr(unit, "property", None)
-    if prop:
-        reply += f" at {prop.name}"
-    reply += f" for {job}."
+    if prop and prop.name and prop.name not in reply:
+        reply = reply.replace(f"unit {unit.unit_number}", f"unit {unit.unit_number} at {prop.name}", 1)
     if contractor.phone:
         reply += f" Phone {contractor.phone}."
+    who = person_label(getattr(user, "id", None))
     if who:
         reply += f" Saved by {who}."
-    return {"ok": True, "reply": reply, "unit_id": unit.id, "contractor_id": contractor.id, "task_id": rows[0].id if rows else None}
+    result["reply"] = reply
+    result["contractor_id"] = contractor.id
+    return result
 
 
 def roster_lines() -> list[str]:

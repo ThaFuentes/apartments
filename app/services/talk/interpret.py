@@ -181,7 +181,7 @@ def interpret(user, text: str, key: str, source: str) -> dict:
         return work
     return {
         "ok": True,
-        "reply": "Tell me if that's a trip, work at a unit, or a receipt, and I'll ask for whatever is missing.",
+        "reply": "Tell me the unit and what it needs, or say if this is a trip or a receipt.",
     }
 
 

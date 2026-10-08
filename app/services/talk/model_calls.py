@@ -426,6 +426,11 @@ def _calls_for_her(text: str, calls: list) -> list:
         if name == "upsert_property" and editing:
             kept.append({"name": "update_property", "args": args})
             continue
+        if name in {"plan_trip", "plan_day"}:
+            from app.services.talk.units import _board_payload
+
+            if _board_payload(text):
+                continue
         if name == "plan_trip":
             args = _separate_plan_records(text, args)
         kept.append({"name": name, "args": args})

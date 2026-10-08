@@ -13,6 +13,9 @@ READY_JOBS = (
     ("trashout", "Trashout"),
     ("paint", "Paint"),
     ("carpet", "Carpet"),
+    ("floors", "Floors"),
+    ("spray", "Spray"),
+    ("resurfacing", "Resurfacing"),
     ("clean", "Clean"),
     ("punch", "Punch list"),
     ("appliances", "Appliances"),
@@ -28,6 +31,45 @@ _JOB_BY_LABEL["carpet cleaning"] = "carpet"
 _JOB_BY_LABEL["make ready clean"] = "clean"
 _JOB_BY_LABEL["appliances"] = "appliances"
 _JOB_BY_LABEL["keys"] = "keys"
+_JOB_BY_LABEL["floor"] = "floors"
+_JOB_BY_LABEL["flooring"] = "floors"
+_JOB_BY_LABEL["spraying"] = "spray"
+_JOB_BY_LABEL["bug spray"] = "spray"
+_JOB_BY_LABEL["resurface"] = "resurfacing"
+
+# Longest phrase first. "carpet cleaning" is carpet, and "clean" must not
+# also match inside "cleaning".
+_PHRASES = (
+    ("carpet cleaning", "carpet"),
+    ("carpet clean", "carpet"),
+    ("make ready clean", "clean"),
+    ("trash out", "trashout"),
+    ("punch list", "punch"),
+    ("bug spray", "spray"),
+    ("resurfacing", "resurfacing"),
+    ("resurface", "resurfacing"),
+    ("spraying", "spray"),
+    ("flooring", "floors"),
+    ("floors", "floors"),
+    ("floor", "floors"),
+    ("painters", "paint"),
+    ("painter", "paint"),
+    ("painting", "paint"),
+    ("paint", "paint"),
+    ("trashout", "trashout"),
+    ("punchlist", "punch"),
+    ("cleaners", "clean"),
+    ("cleaner", "clean"),
+    ("cleaning", "clean"),
+    ("clean", "clean"),
+    ("appliances", "appliances"),
+    ("appliance", "appliances"),
+    ("carpet", "carpet"),
+    ("spray", "spray"),
+    ("punch", "punch"),
+    ("keys", "keys"),
+    ("key", "keys"),
+)
 
 
 def job_choices() -> list[tuple[str, str]]:
@@ -38,17 +80,38 @@ def job_label(slug: str) -> str:
     return _JOB_BY_SLUG.get((slug or "").strip().lower()) or (slug or "").replace("_", " ").strip().title()
 
 
+def trades_in(text: str) -> list[str]:
+    """Every known trade named in the text. One contractor never matches two."""
+    raw = " ".join((text or "").lower().replace("-", " ").split())
+    if not raw:
+        return []
+    found: list[str] = []
+    covered = [False] * len(raw)
+    for phrase, slug in _PHRASES:
+        start = 0
+        while True:
+            at = raw.find(phrase, start)
+            if at < 0:
+                break
+            end = at + len(phrase)
+            before = at == 0 or not raw[at - 1].isalnum()
+            after = end == len(raw) or not raw[end].isalnum()
+            if before and after and not any(covered[at:end]):
+                covered[at:end] = [True] * (end - at)
+                if slug not in found:
+                    found.append(slug)
+            start = end
+    return found
+
+
 def match_job(text: str) -> str:
-    raw = (text or "").strip().lower().replace("-", " ")
-    raw = " ".join(raw.split())
+    raw = " ".join((text or "").strip().lower().replace("-", " ").split())
     if raw in _JOB_BY_SLUG:
         return raw
     if raw in _JOB_BY_LABEL:
         return _JOB_BY_LABEL[raw]
-    for slug, label in READY_JOBS:
-        if slug in raw or label.lower() in raw:
-            return slug
-    return ""
+    found = trades_in(raw)
+    return found[0] if len(found) == 1 else ""
 
 
 def open_ready_titles(unit_id: int) -> set[str]:
@@ -69,6 +132,10 @@ def add_ready_job(user, unit: Unit, job: str, source: str, vendor: str = "") -> 
     title = job_label(slug) if slug else (job or "").strip()[:200]
     if not title:
         return {"ok": False, "reply": "Which make-ready job?"}
+    if (vendor or "").strip():
+        from app.services.contractors import assign_trade_vendor
+
+        return assign_trade_vendor(user, unit, job, vendor, source)
     if (unit.occupancy or "") != "make_ready":
         set_occupancy(user, unit, "make_ready", source)
     if title.lower() in open_ready_titles(unit.id):
@@ -177,9 +244,13 @@ def _task_for_title(tasks, title: str) -> UnitTask | None:
     for row in tasks:
         if (row.title or "").strip().lower() == want:
             return row
+    slug = match_job(want)
     for row in tasks:
         have = (row.title or "").strip().lower()
         if have.startswith(want + " ") or have.startswith(want + "-"):
+            others = [item for item in trades_in(have) if item != slug]
+            if others:
+                continue
             return row
     return None
 
@@ -371,19 +442,34 @@ def send_back_task(user, task: UnitTask, note: str) -> dict:
     return {"ok": True, "reply": reply, "unit_id": unit.id}
 
 
+def _same_trade(by_title: dict, slug: str, label: str):
+    """The line for this trade only. A title that also names another trade does not count."""
+    row = by_title.get(label.lower())
+    if row is not None:
+        return row
+    prefix = label.lower() + " "
+    dashed = label.lower() + "-"
+    for key, candidate in by_title.items():
+        if not (key.startswith(prefix) or key.startswith(dashed)):
+            continue
+        if any(item != slug for item in trades_in(key)):
+            continue
+        return candidate
+    return None
+
+
 def ready_checklist(tasks) -> list[dict]:
     by_title = {}
     for row in tasks:
         key = (row.title or "").strip().lower()
-        if key and key not in by_title:
+        if not key:
+            continue
+        current = by_title.get(key)
+        if current is None or ((row.vendor or "").strip() and not (current.vendor or "").strip()):
             by_title[key] = row
     checks = []
     for slug, label in READY_JOBS:
-        row = by_title.get(label.lower())
-        if row is None:
-            prefix = label.lower() + " "
-            dashed = label.lower() + "-"
-            row = next((candidate for key, candidate in by_title.items() if key.startswith(prefix) or key.startswith(dashed)), None)
+        row = _same_trade(by_title, slug, label)
         actor_id = None
         if row:
             if row.status == "done" and row.done_by_id:
@@ -467,11 +553,18 @@ def ready_cards(user) -> list[dict]:
         open_rows = [row for row in tasks if row.status in ("needed", "vendored")]
         vendors = []
         seen = set()
+        assignments = []
+        assigned = set()
         for row in open_rows:
             name = (row.vendor or "").strip()
             if name and name.lower() not in seen:
                 seen.add(name.lower())
                 vendors.append(name)
+            if name:
+                line = f"{row.title}: {name}"
+                if line.lower() not in assigned:
+                    assigned.add(line.lower())
+                    assignments.append(line)
         ready_day = unit.ready_by
         cards.append(
             {
@@ -479,6 +572,7 @@ def ready_cards(user) -> list[dict]:
                 "property": prop,
                 "jobs": [row.title for row in open_rows],
                 "vendors": vendors,
+                "assignments": assignments,
                 "open_count": len(open_rows),
                 "done_count": sum(1 for row in tasks if row.status == "done"),
                 "ready_by": ready_day.isoformat() if ready_day else "",

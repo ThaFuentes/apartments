@@ -263,16 +263,21 @@ def set_occupancy(user, unit: Unit, occupancy: str, source: str) -> None:
 
 
 def add_needed(user, unit: Unit, titles: list[str], source: str, kind: str = "", vendor: str = "", notes: str = "") -> list[UnitTask]:
+    titles = [title for title in titles if (title or "").strip()]
+    # One name on a list of trades would credit that contractor for all of them.
+    one_vendor = (vendor or "").strip() if len(titles) == 1 else ""
     rows = []
     for title in titles:
         task_kind = kind or _kind_for(title)
+        if task_kind == "vendor" and not one_vendor:
+            task_kind = _kind_for(title)
         row = UnitTask(
             property_id=unit.property_id,
             unit_id=unit.id,
             kind=task_kind,
             title=title[:200],
             status="vendored" if task_kind == "vendor" else "needed",
-            vendor=(vendor or "")[:160],
+            vendor=one_vendor[:160],
             notes=(notes or "")[:2000],
             created_by_id=user.id,
             created_at=utcnow(),
@@ -423,13 +428,17 @@ def apply_unit_board(user, payload, source) -> dict:
         if occupancy == "make_ready" and jobs:
             from app.services.ready import add_ready_job
 
+            named_vendor = (payload.get("vendor") or "").strip()
+            vendor_for_job = named_vendor if len(jobs) == 1 else ""
             names = []
             for title in jobs:
-                added = add_ready_job(user, unit, title, source, vendor=payload.get("vendor") or "")
+                added = add_ready_job(user, unit, title, source, vendor=vendor_for_job)
                 if added.get("ok"):
                     names.append(title)
             if names:
                 reply += " Needs " + ", ".join(names) + "."
+            if named_vendor and len(jobs) > 1:
+                reply += " That contractor was not put on every trade. Each one stays with its own person."
         if who:
             reply += f" Saved by {who}."
         return {"ok": True, "reply": reply, "unit_id": unit.id, "property_id": prop.id}
@@ -440,11 +449,15 @@ def apply_unit_board(user, payload, source) -> dict:
         kind = payload.get("kind") or ""
         if kind == "task" and unit.occupancy == "occupied":
             return {"ok": False, "reply": f"Mark unit {unit.unit_number} vacant before adding make-ready work."}
-        rows = add_needed(user, unit, titles, source, kind=kind, vendor=payload.get("vendor") or "")
+        named_vendor = (payload.get("vendor") or "").strip()
+        vendor = named_vendor if len(titles) == 1 else ""
+        rows = add_needed(user, unit, titles, source, kind=kind, vendor=vendor)
         if not rows:
             return {"ok": False, "reply": "What does that unit need?"}
         names = ", ".join(row.title for row in rows)
         reply = f"Unit {unit.unit_number} at {prop.name} needs {names}."
+        if named_vendor and len(titles) > 1:
+            reply += " That contractor was not put on every trade. Name one trade for them."
         if who:
             reply += f" Saved by {who}."
         return {"ok": True, "reply": reply, "unit_id": unit.id}

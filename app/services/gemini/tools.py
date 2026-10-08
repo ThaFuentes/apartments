@@ -420,14 +420,14 @@ TOOL_DECLS = [
     },
     {
         "name": "ready_check",
-        "description": "Check one make-ready trade done or open on a unit: trashout, paint, carpet, clean, punch, appliances, keys.",
+        "description": "Check one make-ready trade done or open on a unit: trashout, paint, carpet, floors, spray, resurfacing, clean, punch, appliances, keys. One trade only.",
         "parameters": {
             "type": "object",
             "properties": {
                 "unit_number": {"type": "string"},
                 "property_name": {"type": "string"},
                 "city": {"type": "string"},
-                "job": {"type": "string", "enum": ["trashout", "paint", "carpet", "clean", "punch", "appliances", "keys"]},
+                "job": {"type": "string", "enum": ["trashout", "paint", "carpet", "floors", "spray", "resurfacing", "clean", "punch", "appliances", "keys"]},
                 "done": {"type": "boolean", "description": "true marks it done, false opens it again"},
             },
             "required": ["unit_number", "job", "done"],
@@ -677,7 +677,9 @@ CHAT_RULES = (
     "When she names a unit, gear, or job with no property, pass that property's exact name and city instead of asking again. "
     "When she says remember I'm always at, my default property is, or set the default property, call set_default_property. "
     "A contractor going into or leaving a unit is contractor_in or contractor_out with the unit number and the stated time. "
-    "Ready-by dates are set_ready_by; a trade marked done is ready_check with one of trashout, paint, carpet, clean, punch, appliances, keys. "
+    "Ready-by dates are set_ready_by; a trade marked done is ready_check with one of trashout, paint, carpet, floors, spray, resurfacing, clean, punch, appliances, keys. "
+    "A contractor is one trade on one unit. Do not put that vendor on the unit's other jobs. Work with no vendor stays with maintenance. "
+    "A trip or a day of stops is the only plan. Make-ready, a unit job, and one trade are not a plan. "
     "A recurring reminder like a filter change every 90 days is pm_save. Parts she used are parts_used. "
     "When the apartment name and the city are both in the thread, call upsert_property once and include any street she already typed. "
     "Do not say there is no matching job unless she asked about a job. "

@@ -427,6 +427,95 @@ class ReadyContractorTests(AptTestBase):
         self.assertIn(b"Trashout", unit_page.data)
         self.assertIn(b"Call them to this unit", unit_page.data)
 
+    def test_one_contractor_does_not_take_the_other_trades(self):
+        from app.services.board import add_units, apply_unit_board
+        from app.services.contractors import call_to_unit, remember_contractor
+        from app.services.ready import add_ready_job, ready_cards
+
+        owner = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        add_units(owner, prop, "210", "human")
+        db.session.commit()
+        unit = Unit.query.filter_by(property_id=prop.id, unit_number="210").one()
+        add_ready_job(owner, unit, "trashout", "human")
+        add_ready_job(owner, unit, "paint", "human")
+        painter = remember_contractor(owner, "Wall Co", trade="paint")
+        mixed = remember_contractor(owner, "Floor Co", trade="floors, trashout")
+        db.session.commit()
+
+        refused = call_to_unit(owner, mixed, unit, title="", source="human")
+        self.assertFalse(refused["ok"], refused)
+        trash = UnitTask.query.filter_by(unit_id=unit.id, title="Trashout").one()
+        paint = UnitTask.query.filter_by(unit_id=unit.id, title="Paint").one()
+        self.assertEqual(trash.vendor, "")
+        self.assertEqual(paint.vendor, "")
+
+        called = call_to_unit(owner, painter, unit, title="paint", source="human")
+        self.assertTrue(called["ok"], called)
+        self.assertIn("left as it is", called["reply"])
+        db.session.refresh(paint)
+        db.session.refresh(trash)
+        self.assertEqual(paint.vendor, "Wall Co")
+        self.assertEqual(paint.kind, "vendor")
+        self.assertEqual(trash.vendor, "")
+        self.assertEqual(UnitTask.query.filter_by(unit_id=unit.id, title="Paint").count(), 1)
+
+        both = apply_unit_board(
+            owner,
+            {
+                "action": "needs",
+                "property_hint": "Woodview",
+                "unit_number": "210",
+                "titles": ["floors", "resurfacing"],
+                "vendor": "Wall Co",
+            },
+            "human",
+        )
+        self.assertTrue(both["ok"], both)
+        self.assertIn("not put on every trade", both["reply"])
+        for title in ("floors", "resurfacing"):
+            row = UnitTask.query.filter_by(unit_id=unit.id, title=title).one()
+            self.assertEqual(row.vendor, "")
+        db.session.refresh(trash)
+        self.assertEqual(trash.vendor, "")
+
+        cards = ready_cards(owner)
+        checks = {row["slug"]: row for row in cards[0]["checklist"]}
+        self.assertEqual(checks["paint"]["vendor"], "Wall Co")
+        self.assertEqual(checks["trashout"]["vendor"], "")
+        self.assertIn("floors", checks)
+        self.assertIn("spray", checks)
+        self.assertIn("resurfacing", checks)
+        self.assertEqual(cards[0]["assignments"], ["Paint: Wall Co"])
+        db.session.commit()
+
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        board = client.get("/ready")
+        self.assertEqual(board.status_code, 200)
+        self.assertIn(b"Paint: Wall Co", board.data)
+        self.assertIn(b"Floors", board.data)
+        self.assertIn(b"Spray", board.data)
+        self.assertIn(b"Resurfacing", board.data)
+        self.assertIn(b"maintenance", board.data)
+        self.assertIn(b"Which trade?", board.data)
+        self.assertIn(b"Maintenance", board.data)
+        self.assertNotIn(b"Called:", board.data)
+        self.assertNotIn(b"Usual work", board.data)
+        page = client.get(f"/units/{unit.id}")
+        self.assertEqual(page.status_code, 200)
+        text = page.get_data(as_text=True)
+        trash_at = text.index("<h3>Trashout</h3>")
+        trash_block = text[trash_at:text.index("<h3>", trash_at + 4)]
+        self.assertIn('name="vendor" value=""', trash_block)
+        self.assertNotIn("Wall Co", trash_block)
+        vendored = text.split("<h2>Vendored out</h2>", 1)[1].split("<h2>Equipment</h2>", 1)[0]
+        self.assertIn("<h3>Paint</h3>", vendored)
+        self.assertIn("Wall Co", vendored)
+        self.assertNotIn("<h3>Trashout</h3>", vendored)
+
     def test_move_out_and_photo_logged_from_field_form(self):
         from io import BytesIO
         from PIL import Image
@@ -525,6 +614,19 @@ class ReadyContractorTests(AptTestBase):
         self.assertIn(b"Target ready", board.data)
         self.assertIn(b"days overdue", board.data)
         self.assertIn(b"ready-check", board.data)
+        self.assertIn(b"Tap to add", board.data)
+        self.assertIn(b"maintenance", board.data)
+        page_html = board.get_data(as_text=True)
+        phone = page_html.split('<nav class="nav">', 1)[1].split("</nav>", 1)[0]
+        self.assertLess(phone.index("Make ready"), phone.index("Properties"))
+        self.assertLess(phone.index("Properties"), phone.index(">Home</a>"))
+        self.assertLess(phone.index(">Home</a>"), phone.index(">More</a>"))
+        self.assertNotIn("Plan", phone)
+        self.assertNotIn("mobile-signout", phone)
+        self.assertIn("header-signout", page_html)
+        more = client.get("/more")
+        self.assertIn(b"Today's plan", more.data)
+        self.assertIn(b"Open make ready", client.get("/").data)
         marked = client.post(
             f"/units/{unit.id}/ready-check",
             data={"csrf_token": token, "job": "paint", "done": "1", "next": "/ready"},
@@ -599,6 +701,31 @@ class ReadyContractorTests(AptTestBase):
         self.assertEqual(unit.occupancy, "make_ready")
         titles = sorted(row.title for row in UnitTask.query.filter_by(unit_id=unit.id).all())
         self.assertEqual(titles, ["Paint", "Trashout"])
+
+    def test_scheduling_a_trade_stays_on_the_unit(self):
+        from app.models import Trip
+        from app.services.board import add_units
+
+        owner = self.owner()
+        prop = ensure_property("Woodview", "Odessa", "Texas", owner.id)
+        db.session.commit()
+        add_units(owner, prop, "210", "human")
+        db.session.commit()
+        heard = handle_message(
+            owner,
+            "schedule paint and trashout for unit 210 at woodview",
+            idempotency_key="schedule-trades",
+        )
+        saved = (heard.get("reply") or "") + " " + self.save(owner)
+        self.assertNotIn("where should i plan", saved.lower())
+        self.assertEqual(Trip.query.filter(Trip.deleted_at.is_(None)).count(), 0)
+        unit = Unit.query.filter_by(unit_number="210").one()
+        rows = {
+            (row.title or "").lower(): (row.vendor or "")
+            for row in UnitTask.query.filter_by(unit_id=unit.id).all()
+        }
+        self.assertEqual(rows.get("paint"), "")
+        self.assertEqual(rows.get("trashout"), "")
 
     def test_office_sends_finished_make_ready_back_and_adds_a_missed_job(self):
         from app.services.board import recent_changes

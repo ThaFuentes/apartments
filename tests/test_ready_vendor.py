@@ -359,8 +359,9 @@ need(card["payload"]["job"] == "paint", card["payload"])
 need(card["payload"]["vendor_trade"] == "Painters", card["payload"])
 
 # A saved trade that is not a make-ready job still has to be asked.
-flooring = vendor("FVS Vending", trade="Flooring")
-facts = world(vendors=[flooring], units=[unit(occupancy="")])
+# Floors, spray, and resurfacing are checklist trades now, so HVAC stands in.
+hvac = vendor("FVS Vending", trade="HVAC")
+facts = world(vendors=[hvac], units=[unit(occupancy="")])
 step = say("add a vendor, fvs to my 403 make ready", None, facts)
 need(step["kind"] == "ask", step["reply"])
 need("already a vendor" in step["reply"].lower(), step["reply"])

@@ -13,14 +13,8 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False, 
         "generationConfig": {"temperature": 0.2, "maxOutputTokens": max_output_tokens or 1600},
     }
     if tools:
-        body["systemInstruction"] = {
-            "parts": [
-                {
-                    "text": CHAT_RULES + " You have Google Search. Use it for addresses and businesses that are not already in her record."
-                }
-            ]
-        }
-        body["tools"] = [{"functionDeclarations": TOOL_DECLS}, {"google_search": {}}]
+        body["systemInstruction"] = {"parts": [{"text": CHAT_RULES}]}
+        body["tools"] = [{"functionDeclarations": TOOL_DECLS}]
     resp = requests.post(
         url,
         params={"key": api_key},
@@ -28,15 +22,6 @@ def _generate(api_key: str, model: str, parts: list, timeout: int, tools=False, 
         json=body,
         timeout=timeout,
     )
-    if tools and resp.status_code >= 400 and resp.status_code != 429:
-        body["tools"] = [{"functionDeclarations": TOOL_DECLS}]
-        resp = requests.post(
-            url,
-            params={"key": api_key},
-            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json=body,
-            timeout=timeout,
-        )
     if resp.status_code == 429:
         raise QuotaError(retry_after(resp))
     if resp.status_code >= 400:

@@ -651,15 +651,17 @@ def _local_exact(user, text: str, key: str, source: str, note: str, *, split: bo
     access = _file_access(user, text, key, source)
     if access:
         return access
+    # Unit, make-ready, and contractor sentences are their own path.
+    # A trip is only filed when this sentence did not already match one.
+    board = _file_unit_board(user, text, key, source)
+    if board:
+        return board
     planned = _file_trip_plan(user, text, key, source)
     if planned:
         return planned
     readings = _file_trip_readings(user, text, key, source)
     if readings:
         return readings
-    board = _file_unit_board(user, text, key, source)
-    if board:
-        return board
     noted = _file_item_note(user, text, key, source)
     if noted:
         if note:

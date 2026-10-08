@@ -253,7 +253,9 @@ def office_intent(text: str) -> dict | None:
         raw,
         re.I,
     )
-    if gear and not re.search(r"\b(?:region|unit)\b", gear.group(1) or "", re.I):
+    # "add units 101-104 at Woodview" and "add building 1 units …" are the unit
+    # board, not a piece of equipment sitting at the property.
+    if gear and not re.search(r"\b(?:region|units?|building)\b", gear.group(1) or "", re.I):
         return {
             "kind": "add_place_gear",
             "gear": _tidy(gear.group(1)),

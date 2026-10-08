@@ -309,7 +309,7 @@ def _board_payload(text: str) -> dict | None:
                     re.I,
                 )
                 if not occupied:
-                    return None
+                    return _scheduled_trade(raw)
                 number, hint, word = occupied.group(1), occupied.group(2), occupied.group(3)
     else:
         number, word, hint = occupied.group(1), occupied.group(2), occupied.group(3) or ""
@@ -329,6 +329,31 @@ def _board_payload(text: str) -> dict | None:
     if jobs and (payload.get("occupancy") or "") == "make_ready":
         payload["titles"] = _clean_slot(jobs.group(1))
     return payload
+
+
+def _scheduled_trade(raw: str) -> dict | None:
+    """'Schedule paint for unit 210' is that trade on that unit, not a trip."""
+    booked = re.search(
+        r"\b(?:plan|schedule)\s+(?:the\s+)?(?P<title>.+?)\s+(?:for|on|in)\s+(?:unit\s*)?#?(?P<num>[0-9]{1,6}[a-z]?)"
+        r"(?:\s+(?:at|in)\s+(?P<place>[a-z][a-z0-9']{3,40}))?\s*$",
+        raw or "",
+        re.I,
+    )
+    if not booked:
+        return None
+    if re.search(r"\b(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|trip|going|headed)\b", raw or "", re.I):
+        return None
+    from app.services.ready import trades_in
+
+    title = _clean_slot(booked.group("title"))
+    if not trades_in(title):
+        return None
+    return {
+        "action": "needs",
+        "unit_number": booked.group("num"),
+        "property_hint": booked.group("place") or "",
+        "titles": title,
+    }
 
 
 def _file_unit_board(user, text: str, key: str, source: str):

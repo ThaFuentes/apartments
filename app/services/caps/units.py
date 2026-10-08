@@ -35,7 +35,7 @@ CAPS = [
             "save contractor Ace Plumbing 432-555-0100 trashout",
             "call Ace Plumbing to unit 210 at Woodview for trashout",
         ),
-        howto="Say the unit and the new status or building. Save contractor names once, then call that same name to another unit.",
+        howto="Say the unit and the new status or building. A contractor is one trade on that unit. Trash out, paint, floors, spray, and resurfacing stay separate. Work with no contractor stays with maintenance.",
     ),
     Capability(
         tool="ready_vendor",

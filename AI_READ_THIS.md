@@ -16,6 +16,8 @@ The operator said this in plain words: if there is an AI, have it take the sente
 
 Do not move trip parsers, plan parsers, property parsers, gear parsers, or record questions back above `_from_model`. That was the bug. A clear sentence was finished locally and the model was never asked, including when a key was sitting right there.
 
+Known field sentences are the exception, and they already run inside `_from_model` before a key is spent: office, a vendor on a make-ready, contractor check-in, and `_local_exact`. Inside that local path, a unit, a make-ready, and one trade are not a trip. The plan matcher runs only after the unit board, and only when the sentence is a trip or a day of stops. The word plan or schedule does not make unit work a trip. The model is for a sentence no path recognized, and it uses those same tools.
+
 ## What the model is for
 
 When a key works, the model decides the action and calls the tool: plan, trip, property, unit, work, expense, address, question. `parse.py` is the checker on those tool arguments. It resolves a property, asks which city when two places share a name, and rejects a slot that would save the wrong site. It is not a second brain that replaces the model.

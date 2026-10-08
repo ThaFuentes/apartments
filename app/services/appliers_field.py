@@ -220,21 +220,18 @@ def apply_contractor_in(user, payload: dict, source: str) -> dict:
         return {"ok": False, "needs_answer": True, "reply": "Which unit and property?"}
     task = None
     title = (payload.get("title") or payload.get("job") or "").strip()
+    if not title:
+        from app.services.ready import trades_in
+
+        if len(trades_in(contractor.trade or "")) == 1:
+            title = contractor.trade
     if title:
-        from app.services.ready import job_label, match_job
+        from app.services.contractors import assign_trade_vendor
 
-        slug = match_job(title)
-        want = job_label(slug) if slug else title[:200]
-        task = (
-            UnitTask.query.filter_by(unit_id=unit.id)
-            .filter(UnitTask.deleted_at.is_(None), db.func.lower(UnitTask.title) == want.lower())
-            .first()
-        )
-        if task is None:
-            from app.services.board import add_needed
-
-            rows = add_needed(user, unit, [want], source, kind="vendor", vendor=contractor.name)
-            task = rows[0] if rows else None
+        assigned = assign_trade_vendor(user, unit, title, contractor.name, source)
+        if not assigned.get("ok"):
+            return assigned
+        task = db.session.get(UnitTask, assigned.get("task_id")) if assigned.get("task_id") else None
     open_row = (
         ContractorVisit.query.filter_by(unit_id=unit.id, contractor_id=contractor.id)
         .filter(ContractorVisit.check_out.is_(None))
@@ -289,6 +286,8 @@ def apply_contractor_in(user, payload: dict, source: str) -> dict:
     stamp = row.check_in.strftime("%-I:%M %p").lstrip("0") if row.check_in else ""
     if stamp:
         reply += f" at {stamp}".replace(":00 ", " ")
+    if task and (task.title or "").strip():
+        reply += f" for {task.title} only"
     hours = row.estimated_hours
     if hours:
         reply += f", should take about {hours:g} hour{'s' if hours != 1 else ''}."
@@ -402,8 +401,13 @@ def contractor_board(user) -> dict:
                 "estimated_hours": row.estimated_hours,
                 "over": over,
                 "note": row.note or "",
+                "trade": "",
             }
         )
+        if row.task_id:
+            task = db.session.get(UnitTask, row.task_id)
+            if task and not task.deleted_at:
+                on_site[-1]["trade"] = task.title or ""
     day = local_today()
     flagged_query = ContractorVisit.query.filter(ContractorVisit.check_out.isnot(None))
     if getattr(user, "role", "") != "owner":

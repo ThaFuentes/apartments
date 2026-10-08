@@ -21,7 +21,8 @@ _LEAD = re.compile(
 _UNIT = r"[0-9]{1,6}[a-z]?"
 _JOB = (
     r"paint(?:ers|ing|er)?|trash\s*out|trashout|carpet(?:\s+clean(?:ing)?)?|"
-    r"make\s+ready\s+clean|clean(?:ers?|ing)?|punch(?:\s*list)?|punchlist|appliances?|keys?"
+    r"make\s+ready\s+clean|floor(?:ing|s)?|bug\s+spray|spray(?:ing)?|resurfac(?:e|ing)|"
+    r"clean(?:ers?|ing)?|punch(?:\s*list)?|punchlist|appliances?|keys?"
 )
 _PLACE = r"[a-z][a-z0-9' ._-]{1,80}"
 _PHONE = re.compile(r"(?:\+?1[\s.-]?)?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})(?!\d)")
@@ -42,6 +43,14 @@ _TRADES = (
     ("make ready clean", "clean", "Clean", "Make ready clean"),
     ("trash out", "trashout", "Trashout", "Trash out"),
     ("trashout", "trashout", "Trashout", "Trashout"),
+    ("resurfacing", "resurfacing", "Resurfacing", "Resurfacing"),
+    ("resurface", "resurfacing", "Resurfacing", "Resurface"),
+    ("bug spray", "spray", "Spray", "Bug spray"),
+    ("spraying", "spray", "Spray", "Spraying"),
+    ("spray", "spray", "Spray", "Spray"),
+    ("flooring", "floors", "Floors", "Flooring"),
+    ("floors", "floors", "Floors", "Floors"),
+    ("floor", "floors", "Floors", "Floor"),
     ("punch list", "punch", "Punch list", "Punch list"),
     ("punchlist", "punch", "Punch list", "Punch list"),
     ("painters", "paint", "Paint", "Painters"),
@@ -59,7 +68,7 @@ _TRADES = (
     ("keys", "keys", "Keys", "Keys"),
     ("key", "keys", "Keys", "Key"),
 )
-_TRADE_WORDS = "paint, carpet, clean, trashout, punch, appliances, or keys"
+_TRADE_WORDS = "paint, floors, spray, resurfacing, carpet, clean, trashout, punch, appliances, or keys"
 _ORDINALS = {"first": 0, "second": 1, "third": 2, "fourth": 3, "fifth": 4}
 
 

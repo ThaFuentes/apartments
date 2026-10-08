@@ -240,7 +240,7 @@ def chat_history(user, current: str) -> list[dict]:
     rows = (
         ChatMessage.query.filter_by(user_id=user.id)
         .order_by(ChatMessage.id.desc())
-        .limit(12)
+        .limit(6)
         .all()
     )
     rows.reverse()
@@ -421,8 +421,6 @@ def collect_tool_calls(user, text: str):
     rows = keys_for(user)
     if not rows:
         return None
-    from app.services.caps import rules as caps_rules
-
     from app.services.context import context_brief
 
     prompt = (
@@ -433,14 +431,13 @@ def collect_tool_calls(user, text: str):
         + context_brief(user)
         + "\n\n"
         + parse_rules()
-        + "\n\n"
-        + caps_rules()
         + "\n\nEach appliance is its own card on one unit. A serial, style, or note belongs to that one item. "
         + "A washer in unit 26 does not share a note with any other washer. "
         + "When she says she added, installed, or replaced an appliance in a unit, call record_unit_visit with equipment filled in: kind, brand, model, serial, size, style, color, notes. Equipment saves even without a work title. "
         + "A trip plan is a plan. Gas is a line on that plan, not a place. "
         + "Make-ready units and occupied units are statuses on that unit. "
-        + "A note, task, or vendor on one unit stays on that unit. "
+        + "A note, task, or vendor on one unit stays on that unit. A vendor covers one trade only, and other trades stay with maintenance or their own contractor. "
+        + "Call plan_trip or plan_day only for a trip or a day of stops. "
         + "Say who is logged in by using her words; the server stamps her login on the change.\n\nShe said: "
         + (text or "")
     )

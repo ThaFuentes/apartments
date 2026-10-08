@@ -139,6 +139,7 @@
     font-size: 0.92rem;
   }
   .phone-only { display: none; }
+  .ready-check { grid-template-columns: 1fr 1fr; }
   .sec-switch {
     display: inline-flex;
     align-items: center;

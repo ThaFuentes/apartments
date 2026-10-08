@@ -6,7 +6,7 @@
   <div class="hero">
     <p class="kicker">Turn</p>
     <h1>Make ready</h1>
-    <p class="lead">Units that still need trashout, paint, carpet, and the rest. Call a saved contractor onto another unit from here.</p>
+    <p class="lead">Tap a line when that work is done. A name is the contractor for that one job. No name means maintenance still has it.</p>
     {% if focus_name %}<p class="hint">Showing {{ focus_name }}. Change the property at the top to see another.</p>{% endif %}
     <p><a href="/contractors">Contractor list</a></p>
     {% if editable and available_units %}
@@ -34,7 +34,7 @@
     <h2>On site now</h2>
     <ul class="list">
       {% for row in on_site %}
-      <li><strong>{{ row.contractor }}</strong>{% if row.company %} ({{ row.company }}){% endif %} — unit {{ row.unit }} at {{ row.property }} · {{ row.minutes // 60 }}h {{ '%02d'|format(row.minutes % 60) }}m on site{% if row.estimated_hours %} · est {{ row.estimated_hours }}h{% endif %}{% if row.over %} · <span class="overdue">over estimate</span>{% endif %}</li>
+      <li><strong>{{ row.contractor }}</strong>{% if row.company %} ({{ row.company }}){% endif %} — unit {{ row.unit }} at {{ row.property }}{% if row.trade %} · {{ row.trade }} only{% endif %} · {{ row.minutes // 60 }}h {{ '%02d'|format(row.minutes % 60) }}m on site{% if row.estimated_hours %} · est {{ row.estimated_hours }}h{% endif %}{% if row.over %} · <span class="overdue">over estimate</span>{% endif %}</li>
       {% endfor %}
     </ul>
     {% if over_estimate %}
@@ -60,10 +60,70 @@
       {% if card.jobs %}
       <span class="unit-gear">{% for job in card.jobs %}{{ job }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
       {% endif %}
-      {% if card.vendors %}
-      <span class="hint">Called: {{ card.vendors|join(', ') }}</span>
+      {% if card.assignments %}
+      <span class="hint assign-line">{% for line in card.assignments %}{{ line }}{% if not loop.last %} · {% endif %}{% endfor %}</span>
       {% endif %}
       {% if editable %}
+      {% if card.unit.occupancy == 'make_ready' or card.rentable %}
+      <ul class="ready-check">
+        {% for item in card.checklist %}
+        <li>
+          <form method="post" action="/units/{{ card.unit.id }}/ready-check">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="next" value="/ready">
+            <input type="hidden" name="job" value="{{ item.slug }}">
+            <input type="hidden" name="done" value="{{ '1' if (item.open or item.return_note) and not item.done else '0' }}">
+            <button type="submit" class="trade-row {% if item.done %}is-done{% elif item.return_note or item.open %}is-open{% else %}is-add{% endif %}">
+              <span class="trade-name">{{ item.label }}</span>
+              <span class="trade-who">{% if item.done %}Done{% elif item.return_note %}Sent back{% elif item.vendor %}{{ item.vendor }}{% elif item.open %}Maintenance{% else %}Tap to add{% endif %}</span>
+            </button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% for item in card.checklist if item.return_note %}
+      <p class="hint">{{ item.label }}: {{ item.return_note }}</p>
+      {% endfor %}
+      {% for item in card.checklist if item.done and item.task_id %}
+      <details class="change-extra">
+        <summary>Why they need to go back</summary>
+        {% with task_id=item.task_id, next='/ready', note='', button='Send back' %}
+        {% include "_send_back.html" %}
+        {% endwith %}
+      </details>
+      {% endfor %}
+      <details class="change-extra">
+        <summary>Add something else</summary>
+        {% with unit_id=card.unit.id, next='/ready' %}
+        {% include "_add_turn_item.html" %}
+        {% endwith %}
+      </details>
+      {% endif %}
+      {% if contractors %}
+      <details class="change-extra call-fold" open>
+        <summary>Call one contractor</summary>
+        <p class="hint">Pick one trade. Everything else stays with maintenance or the person who already has it.</p>
+        <form method="post" action="/units/{{ card.unit.id }}/call" class="stack call-card">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Who
+            <select name="contractor_id">
+              {% for person in contractors %}
+              <option value="{{ person.id }}">{{ person.name }}{% if person.trade %} · {{ person.trade }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Which trade?
+            <select name="title">
+              <option value="">Which trade?</option>
+              {% for slug, label in jobs %}
+              <option value="{{ slug }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button type="submit">Call to this unit</button>
+        </form>
+      </details>
+      {% endif %}
       {% if not card.rentable %}
       <form method="post" action="/units/{{ card.unit.id }}/occupancy" class="ready-date">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -94,62 +154,6 @@
         <input type="hidden" name="next" value="/ready">
         <button type="submit" class="{% if card.rentable %}is-done{% else %}quiet{% endif %}">{% if card.rentable %}Clear rentable status{% else %}Mark ready to rent{% endif %}</button>
       </form>
-      {% endif %}
-      {% if card.unit.occupancy == 'make_ready' or card.rentable %}
-      <ul class="ready-check">
-        {% for item in card.checklist %}
-        <li>
-          <form method="post" action="/units/{{ card.unit.id }}/ready-check">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="next" value="/ready">
-            <input type="hidden" name="job" value="{{ item.slug }}">
-            <input type="hidden" name="done" value="{{ '0' if item.done else '1' }}">
-            <button type="submit" class="{% if item.done %}is-done{% elif item.return_note %}is-open{% elif item.open %}is-open{% endif %}">{{ item.label }}{% if item.done %} · done{% elif item.return_note %} · sent back{% elif item.open %} · needed{% endif %}{% if item.actor %} · {{ item.actor }}{% endif %}{% if item.vendor %} · {{ item.vendor }}{% endif %}</button>
-          </form>
-        </li>
-        {% endfor %}
-      </ul>
-      {% for item in card.checklist if item.return_note %}
-      <p class="hint">{{ item.label }}: {{ item.return_note }}</p>
-      {% endfor %}
-      {% for item in card.checklist if item.done and item.task_id %}
-      <details class="change-extra">
-        <summary>Why they need to go back</summary>
-        {% with task_id=item.task_id, next='/ready', note='', button='Send back' %}
-        {% include "_send_back.html" %}
-        {% endwith %}
-      </details>
-      {% endfor %}
-      <details class="change-extra">
-        <summary>Add something else</summary>
-        {% with unit_id=card.unit.id, next='/ready' %}
-        {% include "_add_turn_item.html" %}
-        {% endwith %}
-      </details>
-      {% endif %}
-      {% if contractors %}
-      <details class="change-extra">
-        <summary>Call a contractor</summary>
-        <form method="post" action="/units/{{ card.unit.id }}/call" class="inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <label>Call
-            <select name="contractor_id">
-              {% for person in contractors %}
-              <option value="{{ person.id }}">{{ person.name }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label>For
-            <select name="title">
-              <option value="">Usual work</option>
-              {% for slug, label in jobs %}
-              <option value="{{ slug }}">{{ label }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <button type="submit" class="quiet">Call to this unit</button>
-        </form>
-      </details>
       {% endif %}
       {% endif %}
     </article>

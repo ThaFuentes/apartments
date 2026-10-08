@@ -6,7 +6,7 @@
   <div class="hero">
     <h1>Unit {{ unit.unit_number }}</h1>
     {% if unit.building %}<p class="kicker">Building {{ unit.building }}</p>{% else %}<p class="kicker">Building not assigned</p>{% endif %}
-    <p class="hint">{{ gear|length }} equipment · {{ tasks.get('part', [])|length }} parts · {{ tasks.get('vendor', [])|length }} vendored · {{ tasks.get('task', [])|length + tasks.get('work_order', [])|length }} open items · {{ jobs|length }} labor records</p>
+    <p class="hint unit-counts">{{ gear|length }} equipment · {{ tasks.get('part', [])|length }} parts · {{ tasks.get('vendor', [])|length }} vendored · {{ tasks.get('task', [])|length + tasks.get('work_order', [])|length }} open items · {{ jobs|length }} labor records</p>
     <p class="lead">
       {% if unit.rentable %}Ready to be rented.
       {% elif unit.occupancy == 'occupied' %}Occupied — someone lives here.
@@ -62,7 +62,7 @@
   <h2>Make ready</h2>
 
   {% if editable %}
-  <p class="hint">Tap a job this unit still needs. Names on the contractor list can be called here without typing them again.</p>
+  <p class="hint">Tap a trade to put it on this unit. Then call one person for that trade only.</p>
   <div class="chips ready-jobs">
     {% for slug, label in ready_jobs %}
     <form method="post" action="/units/{{ unit.id }}/ready">
@@ -73,20 +73,21 @@
     {% endfor %}
   </div>
   {% if contractors %}
-  <details class="change-extra">
-    <summary>Call a contractor</summary>
+  <details class="change-extra call-fold" open>
+    <summary>Call one contractor</summary>
+    <p class="hint">Pick one trade. Everything else stays with maintenance or the person who already has it.</p>
     <form method="post" action="/units/{{ unit.id }}/call" class="card stack call-card">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label>Call a contractor
+      <label>Who
         <select name="contractor_id">
           {% for person in contractors %}
           <option value="{{ person.id }}">{{ person.name }}{% if person.phone %} · {{ person.phone }}{% endif %}{% if person.trade %} · {{ person.trade }}{% endif %}</option>
           {% endfor %}
         </select>
       </label>
-      <label>For
+      <label>Which trade?
         <select name="title">
-          <option value="">Their usual work</option>
+          <option value="">Which trade?</option>
           {% for slug, label in ready_jobs %}
           <option value="{{ slug }}">{{ label }}</option>
           {% endfor %}
@@ -104,6 +105,9 @@
   {% for item in ready %}
   <article class="card">
     <h3>{{ item.title }}</h3>
+    {% if item.status in ['needed', 'vendored'] and not item.vendor %}
+    <p class="who-line">Maintenance</p>
+    {% endif %}
     {% if item.status == 'done' %}
     <p class="hint">{{ who(item.done_by_id) or who(item.created_by_id) or "Someone" }} · unit {{ unit.unit_number }} · {{ (item.done_at or item.created_at)|apt_when }} · done</p>
     {% elif item.return_note %}

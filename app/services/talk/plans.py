@@ -105,6 +105,11 @@ def _plan_slots(text: str) -> dict | None:
 def _file_trip_plan(user, text: str, key: str, source: str):
     if not _is_trip_plan(text):
         return None
+    # A unit, a make-ready, or a named trade is that path. The word plan does not make it a trip.
+    from app.services.talk.units import _board_payload
+
+    if _board_payload(text):
+        return None
     from app.services.clock import local_today
     from app.services.pending import commit_apply
     from app.services.parse import resolve_or_lines, resolve_property
@@ -149,6 +154,9 @@ def _file_trip_plan(user, text: str, key: str, source: str):
         elif verdict["state"] == "ambiguous":
             _prop, ask = resolve_or_lines(hint, user=user)
             waiting = "city" if verdict.get("name") else "property"
+            if waiting == "city":
+                slots.pop("city", None)
+                slots.pop("region", None)
             return propose(
                 user,
                 "plan_trip",
@@ -160,10 +168,7 @@ def _file_trip_plan(user, text: str, key: str, source: str):
                 source,
             )
     if not (slots.get("property_name") or slots.get("place") or slots.get("city")):
-        return {
-            "ok": True,
-            "reply": "Where should I plan this? Tell me the property and the city. I will make the plan, not a new property.",
-        }
+        return None
     _close_questions(user)
     # A full plan sentence (property + city or per-unit work) is explicit:
     # it files the trip now instead of staging another card.
