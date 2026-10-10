@@ -649,3 +649,62 @@ def pm_due_lines(user) -> list[str]:
         where = " ".join(bit for bit in (f"unit {unit.unit_number}" if unit else "", prop.name if prop else "") if bit)
         lines.append(f"{row.task} — {gear.kind or 'equipment'}{f' in {where}' if where else ''}: {when}")
     return lines
+
+
+def apply_finish_vendor_trade(user, payload: dict, source: str) -> dict:
+    """Close one vendor trade: clocks, note, then the make-ready line. One confirm."""
+    from app.services.contractors import assign_trade_vendor
+
+    unit = None
+    raw_id = payload.get("unit_id")
+    if raw_id not in (None, ""):
+        try:
+            unit = db.session.get(Unit, int(raw_id))
+        except (TypeError, ValueError):
+            unit = None
+        if unit is not None and unit.deleted_at:
+            unit = None
+    if unit is None:
+        unit, _place = _visit_target(user, payload)
+    if unit is None:
+        return {"ok": False, "reply": "Which unit, and at which property?"}
+    if (unit.occupancy or "") == "occupied":
+        return {"ok": False, "reply": f"Mark unit {unit.unit_number} vacant before changing make-ready work."}
+    vendor = (payload.get("vendor") or payload.get("contractor") or "").strip()
+    job = (payload.get("job") or payload.get("trade") or "").strip()
+    if not vendor or not job:
+        return {"ok": False, "reply": "I still need the trade and the vendor."}
+    if not (payload.get("check_in") or "").strip() or not (payload.get("check_out") or "").strip():
+        return {"ok": False, "reply": "I still need when they started and when they finished."}
+    assigned = assign_trade_vendor(user, unit, job, vendor, source)
+    if not assigned.get("ok"):
+        return assigned
+    title = assigned.get("title") or job
+    visit = {
+        "contractor": vendor,
+        "unit_number": unit.unit_number,
+        "property_id": unit.property_id,
+        "title": title,
+        "job": title,
+        "check_in": payload.get("check_in") or "",
+    }
+    entered = apply_contractor_in(user, visit, source)
+    if not entered.get("ok"):
+        return entered
+    left = apply_contractor_out(
+        user,
+        {**visit, "check_out": payload.get("check_out") or "", "note": payload.get("note") or ""},
+        source,
+    )
+    if not left.get("ok"):
+        return left
+    done = apply_ready_check(
+        user,
+        {"unit_number": unit.unit_number, "property_id": unit.property_id, "job": title, "done": True},
+        source,
+    )
+    if not done.get("ok"):
+        return done
+    from app.services.ready import spoken_job
+
+    return {"ok": True, "reply": f"Saved. {unit.unit_number} {spoken_job(title)} by {vendor} is marked done."}

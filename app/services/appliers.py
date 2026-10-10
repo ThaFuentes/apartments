@@ -45,6 +45,7 @@ from app.services.appliers_field import (
     apply_parts_used,
     apply_pm_done,
     apply_pm_save,
+    apply_finish_vendor_trade,
     apply_ready_check,
     apply_set_ready_by,
 )
@@ -108,6 +109,12 @@ def _apply_ready_vendor(user, payload: dict, source: str) -> dict:
     return apply_ready_vendor(user, payload, source)
 
 
+def _apply_make_ready(user, payload: dict, source: str) -> dict:
+    from app.services.talk.guide.sections.ready import apply_make_ready
+
+    return apply_make_ready(user, payload, source)
+
+
 APPLIERS = {
     "plan_trip": apply_plan_trip,
     "plan_day": apply_plan_day,
@@ -143,6 +150,8 @@ APPLIERS = {
     "set_default_property": _apply_set_default_property,
     "set_ready_by": apply_set_ready_by,
     "ready_check": apply_ready_check,
+    "finish_vendor_trade": apply_finish_vendor_trade,
+    "make_ready_unit": _apply_make_ready,
     "contractor_in": apply_contractor_in,
     "contractor_out": apply_contractor_out,
     "pm_save": apply_pm_save,

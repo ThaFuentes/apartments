@@ -114,6 +114,23 @@ def match_job(text: str) -> str:
     return found[0] if len(found) == 1 else ""
 
 
+# Stored titles stay short ("Trashout"). This is only what we say back.
+_SPOKEN = {
+    "trashout": "trash out",
+    "punch": "punch list",
+}
+
+
+def spoken_job(text: str) -> str:
+    """How a person says the trade. The row title stays job_label."""
+    slug = match_job(text or "")
+    if slug in _SPOKEN:
+        return _SPOKEN[slug]
+    if slug:
+        return job_label(slug).lower()
+    return (text or "").strip().lower()
+
+
 def open_ready_titles(unit_id: int) -> set[str]:
     rows = (
         UnitTask.query.filter_by(unit_id=unit_id)

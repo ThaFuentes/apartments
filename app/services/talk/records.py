@@ -249,7 +249,10 @@ def answer_record(user, text: str) -> dict | None:
         if not lines:
             return {"ok": True, "reply": "No contractors saved yet. Say “save contractor Ace Plumbing 432-555-0100 trashout.”"}
         return {"ok": True, "reply": "Contractors:\n" + "\n".join(lines)}
-    if re.search(r"\b(make[- ]ready|units? (?:are|is) ready|ready units?)\b", low):
+    if re.search(
+        r"\b(?:show|list|which|what)\b.*\bmake[- ]ready\b|\bmake[- ]ready units\b|\bunits? (?:are|is) ready\b|\bready units?\b",
+        low,
+    ):
         from app.models import Unit, UnitTask
 
         ready_query = Unit.query.filter(Unit.deleted_at.is_(None), Unit.occupancy == "make_ready")

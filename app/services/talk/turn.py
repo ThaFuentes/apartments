@@ -47,6 +47,12 @@ def clear_chat(user) -> dict:
 def handle_message(user, text: str, *, idempotency_key: str, source: str = "ai") -> dict:
     text = (text or "").strip()
     if not text:
+        from app.services.providers import keys_for
+
+        if not keys_for(user):
+            from app.services.talk.guide.menu import offline_menu
+
+            return offline_menu(user)
         return {"ok": False, "reply": "Say where you are headed, or what you just did."}
     from app.services.talk.office import secret_leak
 
@@ -367,6 +373,11 @@ def route(user, text: str, key: str, source: str) -> dict:
     vendor_details = answer_ready_vendor(user, text, key, source)
     if vendor_details:
         return vendor_details
+    from app.services.talk.guide import answer_open_guide
+
+    guided = answer_open_guide(user, text, key, source)
+    if guided:
+        return guided
     bare = answer_bare_reply(user, text)
     if bare:
         return _finish_bare(user, bare, text, key, source)
@@ -604,9 +615,17 @@ def _local_exact(user, text: str, key: str, source: str, note: str, *, split: bo
         role = getattr(user, "role", "") or None
         helping = help_reply(text, role=role, user=user)
         if helping:
+            if helping.get("guide_menu") and not helping.get("help_page_url"):
+                from app.services.talk.guide import start_guide
+
+                started = start_guide(user, "what would you like to do", key, source)
+                if started:
+                    if note:
+                        started = dict(started)
+                        started["reply"] = note + " " + (started.get("reply") or "")
+                    return started
             if note:
                 helping["reply"] = note + " " + (helping.get("reply") or "")
-            helping["help_page_url"] = "/help"
             return helping
     if NEXT_UNIT.search(text):
         return {

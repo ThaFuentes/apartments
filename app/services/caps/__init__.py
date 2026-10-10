@@ -67,41 +67,13 @@ def help_reply(text: str, role: str | None = None, user=None) -> dict | None:
     cap = match(allowed, low)
     if how_to and cap and cap.howto:
         return {"ok": True, "reply": cap.howto}
+    if asking_for_menu or how_to or is_help:
+        from app.services.talk.guide.menu import offline_menu
 
-    # If we have a role, give a scoped reply pointing to the help page
-    if role:
-        topics = role_help_topics(role, user=user)
-        topic_names = "; ".join(label.lower() for label, _caps in topics) if topics else "nothing specific to your role"
-        if is_help:
-            return {
-                "ok": True,
-                "reply": (
-                    f"I've opened the help page for your role. You can see everything you can do "
-                    f"as a {role.replace('_', ' ')}."
-                ),
-                "help_page_url": "/help",
-            }
-        return {
-            "ok": True,
-            "reply": (
-                f"One question at a time — I'll guide you. For your role, I can help with: "
-                + topic_names
-                + ". Say 'help' to see the full help page for your role."
-            ),
-        }
-
-    topics = "; ".join(label.lower() for label, _caps in TOPICS)
-    if is_help:
-        return {
-            "ok": True,
-            "reply": "I've opened the help page. You can see everything you can do there.",
-            "help_page_url": "/help",
-        }
-    return {
-        "ok": True,
-        "reply": (
-            "One question at a time — I'll guide you. I can do: "
-            + topics
-            + ". Say what it is, like 'plan a trip', and I'll ask for what I need."
-        ),
-    }
+        reply = offline_menu(user)
+        if is_help and low != "help":
+            reply["help_page_url"] = "/help"
+            return reply
+        reply["guide_menu"] = True
+        return reply
+    return None

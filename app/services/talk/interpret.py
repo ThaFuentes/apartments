@@ -59,6 +59,16 @@ def interpret(user, text: str, key: str, source: str) -> dict:
         from app.services.pending import commit_apply
 
         return commit_apply(user, "plan_day", planned, source, key)
+    # "the 403 trash out is done" is the guided walk. A plan outcome is
+    # everything else that simply says the work is done.
+    from app.services.talk.guide.catalog import match as match_guide
+
+    if match_guide(text):
+        from app.services.talk.guide import start_guide
+
+        guided = start_guide(user, text, key, source)
+        if guided:
+            return guided
     outcome = parse_outcome_text(text) if not UNIT_JOB.search(text.strip()) else None
     if outcome:
         from app.services.pending import commit_apply
@@ -179,6 +189,11 @@ def interpret(user, text: str, key: str, source: str) -> dict:
     work = _ask_about_work(user, text, key, source)
     if work:
         return work
+    from app.services.talk.guide import start_guide
+
+    guided = start_guide(user, text, key, source)
+    if guided:
+        return guided
     return {
         "ok": True,
         "reply": "Tell me the unit and what it needs, or say if this is a trip or a receipt.",

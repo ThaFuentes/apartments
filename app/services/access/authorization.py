@@ -535,7 +535,7 @@ def _resource_property_ids(user, tool: str, payload: dict) -> tuple[set[int], st
         shift = open_shift(user)
         if shift:
             ids.add(shift.property_id)
-    if tool in {"set_ready_by", "ready_check", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used"}:
+    if tool in {"set_ready_by", "ready_check", "finish_vendor_trade", "make_ready_unit", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used"}:
         return _field_tool_place(user, tool, payload)
     return ids, ""
 

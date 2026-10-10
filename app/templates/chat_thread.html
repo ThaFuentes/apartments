@@ -18,7 +18,7 @@
     {% if card.changes %}
     <ul class="changes" aria-label="Proposed changes">
       {% for row in card.changes %}
-      <li><span class="field">{{ row.field }}</span><span class="value"><s>{{ row.before }}</s><span aria-hidden="true">→</span><strong>{{ row.after }}</strong></span></li>
+      <li class="{{ 'has-fix' if row.step else '' }}"><span class="field">{{ row.field }}</span><span class="value"><s>{{ row.before }}</s><span aria-hidden="true">→</span><strong>{{ row.after }}</strong></span>{% if row.step %}<button type="button" class="ghost fix-line" data-answer="{{ row.field }} needs correction">Needs correction</button>{% endif %}</li>
       {% endfor %}
     </ul>
     {% else %}
@@ -26,6 +26,9 @@
     {% endif %}
     {% if card.status == 'pending' %}
     <p class="card-note">Nothing changes until you save this item.</p>
+    {% if card.changes and card.changes[0].step %}
+    <p class="card-note">Tap Needs correction on a line if something is wrong. Nothing is saved until you press Save.</p>
+    {% endif %}
     <div class="actions">
       <form method="post" action="/pending/{{ card.id }}/confirm" class="approve-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -40,6 +43,19 @@
     </div>
     {% else %}
     <p class="card-note">{{ card.note or 'Waiting on your answer. Say it in the chat.' }}</p>
+    {% if card.choices and card.waiting_for not in ('property_confirm', 'property', 'city', 'unit', 'default_confirm') %}
+    <div class="actions answer-actions">
+      {% set letters = "ABCDEF" %}
+      {% for choice in card.choices[:6] %}
+      <button type="button" class="quiet" data-answer="{{ letters[loop.index0] }}">{{ letters[loop.index0] }}. {{ choice.label }}</button>
+      {% endfor %}
+      <form method="post" action="/pending/{{ card.id }}/discard" class="discard-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button type="submit" class="ghost">Cancel</button>
+      </form>
+    </div>
+    {% endif %}
     {% if card.status == 'needs_answer' and card.waiting_for == 'default_confirm' %}
     <div class="actions answer-actions">
       <button type="button" class="quiet default-yes" data-answer="yes">Yes, make it my default</button>

@@ -367,6 +367,7 @@ def create_app() -> Flask:
                             "note": parts[-1] if len(parts) > 1 else "",
                             "changes": payload.get("_changes") or [],
                             "waiting_for": payload.get("waiting_for") or "",
+                            "choices": payload.get("choices") or [],
                             "payload": payload,
                             "place": place_line,
                         }

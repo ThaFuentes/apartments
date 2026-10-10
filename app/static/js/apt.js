@@ -392,6 +392,15 @@
         after.textContent = row.after == null ? "—" : String(row.after);
         value.append(before, arrow, after);
         item.append(field, value);
+        if (row.step) {
+          item.classList.add("has-fix");
+          const fix = document.createElement("button");
+          fix.type = "button";
+          fix.className = "ghost fix-line";
+          fix.dataset.answer = (row.field || "That line") + " needs correction";
+          fix.textContent = "Needs correction";
+          item.appendChild(fix);
+        }
         list.appendChild(item);
       });
       card.appendChild(list);
@@ -403,9 +412,28 @@
       ? "Nothing changes until you save this item."
       : (waitingFor === "default_confirm" ? "Should this be your default property for now?" : "Waiting on your answer. Answer here or in the chat.");
     card.appendChild(note);
+    if (proposal.status === "pending" && changes.some(function (row) { return row.step; })) {
+      const fixNote = document.createElement("p");
+      fixNote.className = "card-note";
+      fixNote.textContent = "Tap Needs correction on a line if something is wrong. Nothing is saved until you press Save.";
+      card.appendChild(fixNote);
+    }
 
     const actions = document.createElement("div");
     actions.className = "actions";
+    const choiceRows = proposal.choices || payload.choices || [];
+    const guideChoices = proposal.status === "needs_answer" && choiceRows.length && !["property_confirm", "property", "city", "unit", "default_confirm"].includes(waitingFor);
+    if (guideChoices) {
+      actions.classList.add("answer-actions");
+      "ABCDEF".split("").slice(0, Math.min(choiceRows.length, 6)).forEach(function (letter, index) {
+        const choice = document.createElement("button");
+        choice.type = "button";
+        choice.className = "quiet";
+        choice.dataset.answer = letter;
+        choice.textContent = letter + ". " + (choiceRows[index].label || "");
+        actions.appendChild(choice);
+      });
+    }
     if (proposal.status === "pending") {
       const save = document.createElement("form");
       save.method = "post";
@@ -431,7 +459,7 @@
       no.textContent = waitingFor === "default_confirm" ? "No, not for now" : "No, choose another";
       actions.append(yes, no);
     }
-    if (proposal.status === "pending" || ["property_confirm", "default_confirm", "property", "city", "unit"].includes(waitingFor)) {
+    if (proposal.status === "pending" || guideChoices || ["property_confirm", "default_confirm", "property", "city", "unit"].includes(waitingFor)) {
       const discard = document.createElement("form");
       discard.method = "post";
       discard.action = "/pending/" + encodeURIComponent(proposal.id) + "/discard";
@@ -441,7 +469,7 @@
       const discardButton = document.createElement("button");
       discardButton.type = "submit";
       discardButton.className = "ghost";
-      discardButton.textContent = proposal.status === "pending" ? "Don't save" : "Cancel this item";
+      discardButton.textContent = proposal.status === "pending" ? "Don't save" : (guideChoices ? "Cancel" : "Cancel this item");
       discard.appendChild(discardButton);
       actions.appendChild(discard);
     }
