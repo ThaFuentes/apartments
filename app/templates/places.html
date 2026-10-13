@@ -37,6 +37,9 @@
         No units logged yet
         {% endif %}
       </span>
+      {% if place.address or place.lat %}
+      <a class="directions" href="{{ place.address|maps_url(place.lat, place.lng) }}" target="_blank" rel="noopener noreferrer">Directions</a>
+      {% endif %}
       {% if current_user.role != 'viewer' %}
       <form method="post" action="/properties/{{ place.id }}/pin">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

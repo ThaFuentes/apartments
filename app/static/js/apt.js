@@ -773,4 +773,14 @@
     providerSelect.addEventListener("change", fillModels);
     fillModels();
   }
+
+  const hashed = document.getElementById((location.hash || "").slice(1));
+  const hashedDetails = hashed && (hashed.tagName === "DETAILS" ? hashed : hashed.closest("details"));
+  if (hashedDetails) hashedDetails.open = true;
+
+  document.querySelectorAll(".photo-shot input[type='file']").forEach(function (input) {
+    input.addEventListener("change", function () {
+      if (input.files && input.files.length && input.form && input.form.requestSubmit) input.form.requestSubmit();
+    });
+  });
 })();

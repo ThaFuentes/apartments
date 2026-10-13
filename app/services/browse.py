@@ -299,6 +299,9 @@ def place_groups(city_id: int | None = None, user=None) -> list[dict]:
                 "last_title": title,
                 "pinned": bool(access and access.pinned),
                 "sort_order": access.sort_order if access else 0,
+                "address": prop.address or "",
+                "lat": prop.lat,
+                "lng": prop.lng,
             }
         )
     pinned = []

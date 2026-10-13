@@ -6,7 +6,17 @@
   <p><a href="/places{% if prop.city_id %}/{{ prop.city_id }}{% endif %}">{{ city_name }}{% if state_name %}, {{ state_name }}{% endif %}</a></p>
   <h1>{{ place_name }}</h1>
   <p class="lead">{{ unit_total }} unit{% if unit_total != 1 %}s{% endif %} here.</p>
-  <p><a href="/map?property={{ prop.id }}">Property map</a></p>
+  <p class="place-actions">
+    <a href="/map?property={{ prop.id }}">Property map</a>
+    {% if prop.address or prop.lat %}<a class="directions" href="{{ prop.address|maps_url(prop.lat, prop.lng) }}" target="_blank" rel="noopener noreferrer">Directions</a>{% endif %}
+  </p>
+  <form method="get" action="/properties/{{ prop.id }}" class="unit-jump">
+    <label>Go to unit
+      <input name="q" inputmode="numeric" enterkeyhint="go" placeholder="210" autocomplete="off" required>
+    </label>
+    <input type="hidden" name="go" value="1">
+    <button type="submit">Open</button>
+  </form>
   <p class="hint">Green units need make-ready work · Blue units are occupied · Search records across equipment, jobs, vendors, and notes.</p>
   {% if editable %}
   <p class="rare-actions">
@@ -35,7 +45,25 @@
     {% if building %}<input type="hidden" name="building" value="{{ building }}">{% endif %}
     <button type="submit" class="quiet">Search records</button>
   </form>
-  <div class="unit-tools" aria-label="Filter units">
+  <div class="unit-tools phone-only" aria-label="Filter units">
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='make_ready', building=building or '', q=query or '') }}" {% if show == "make_ready" %}aria-current="page"{% endif %}>Make ready</a>
+    <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='occupied', building=building or '', q=query or '') }}" {% if show == "occupied" %}aria-current="page"{% endif %}>Occupied</a>
+  </div>
+  <details class="more-filters phone-only">
+    <summary>More filters</summary>
+    <div class="unit-tools">
+      <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort='recent', show='', building=building or '', q=query or '') }}" {% if sort == "recent" and not show %}aria-current="page"{% endif %}>Most recent</a>
+      <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort='number', show=show or '', building=building or '', q=query or '') }}" {% if sort == "number" and not show %}aria-current="page"{% endif %}>Unit number</a>
+      <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='worked', building=building or '', q=query or '') }}" {% if show == "worked" %}aria-current="page"{% endif %}>Had work</a>
+      <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='rentable', building=building or '', q=query or '') }}" {% if show == "rentable" %}aria-current="page"{% endif %}>Ready to rent</a>
+      <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='needs', building=building or '', q=query or '') }}" {% if show == "needs" %}aria-current="page"{% endif %}>Needs work</a>
+      <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show=show or '', building='', q=query or '') }}" {% if not building %}aria-current="page"{% endif %}>All buildings</a>
+      {% for name in building_names %}
+      <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show=show or '', building=name, q=query or '') }}" {% if building == name %}aria-current="page"{% endif %}>Building {{ name }}</a>
+      {% endfor %}
+    </div>
+  </details>
+  <div class="unit-tools desk-only" aria-label="Filter units">
     <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort='recent', show='', building=building or '', q=query or '') }}" {% if sort == "recent" and not show %}aria-current="page"{% endif %}>Most recent</a>
     <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort='number', show=show or '', building=building or '', q=query or '') }}" {% if sort == "number" and not show %}aria-current="page"{% endif %}>Unit number</a>
     <a href="{{ url_for('desk.property_detail', property_id=prop.id, sort=sort, show='worked', building=building or '', q=query or '') }}" {% if show == "worked" %}aria-current="page"{% endif %}>Had work</a>

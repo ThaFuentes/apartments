@@ -343,11 +343,22 @@ def unit_ready_check(unit_id):
     if not result.get("ok") and unit.occupancy == "occupied":
         abort(409, description=result.get("reply") or "Mark the unit vacant before changing make-ready work.")
     if result.get("ok"):
-        db.session.commit()
+        from app.routes.common import _key
+        from app.services.once import finish_once
+
+        result = finish_once(current_user, _key(), "ready_check", result)
     else:
         db.session.rollback()
     flash(result.get("reply") or "Saved.", "ok" if result.get("ok") else "warn")
-    return redirect(_field_next(f"/units/{unit.id}", "/ready"))
+    target = _field_next(f"/units/{unit.id}", "/ready")
+    job = (request.form.get("job") or "").strip()
+    if result.get("ok") and done:
+        from app.services.ready import READY_JOBS
+
+        if job in {slug for slug, _label in READY_JOBS}:
+            joiner = "&" if "?" in target else "?"
+            target = f"{target}{joiner}undo={unit.id}&job={job}"
+    return redirect(target)
 
 
 @bp.post("/units/<int:unit_id>/call")

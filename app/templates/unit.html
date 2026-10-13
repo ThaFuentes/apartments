@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Unit {{ unit.unit_number }}{% endblock %}
+{% block body_class %}unit-page{% endblock %}
 {% block main %}
 <section class="sheet">
+  {% include "_undo.html" %}
   <p><a href="/properties/{{ unit.property_id }}">{{ unit.property.name }}</a></p>
   <div class="hero">
     <h1>Unit {{ unit.unit_number }}</h1>
@@ -16,6 +18,14 @@
     </p>
   </div>
   {% if editable %}
+  <form method="post" action="/units/{{ unit.id }}/photo" enctype="multipart/form-data" class="photo-shot" id="unit-photo">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="/units/{{ unit.id }}">
+    <label>Photo of this unit
+      <input id="unit-photo-file" type="file" name="photo" accept="image/*" capture="environment">
+    </label>
+    <button type="submit">Save photo</button>
+  </form>
   <details class="unit-profile-edit"><summary>Edit unit profile</summary>
     <form method="post" action="/units/{{ unit.id }}" class="card unit-profile-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -59,7 +69,7 @@
     <button type="submit" name="rentable" value="0" class="quiet">Clear rentable status</button>
   </form>
   {% endif %}
-  <h2>Make ready</h2>
+  <h2 id="make-ready">Make ready</h2>
 
   {% if editable %}
   <p class="hint">Tap a trade to put it on this unit. Then call one person for that trade only.</p>
@@ -73,7 +83,7 @@
     {% endfor %}
   </div>
   {% if contractors %}
-  <details class="change-extra call-fold" open>
+  <details class="change-extra call-fold" id="call-contractor">
     <summary>Call one contractor</summary>
     <p class="hint">Pick one trade. Everything else stays with maintenance or the person who already has it.</p>
     <form method="post" action="/units/{{ unit.id }}/call" class="card stack call-card">
@@ -201,7 +211,7 @@
   {% endfor %}
 
   {% if editable %}
-  <details>
+  <details id="unit-note">
     <summary>Add something this unit needs</summary>
     <form method="post" action="/units/{{ unit.id }}/tasks" class="card stack">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -248,7 +258,7 @@
       </p>
       {% if item.notes %}<p class="gear-note">{{ item.notes }}</p>{% else %}<p class="hint">No note on this one.</p>{% endif %}
       {% if item.vendor %}<p>Vendor: {{ item.vendor }}</p>{% endif %}
-      {% if item.phone %}<p>Service phone: {{ item.phone }}</p>{% endif %}
+      {% if item.phone and item.phone|tel_href %}<p><a class="call-now" href="{{ item.phone|tel_href }}">Call service · {{ item.phone }}</a></p>{% elif item.phone %}<p>Service phone: {{ item.phone }}</p>{% endif %}
       {% if item.purchase_date %}<p>Purchased {{ item.purchase_date|apt_when }}{% if item.purchase_price is not none %} · ${{ '%.2f'|format(item.purchase_price) }}{% endif %}</p>{% endif %}
       {% if item.warranty_expires %}<p>Warranty through {{ item.warranty_expires|apt_when }}</p>{% endif %}
       {% if item.install_date or item.filter_size or item.tonnage or item.seer or item.refrigerant %}
@@ -381,6 +391,18 @@
   </details>
   {% endif %}
 
+  {% if editable %}
+  <nav class="thumb-bar" aria-label="This unit">
+    <label class="thumb-hit" for="unit-photo-file">Photo</label>
+    {% if contractors %}
+    <a class="thumb-hit" href="#call-contractor">Call</a>
+    {% else %}
+    <a class="thumb-hit" href="/contractors">Call</a>
+    {% endif %}
+    <a class="thumb-hit" href="#make-ready">Trades</a>
+    <a class="thumb-hit" href="#unit-note">Note</a>
+  </nav>
+  {% endif %}
   {% if standalone_photos %}
   <h2>Work photos</h2>
   {% for photo in standalone_photos %}<p><img src="/media/{{ photo.id }}" alt="{{ photo.caption or 'Photo of this work' }}"></p>{% endfor %}

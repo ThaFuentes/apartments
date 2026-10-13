@@ -116,14 +116,84 @@ def upload():
     return redirect("/")
 
 
-def _photo_proposal(user, media, merged, quota: str) -> dict:
+@bp.post("/units/<int:unit_id>/photo")
+@login_required
+def unit_photo(unit_id):
+    """Save a camera photo on this unit. A nameplate still waits for a confirm card."""
+    from app.routes.property_units import _editable_unit, _record_next
+    from app.services.equipment import merge_equipment, parse_equipment, read_photo
+    from app.services.records import dumps
+    from app.services.site_map import MAX_BYTES, sniff_photo
+
+    from app.routes.common import _key
+    from app.services.once import finish_once
+    from app.services.pending import _prior
+
+    unit = _editable_unit(unit_id)
+    back = _record_next(unit)
+    key = _key()
+    if key:
+        prior = _prior(current_user.id, key)
+        if prior:
+            flash(prior.get("reply") or "Photo already saved.", "ok")
+            return redirect(back)
+    blob = request.files.get("photo")
+    raw = blob.read() if blob else b""
+    if not raw:
+        flash("Choose a photo.", "warn")
+        return redirect(back)
+    if len(raw) > MAX_BYTES:
+        flash("That file is too large. Keep it under 12 MB.", "warn")
+        return redirect(back)
+    found = sniff_photo(raw)
+    if not found:
+        flash("Send a JPEG, PNG, WEBP, or GIF.", "warn")
+        return redirect(back)
+    media = Media(
+        user_id=current_user.id,
+        kind="photo",
+        storage_name=save_blob(raw),
+        mime=found[0],
+        caption=f"Unit {unit.unit_number}"[:300],
+        property_id=unit.property_id,
+        unit_id=unit.id,
+        created_at=utcnow(),
+    )
+    db.session.add(media)
+    saved = finish_once(
+        current_user,
+        key,
+        "unit_photo",
+        {"ok": True, "reply": f"Photo saved on unit {unit.unit_number}."},
+    )
+    if saved.get("duplicate"):
+        flash(saved.get("reply") or "Photo already saved.", "ok")
+        return redirect(back)
+    seen = read_photo(current_user, raw, media.mime)
+    merged = merge_equipment(parse_equipment(""), seen)
+    media.parse_json = dumps(merged)
+    media.confidence = merged.get("confidence")
+    if merged.get("serial") or merged.get("model"):
+        media.kind = "nameplate"
+    db.session.commit()
+    quota = seen.get("reply") if seen.get("quota") else ""
+    if merged.get("serial") or merged.get("model") or merged.get("kind"):
+        result = _photo_proposal(current_user, media, merged, quota, unit)
+        flash(result.get("reply") or f"Photo saved on unit {unit.unit_number}.", "ok")
+    else:
+        extra = quota or "Open chat if you want this filed as equipment."
+        flash(f"Photo saved on unit {unit.unit_number}. {extra}", "ok")
+    return redirect(back)
+
+
+def _photo_proposal(user, media, merged, quota: str, unit=None) -> dict:
     from app.services.equipment import describe, plate_ready
     from app.services.pending import propose
     from app.services.records import open_shift
 
     label = describe(merged)
     shift = open_shift(user)
-    number = ""
+    number = unit.unit_number if unit is not None else ""
     if not label and not merged.get("kind"):
         extra = "Add a Gemini key in Settings and I'll read the nameplate, or type the brand, model, and serial."
         if quota:
@@ -138,8 +208,10 @@ def _photo_proposal(user, media, merged, quota: str) -> dict:
             summary = merged["conflict"]
         else:
             summary = f"{summary} I still need {missing} before this is filed."
-    summary += " Which unit number?" if not number else ""
-    if not number:
+    if number:
+        summary += f" This stays on unit {number}."
+    else:
+        summary += " Which unit number?"
         needs = True
     payload = {
         "unit_number": number,
@@ -150,6 +222,9 @@ def _photo_proposal(user, media, merged, quota: str) -> dict:
         "media_id": media.id,
         "needs_answer": needs,
     }
+    if unit is not None:
+        payload["property_id"] = unit.property_id
+        payload["unit_id"] = unit.id
     if shift and shift.confirmed and not needs:
         pass
     return propose(

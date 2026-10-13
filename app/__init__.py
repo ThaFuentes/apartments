@@ -111,6 +111,30 @@ def create_app() -> Flask:
         local = _local_moment(value)
         return local.strftime("%b %d, %Y · %I:%M %p").replace(" 0", " ").replace("· 0", "· ")
 
+    @app.template_filter("tel_href")
+    def tel_href(phone):
+        import re
+
+        raw = (phone or "").strip()
+        if not raw:
+            return ""
+        if raw.startswith("+"):
+            rest = re.sub(r"\D", "", raw)
+            return f"tel:+{rest}" if len(rest) >= 7 else ""
+        rest = re.sub(r"\D", "", raw)
+        return f"tel:{rest}" if len(rest) >= 7 else ""
+
+    @app.template_filter("maps_url")
+    def maps_url(address, lat=None, lng=None):
+        from urllib.parse import quote
+
+        if lat is not None and lng is not None:
+            return f"https://www.google.com/maps/dir/?api=1&destination={lat},{lng}"
+        text = (address or "").strip()
+        if not text:
+            return ""
+        return "https://www.google.com/maps/dir/?api=1&destination=" + quote(text)
+
     from app.guest_access import APT_CSP, open_guest_paths, strip_body_csrf_meta
 
     @app.after_request

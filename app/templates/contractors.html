@@ -38,7 +38,7 @@
   {% for person in contractors %}
   <article class="card stack">
     <h3>{{ person.name }}</h3>
-    <p class="hint">{% if person.company %}{{ person.company }} · {% endif %}{% if person.phone %}{{ person.phone }}{% else %}No phone yet{% endif %}{% if person.trade %} · {{ person.trade }}{% endif %}</p>
+    <p class="hint">{% if person.company %}{{ person.company }} · {% endif %}{% if person.phone and person.phone|tel_href %}<a class="call-now" href="{{ person.phone|tel_href }}">Call {{ person.phone }}</a>{% elif person.phone %}{{ person.phone }}{% else %}No phone yet{% endif %}{% if person.trade %} · {{ person.trade }}{% endif %}</p>
     {% if person.notes %}<p>{{ person.notes }}</p>{% endif %}
     <form method="post" action="/contractors/{{ person.id }}/call" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

@@ -3,6 +3,7 @@
 {% block body_class %}ready-desk{% endblock %}
 {% block main %}
 <section class="sheet">
+  {% include "_undo.html" %}
   <div class="hero">
     <p class="kicker">Turn</p>
     <h1>Make ready</h1>
@@ -43,7 +44,7 @@
   </div>
   {% endif %}
   <div class="stack ready-list">
-    {% for card in cards %}
+    {% for card in cards|sort(attribute='days_overdue', reverse=True) %}
     <article class="unit-card{% if card.rentable %} rentable{% elif card.unit.occupancy == 'make_ready' %} make-ready{% endif %}">
       <a href="/units/{{ card.unit.id }}"><strong>Unit {{ card.unit.unit_number }}</strong></a>
       <span class="unit-meta">
@@ -78,6 +79,9 @@
               <span class="trade-who">{% if item.done %}Done{% elif item.return_note %}Sent back{% elif item.vendor %}{{ item.vendor }}{% elif item.open %}Maintenance{% else %}Tap to add{% endif %}</span>
             </button>
           </form>
+          {% for person in contractors if item.vendor and person.name|lower == item.vendor|lower and person.phone|tel_href %}
+          <a class="call-now" href="{{ person.phone|tel_href }}">Call {{ person.name }}</a>
+          {% endfor %}
         </li>
         {% endfor %}
       </ul>
@@ -99,8 +103,16 @@
         {% endwith %}
       </details>
       {% endif %}
+      <form method="post" action="/units/{{ card.unit.id }}/photo" enctype="multipart/form-data" class="photo-shot">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/ready">
+        <label>Photo of this unit
+          <input type="file" name="photo" accept="image/*" capture="environment">
+        </label>
+        <button type="submit">Save photo</button>
+      </form>
       {% if contractors %}
-      <details class="change-extra call-fold" open>
+      <details class="change-extra call-fold">
         <summary>Call one contractor</summary>
         <p class="hint">Pick one trade. Everything else stays with maintenance or the person who already has it.</p>
         <form method="post" action="/units/{{ card.unit.id }}/call" class="stack call-card">

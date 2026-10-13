@@ -110,6 +110,9 @@
     </aside>
     {% endif %}
   </header>
+  {% if current_user.is_authenticated and current_user.role != 'viewer' %}
+  <div id="apt-outbox" class="outbox" hidden></div>
+  {% endif %}
   <main>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -147,6 +150,9 @@
   </nav>
   {% endif %}
   <script src="{{ url_for('static', filename='js/apt.js') }}?v={{ asset_v }}"></script>
+  {% if current_user.is_authenticated and current_user.role != 'viewer' %}
+  <script src="{{ url_for('static', filename='js/outbox.js') }}?v={{ asset_v }}"></script>
+  {% endif %}
   <script src="{{ url_for('static', filename='js/overlays.js') }}?v={{ asset_v }}"></script>
 </body>
 </html>

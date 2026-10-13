@@ -636,6 +636,90 @@ class ReadyContractorTests(AptTestBase):
         paint = UnitTask.query.filter_by(unit_id=unit.id, title="Paint").one()
         self.assertEqual(paint.status, "done")
 
+    def test_ready_check_same_key_does_not_file_twice(self):
+        from app.models import IdempotencyKey
+        from app.services.ready import add_ready_job
+
+        owner = self.owner()
+        _prop, unit = self._unit(owner, "210")
+        add_ready_job(owner, unit, "paint", "human")
+        db.session.commit()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        key = "tap-paint-once"
+        first = client.post(
+            f"/units/{unit.id}/ready-check",
+            data={"csrf_token": token, "job": "paint", "done": "1", "idempotency_key": key, "next": "/ready"},
+            follow_redirects=False,
+        )
+        self.assertEqual(first.status_code, 302)
+        self.assertIn("undo=", first.headers["Location"])
+        paint = UnitTask.query.filter_by(unit_id=unit.id, title="Paint").one()
+        self.assertEqual(paint.status, "done")
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        second = client.post(
+            f"/units/{unit.id}/ready-check",
+            data={"csrf_token": token, "job": "paint", "done": "0", "idempotency_key": key, "next": "/ready"},
+            follow_redirects=False,
+        )
+        self.assertEqual(second.status_code, 302)
+        self.assertNotIn("undo=", second.headers["Location"])
+        db.session.expire_all()
+        paint = UnitTask.query.filter_by(unit_id=unit.id, title="Paint").one()
+        self.assertEqual(paint.status, "done")
+        self.assertEqual(IdempotencyKey.query.filter_by(user_id=owner.id, key_text=key).count(), 1)
+
+    def test_unit_photo_same_key_does_not_save_twice(self):
+        from io import BytesIO
+
+        from PIL import Image
+
+        from app.models import Media
+
+        owner = self.owner()
+        _prop, unit = self._unit(owner, "216")
+        buffer = BytesIO()
+        Image.new("RGB", (2, 2), (20, 60, 90)).save(buffer, format="PNG")
+        photo = buffer.getvalue()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "alex", "password": "field-pass"})
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        key = "shot-216-once"
+        payload = {
+            "csrf_token": token,
+            "idempotency_key": key,
+            "photo": (BytesIO(photo), "unit.png", "image/png"),
+        }
+        first = client.post(
+            f"/units/{unit.id}/photo",
+            data=payload,
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(Media.query.filter_by(unit_id=unit.id, kind="photo").count(), 1)
+        with client.session_transaction() as sess:
+            token = sess.get("csrf_token")
+        again = client.post(
+            f"/units/{unit.id}/photo",
+            data={
+                "csrf_token": token,
+                "idempotency_key": key,
+                "photo": (BytesIO(photo), "unit.png", "image/png"),
+            },
+            content_type="multipart/form-data",
+            follow_redirects=False,
+        )
+        self.assertEqual(again.status_code, 302)
+        db.session.expire_all()
+        self.assertEqual(Media.query.filter_by(unit_id=unit.id).count(), 1)
+
     def test_chat_saves_contractor_and_calls_them(self):
         from app.services.board import add_units
 

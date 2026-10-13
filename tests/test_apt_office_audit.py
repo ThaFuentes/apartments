@@ -49,6 +49,26 @@ class AptTest09(AptTestBase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"What you can do as a Viewer", page.data)
         self.assertNotIn(b"log work at a unit", page.data)
+        self.assertNotIn(b"Go to unit", page.data)
+        self.assertIn(b"What you open", page.data)
+
+    def test_help_walks_the_phone_for_someone_who_works(self):
+        from app.services.people import create_user
+
+        owner = self.owner()
+        create_user(
+            username="deskhelp", password="field-pass-9", display_name="Dana Desk", role="office", created_by=owner
+        )
+        db.session.commit()
+        client = APP.test_client()
+        client.environ_base["HTTP_USER_AGENT"] = "Mozilla/5.0 AptTest"
+        client.post("/login", data={"username": "deskhelp", "password": "field-pass-9"})
+        page = client.get("/help")
+        self.assertEqual(page.status_code, 200)
+        text = page.get_data(as_text=True)
+        self.assertIn("What you can do as a Office", text)
+        for line in ("A normal day", "Yes, I'm at", "Start a turn", "Go to unit", "tap Undo", "File expense", "I did this", "Directions", "Say it in chat instead"):
+            self.assertIn(line, text)
 
     def test_the_read_only_login_is_refused_the_chat_window(self):
         from app.services.access import authorize_tool

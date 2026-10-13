@@ -33,7 +33,31 @@
     </div>
   </div>
 
-  <p class="phone-only field-go-wrap"><a class="field-go" href="/ready">Open make ready</a></p>
+  <div class="phone-today phone-only">
+    <a class="field-go" href="/ready">Open make ready</a>
+    {% if board.plan %}
+    <h2>Today</h2>
+    <div class="stack">
+      {% for item in board.plan %}
+      <a class="unit-card" href="{% if item.trip_id %}/trips/{{ item.trip_id }}{% else %}/plan{% endif %}">
+        <strong>{% if item.unit %}Unit {{ item.unit }} · {% endif %}{{ item.title }}</strong>
+        <span class="unit-meta">{{ item.property }}{% if item.left %} · {{ item.left }}{% endif %} · {{ item.status }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if board.ready_units %}
+    <h2>Make ready{% if board.home_name %} at {{ board.home_name }}{% endif %}</h2>
+    <div class="stack">
+      {% for unit in board.ready_units %}
+      <a class="unit-card make-ready" href="/units/{{ unit.id }}">
+        <strong>Unit {{ unit.number }}</strong>
+        <span class="unit-meta">{% if unit.building %}Building {{ unit.building }} · {% endif %}Make ready</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
 
   <div class="stats">
     {% if not board.site_bound and not board.focused %}
@@ -127,11 +151,12 @@
   </div>
 
   {% if not board.site_bound and not board.focused %}
-  <h2 class="phone-only">Where you’ve been</h2>
+  <div class="where-been phone-only">
+  <h2>Where you’ve been</h2>
   {% if not board.places %}
-  <p class="empty phone-only">No properties yet.</p>
+  <p class="empty">No properties yet.</p>
   {% else %}
-  <div class="stack phone-only">
+  <div class="stack">
     {% for place in board.places %}
     <a class="unit-card" href="/properties/{{ place.id }}">
       <strong>{{ place.name }}</strong>
@@ -144,8 +169,9 @@
     </a>
     {% endfor %}
   </div>
-  <p class="phone-only"><a href="/places">All properties</a></p>
+  <p><a href="/places">All properties</a></p>
   {% endif %}
+  </div>
   {% endif %}
 
   <section class="dashboard-recent">
@@ -207,5 +233,35 @@
     </form>
     </details>
   </section>
+
+  <details class="phone-only desk-rest">
+    <summary>Counts and latest work</summary>
+    <div class="stats">
+      {% if not board.site_bound and not board.focused %}
+      <a class="stat" href="/places"><strong>{{ board.place_count }}</strong><span>Properties</span></a>
+      {% endif %}
+      <a class="stat" href="/ready"><strong>{{ board.ready_count }}</strong><span>Make ready</span></a>
+      <a class="stat" href="/pm"><strong>{{ pm_n }}</strong><span>Upkeep</span></a>
+      <a class="stat" href="{% if board.home_id %}/properties/{{ board.home_id }}?show=occupied{% else %}/places{% endif %}"><strong>{{ board.occupied_count }}</strong><span>Occupied</span></a>
+      <a class="stat" href="/plan"><strong>{{ board.open_count }}</strong><span>Still open</span></a>
+      {% if not board.site_bound %}
+      <a class="stat" href="/miles"><strong>{{ board.miles }}</strong><span>Miles</span></a>
+      {% endif %}
+    </div>
+    {% if board.jobs %}
+    <div class="stack">
+      {% for job in board.jobs %}
+      <a class="unit-card" href="{% if job.unit_id %}/units/{{ job.unit_id }}{% else %}/properties/{{ job.property_id }}{% endif %}">
+        <strong>{{ job.title }}</strong>
+        <span class="unit-meta">
+          {{ job.created_at|apt_when }}
+          {% if job.unit %} · unit {{ job.unit.unit_number }}{% endif %}
+          {% if job.property %} · {{ job.property.name }}{% endif %}
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </details>
 </section>
 {% endblock %}

@@ -6,16 +6,23 @@
     <h1>More</h1>
     <p class="lead">The rest of the app. Make ready, properties, and home stay on the bottom bar.</p>
   </div>
+  <h2>Today</h2>
   <div class="menu">
     <a href="/trips">Today's plan <span>→</span></a>
-    <a href="/help">Help <span>→</span></a>
+    <a href="/miles">Miles <span>→</span></a>
+    <a href="/expenses">Gas and receipts <span>→</span></a>
+  </div>
+  <h2>This property</h2>
+  <div class="menu">
     <a href="/contractors">Contractors <span>→</span></a>
     <a href="/map">Property map <span>→</span></a>
     <a href="/ready"><span>Make ready <span class="count-pill">{{ ready_n }}</span></span><span>→</span></a>
     <a href="/pm"><span>Upkeep <span class="count-pill">{{ pm_n }}</span></span><span>→</span></a>
     <a href="/inventory">Equipment inventory <span>→</span></a>
-    <a href="/miles">Miles <span>→</span></a>
-    <a href="/expenses">Gas and receipts <span>→</span></a>
+  </div>
+  <h2>Office</h2>
+  <div class="menu">
+    <a href="/help">Help <span>→</span></a>
     <a href="/reports">Reports <span>→</span></a>
     <a href="/audit">Audit log <span>→</span></a>
     {% if can_manage_people %}

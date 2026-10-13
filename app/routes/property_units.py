@@ -57,6 +57,12 @@ def property_detail(property_id):
 
     city_name, state = city_parts(prop.city.name, prop.city.region) if prop.city else ("", "")
     query = (request.args.get("q") or "").strip()
+    if (request.args.get("go") or "") == "1" and query:
+        from app.services.records import match_unit
+
+        exact, _near = match_unit(prop.id, query)
+        if exact:
+            return redirect(f"/units/{exact.id}")
     packed = unit_cards(prop.id, sort=sort, query=query, show=show, building=building)
     deleted_units = Unit.query.filter_by(property_id=prop.id).filter(Unit.deleted_at.isnot(None)).order_by(Unit.unit_number.asc()).all() if can_edit_property(current_user, prop.id) else []
     return render_template(

@@ -1,0 +1,12 @@
+{% set undo_id = request.args.get('undo', '') %}
+{% set undo_job = request.args.get('job', '') %}
+{% if undo_id.isdigit() and undo_job %}
+<form class="undo-bar" method="post" action="/units/{{ undo_id }}/ready-check">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="job" value="{{ undo_job }}">
+  <input type="hidden" name="done" value="0">
+  <input type="hidden" name="next" value="{{ request.path }}">
+  <p>Marked done.</p>
+  <button type="submit">Undo</button>
+</form>
+{% endif %}

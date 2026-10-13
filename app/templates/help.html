@@ -1,70 +1,236 @@
 {% extends "base.html" %}
 {% block title %}Help — {{ role_display }}{% endblock %}
 {% block main %}
-<section class="sheet">
+<section class="sheet help-page">
   <div class="hero">
     <h1>Help</h1>
     <p class="lead">What you can do as a {{ role_display }}, and how to do it.</p>
-  </div>
-
-  <div class="card stack">
-    <h2>Welcome, {{ role_display }}</h2>
     <p>{{ intro }}</p>
   </div>
 
-  <div class="card stack">
-    <h2>What you can do</h2>
-    <p>{{ summary }}</p>
-  </div>
+  {% if role == 'viewer' %}
+  <article class="card stack" id="signin">
+    <h2>Sign in</h2>
+    <ol class="help-steps">
+      <li><strong>1. Username and password</strong> Use the ones you were given. The password is at least 8 characters.</li>
+      <li><strong>2. Forgot password</strong> That link is under the sign-in button. The reset link goes to the password-reset email. That address can be different from the login email.</li>
+      <li><strong>3. A second code</strong> If the screen asks, use the authenticator app, or the code sent to the 2FA inbox.</li>
+    </ol>
+  </article>
+  <article class="card stack">
+    <h2>What you open</h2>
+    <p>The bottom bar is Map, Reports, and Help. You can read what was saved. You cannot change units, people, money, or work.</p>
+    <ol class="help-steps">
+      <li><strong>1. Reports</strong> Open Reports. The list is what was saved for your login. Tap a title to read it. CSV is on the same row. You do not get the buttons that save a new report.</li>
+      <li><strong>2. Map</strong> Open Map and pick the property if it asks. That is the picture or PDF the office uploaded. It is not driving directions.</li>
+      <li><strong>3. Help</strong> This page. If a number looks wrong, ask the person who can edit that property.</li>
+    </ol>
+  </article>
+  {% else %}
+
+  <nav class="menu help-jump" aria-label="Help sections">
+    <a href="#day-path">A normal day <span>→</span></a>
+    <a href="#signin">Sign in <span>→</span></a>
+    <a href="#place">The property <span>→</span></a>
+    <a href="#ready">Make a unit ready <span>→</span></a>
+    <a href="#unit">Open one unit <span>→</span></a>
+    <a href="#call">Call and check in <span>→</span></a>
+    <a href="#photo">Take a photo <span>→</span></a>
+    <a href="#upkeep">Upkeep <span>→</span></a>
+    <a href="#drive">Get there <span>→</span></a>
+    <a href="#day">Plan, miles, receipts <span>→</span></a>
+    <a href="#offline">No signal <span>→</span></a>
+    <a href="#chat">Chat <span>→</span></a>
+    <a href="#office">Office <span>→</span></a>
+  </nav>
+
+  <article class="card stack" id="day-path">
+    <h2>A normal day</h2>
+    <p>Follow this. The sections under it are the same jobs, with every tap.</p>
+    <ol class="help-steps">
+      <li><strong>1. Sign in</strong> Username and password. If a code is asked, enter it.</li>
+      <li><strong>2. Check the property at the top</strong> If it asks, tap Yes, I'm at that property. If the name is wrong, change it before you log anything.</li>
+      <li><strong>3. Home</strong> Today's stops are first, then the make-ready units. Tap a unit, or tap Open make ready.</li>
+      <li><strong>4. At the unit</strong> Tap the trade when that work is done. Take a photo if you need one. Call if a contractor has that trade.</li>
+      <li><strong>5. When you stop</strong> More, then Today. Gas and receipts for the pump. Miles for the odometer.</li>
+      <li><strong>6. A planned stop</strong> Today's plan, open the line, then I did this.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="signin">
+    <h2>Sign in</h2>
+    <ol class="help-steps">
+      <li><strong>1. The first screen</strong> Username and password. At least 8 characters. Sign out is at the top after you are in.</li>
+      <li><strong>2. The very first owner</strong> The screen says Set up your owner account. Your name, a username, and a password. Email can be left blank. Later people are added from People.</li>
+      <li><strong>3. Forgot password</strong> Under the sign-in button. The link goes to the password-reset email, which can be different from the login email and from the 2FA inbox.</li>
+      <li><strong>4. A second code</strong> Use the authenticator app, or the code emailed to the 2FA inbox. Two-factor setup stays on its own page. Chat cannot turn it off.</li>
+      <li><strong>5. The bottom bar</strong> Make ready, Properties, Home, and More. Chat stays closed until you tap Chat.</li>
+      <li><strong>6. Install</strong> Home can offer Install. After that, the phone opens Apartments like an app. The icon can also jump to Make ready or Today's plan.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="place">
+    <h2>The property</h2>
+    <ol class="help-steps">
+      <li><strong>1. The name at the top</strong> That is the property the boards follow. Make ready, upkeep, and inventory all use it. Change it before you log work at a different place.</li>
+      <li><strong>2. Yes, I'm at</strong> When you arrive, tap Yes, I'm at and the property name. That tells the record you are there.</li>
+      <li><strong>3. A new property</strong> On Home, open Add a site. Type the property name, the city, and the state, then Save site. If you do not see Add a site, this login is already tied to its properties.</li>
+      <li><strong>4. New units</strong> Open the property. Tap Add units. Building, then the numbers, such as 1000-1020. That creates every unit in that range.</li>
+      <li><strong>5. Find it later</strong> Properties lists them by state and city. Pin to top keeps one at the top of your list.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="ready">
+    <h2>Make a unit ready</h2>
+    <p>This is the screen while you are walking the building.</p>
+    <ol class="help-steps">
+      <li><strong>1. Open it</strong> Tap Make ready on the bottom bar, or Open make ready on Home.</li>
+      <li><strong>2. Start a turn</strong> If the unit is not on the board, open Start a turn, pick the unit, and tap Start make ready.</li>
+      <li><strong>3. Find the unit</strong> Units past their target date are listed first. A name on a trade is that one contractor. No name means maintenance still has it.</li>
+      <li><strong>4. Tap the trade</strong> Tap it when that work is done. Tap to add puts that trade on the unit. Trash out, paint, floors, spray, and resurfacing stay separate.</li>
+      <li><strong>5. Undo</strong> If you tapped the wrong trade, tap Undo. It sits above the bottom bar for a moment.</li>
+      <li><strong>6. Send it back</strong> On a finished trade, open Why they need to go back. Write why, then Send back. The trade is open again.</li>
+      <li><strong>7. Dates</strong> Open Dates. Move-out date is when they leave. Target ready is the day it should be done. Save each one.</li>
+      <li><strong>8. Occupied or ready to rent</strong> Mark occupied when someone moves in. Mark ready to rent when the work is finished and nobody lives there. An occupied unit will not take make-ready changes until it is vacant. Clear rentable status takes Ready to rent back off.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="unit">
+    <h2>Open one unit</h2>
+    <ol class="help-steps">
+      <li><strong>1. Properties</strong> Tap Properties, then the property name.</li>
+      <li><strong>2. Go to unit</strong> Type the number, such as 210, and tap Open.</li>
+      <li><strong>3. Search is different</strong> Search unit records is for a note, an appliance, or a vendor. It does not jump to the unit. Use Go to unit for the number.</li>
+      <li><strong>4. On a phone</strong> The filters start as Make ready and Occupied. More filters has the rest, including each building. Green needs make-ready work. Blue means someone lives there.</li>
+      <li><strong>5. Who lives there</strong> Under the unit name: Make ready, Occupied, or Clear. Clear means no occupancy is set.</li>
+      <li><strong>6. Move-out and rent</strong> Open Move-out date, pick the day, and save it. Mark ready to rent shows when the unit is in make ready. Clear rentable status takes that off.</li>
+      <li><strong>7. The bar</strong> Photo, Call, Trades, and Note sit above the bottom bar.</li>
+      <li><strong>8. Trades</strong> Tap a trade name to put it on this unit. Then call one person for that trade only.</li>
+      <li><strong>9. A note</strong> Note opens Add something this unit needs. Pick the kind, type what it is, and save it on this unit.</li>
+      <li><strong>10. Equipment</strong> Each washer, HVAC unit, and the rest is its own card further down. A service phone is a call button. How we do this is the instructions for that one piece. A reminder says how often, such as a filter every month. Done · reset this reminder starts the count again.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="call">
+    <h2>Call and check in</h2>
+    <ol class="help-steps">
+      <li><strong>1. From the trade</strong> On Make ready, Call shows under a trade when that contractor has a phone number. It dials the phone.</li>
+      <li><strong>2. One trade only</strong> Open Call one contractor. Pick one person and one trade, then Call to this unit. The other trades stay with maintenance or the person who already has them.</li>
+      <li><strong>3. Save a name first</strong> If Call opens the contractor list, nobody is saved yet. More, then This property, then Contractors. Name, company, phone, usual work, and a note. Save contractor. No insurance tracking.</li>
+      <li><strong>4. Check in</strong> On that person's card, Check a contractor in. Unit, property, time, estimated hours, and the one trade. Check in.</li>
+      <li><strong>5. Check out</strong> The same card has check out. The make-ready board shows who is on site, and it flags a visit that runs past the estimate.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="photo">
+    <h2>Take a photo</h2>
+    <ol class="help-steps">
+      <li><strong>1. On the unit</strong> Tap Photo on the bar. The camera opens. The picture is saved on that unit. On Make ready the same button says Photo of this unit. Tap Save photo if it does not send by itself.</li>
+      <li><strong>2. A nameplate</strong> If the photo shows a brand, model, or serial, open Chat. A card is waiting. Read it. Tap Save to file the equipment. Until you save, it is only a photo.</li>
+      <li><strong>3. Work photos</strong> They sit on the unit under Work photos.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="upkeep">
+    <h2>Upkeep</h2>
+    <ol class="help-steps">
+      <li><strong>1. Open it</strong> More, then This property, then Upkeep. The count on the button is how many reminders are due.</li>
+      <li><strong>2. Read the card</strong> The task, the equipment, the unit or the property, and how long until it is due.</li>
+      <li><strong>3. You did it</strong> Tap Done · reset this reminder. It comes back after the interval you set. There is no calendar. The number is the list.</li>
+      <li><strong>4. A pool or other property piece</strong> Open Add pool or property equipment. That piece belongs to the property, not one unit. Name it. Every N days adds the reminder.</li>
+      <li><strong>5. The full list</strong> Equipment inventory, on the same menu, is everything filed at the property you picked at the top. Open the unit from a row.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="drive">
+    <h2>Get there</h2>
+    <ol class="help-steps">
+      <li><strong>1. Directions</strong> On a property, and on the property list, Directions opens the phone's maps when an address is saved.</li>
+      <li><strong>2. The property map</strong> More, then This property, then Property map. Pick the property. That is the uploaded picture or PDF, so the team can see the site. It is not the street map. Replacing it is a new picture or PDF for that property only.</li>
+      <li><strong>3. Driving view</strong> On More, tap I'm driving. Buttons get bigger and this menu hides while you are on the road. Turn driving view off in the same place when you park.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="day">
+    <h2>Plan, miles, and receipts</h2>
+    <p>More, then Today.</p>
+    <ol class="help-steps">
+      <li><strong>1. Today's plan</strong> Open Today's plan. Still to do is what is open. Tap Make a plan.</li>
+      <li><strong>2. The plan form</strong> Pick the day and the property. Starting mileage and ending mileage are optional. Leave them blank if you will enter the odometer later.</li>
+      <li><strong>3. One card per job</strong> Unit number, then what was done. Unit 12 is not the same card as unit 26. Or type one job per line. Save this plan.</li>
+      <li><strong>4. After the stop</strong> Tap the line. I did this closes it. Don't need it closes it as not needed. Leave open puts it back. I only finished some asks how many. Someone else finished it asks their name.</li>
+      <li><strong>5. Miles</strong> Open Miles. When you stop, type the odometer and tap Save odometer. The first number is the start. The next number adds the miles between them.</li>
+      <li><strong>6. Or type the miles</strong> Miles driven, a note such as Odessa to Midland, then Add miles. If an odometer already covers that day, those typed miles are not added a second time. The map does not guess the miles.</li>
+      <li><strong>7. Gas and receipts</strong> Open Gas and receipts. Kind is Gas, Food, or Other. Type the amount. Merchant if you have it. For gas, the odometer. Check the amount, then File expense.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="offline">
+    <h2>No signal</h2>
+    <ol class="help-steps">
+      <li><strong>1. The board you already opened</strong> Make ready, Home, and a unit stay on the phone after you have opened them once. If the page says you are offline, tap Open make ready when you are back in range.</li>
+      <li><strong>2. A trade or a photo</strong> Tap it anyway. It sits in Waiting to send and goes through when the signal is back. The same tap is not saved twice.</li>
+      <li><strong>3. Gas, miles, and a receipt</strong> They wait on the phone too. When the signal is back, check the line and tap File this. Not now drops it. A typed chat note with no photo and no money still sends on its own.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="chat">
+    <h2>Chat</h2>
+    <ol class="help-steps">
+      <li><strong>1. Open it</strong> Tap Chat at the top. Say one thing, such as "I need a trash out" or "paint is done in 210".</li>
+      <li><strong>2. Read the card</strong> Chat shows the change first. Nothing is written until you tap Save. Discard throws that card away. New starts a fresh chat. Buttons on the screens save directly and do not ask twice.</li>
+      <li><strong>3. No AI key</strong> Chat still walks the work one question at a time. The first choices are Make ready, Vendor, Units, Equipment, and More. One trade at a time. "The team" or "maintenance" leaves the contractor blank.</li>
+      <li><strong>4. Help from chat</strong> Say help and this page opens.</li>
+    </ol>
+  </article>
+
+  <article class="card stack" id="office">
+    <h2>Office</h2>
+    <p>More, then Office. Look, at the top, changes colors. Arrange changes a wide desk. A phone keeps the bottom bar. Neither one changes the records.</p>
+    <ol class="help-steps">
+      <li><strong>1. Reports</strong> Open Reports. This week, not saved yet, is the live week. Save weekly report covers the team. Save my week is only your work. An owner or admin can also Save company report. One person can be picked for that person's week.</li>
+      <li><strong>2. After it is saved</strong> Tap the title. Send from that page when you mean to mail it. Mail has to be saved in Settings first. A boss with an email can get the company report. CSV and Download stay on the page. A boss login can read what was saved and does not get the save buttons.</li>
+      <li><strong>3. Audit log</strong> Who changed what, and when, on the units you can see. A recent removal can be restored from the unit, under Recently removed records.</li>
+      {% if can_manage_people %}
+      <li><strong>4. People</strong> Open People. Hire someone: name, username, password, and a title. The labels are Owner, Employee, and Boss. Pick the property they work. An employee can be limited to named properties. A boss can look and cannot change the record. The first login can have an email. Later ones can omit it.</li>
+      {% endif %}
+      {% if can_manage_regions %}
+      <li><strong>5. Regions</strong> A region is the cities inside it and the people who cover them. A regional login sees the properties in those cities.</li>
+      {% endif %}
+      <li><strong>6. Settings</strong> Your name on reports, the chat name, and outgoing mail. The mailbox sends reports, codes, and password-reset links. Leave the mail password blank to keep the one already saved. Save the mailbox, then send a test if you want to see that it arrives.</li>
+      <li><strong>7. AI keys</strong> Optional. A blank key still leaves the buttons and search working. A key shows only its last 4 characters. 1st is tried first. Do not paste a key into chat.</li>
+      {% if current_user.role == 'owner' or security_watch %}
+      <li><strong>8. Security console</strong> Sign-in trouble, bans, and the threat map. A ban needs the full sentence. Two-factor stays on its setup page.</li>
+      {% endif %}
+    </ol>
+  </article>
+  {% endif %}
 
   {% if topics %}
-  <div class="card stack">
-    <h2>Help topics</h2>
+  <details class="card stack help-say">
+    <summary>Say it in chat instead</summary>
+    <p>The same jobs, as a sentence. A card still waits for Save.</p>
     {% for label, caps in topics %}
     <h3>{{ label }}</h3>
-    <ul>
+    <ul class="help-lines">
       {% for cap in caps %}
       <li>
         <strong>{{ cap.label }}</strong>
         {% if cap.howto %}
           — {{ cap.howto }}
-        {% else %}
-          {% if cap.says %}
-            Try saying: "{{ cap.says[0] }}"
-          {% endif %}
+        {% elif cap.says %}
+          — Try saying: "{{ cap.says[0] }}"
         {% endif %}
       </li>
       {% endfor %}
     </ul>
     {% endfor %}
-  </div>
-  {% else %}
-  <div class="card stack">
-    <p>No help topics available for your role.</p>
-  </div>
+  </details>
   {% endif %}
 
-  {% if role != 'viewer' %}
-  <div class="card stack">
-    <h2>Ask in chat</h2>
-    <p>You can also ask for help in the chat. Try saying:</p>
-    <ul>
-      <li>"help" — show this help page</li>
-      <li>"what can you do" — see what's available for your role</li>
-      <li>"how do I log work at a unit" — get step-by-step help</li>
-    </ul>
-    <p>The chat can guide you through maintenance work and upkeep tasks step by step.</p>
-  </div>
-
-  <div class="card stack">
-    <h2>Quick tips</h2>
-    <ul>
-      <li>Say the unit number and what you did to log work — like "unit 12 fixed the ac"</li>
-      <li>Changes wait for your confirmation before they're saved</li>
-      <li>You can attach photos of nameplates to record equipment serial numbers</li>
-      <li>Use "yes" or "no" to confirm the property when you arrive</li>
-    </ul>
-  </div>
-  {% endif %}
+  <details class="card stack">
+    <summary>Your access</summary>
+    <p>{{ summary }}</p>
+  </details>
 </section>
 {% endblock %}
