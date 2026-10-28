@@ -70,6 +70,11 @@ def _role_can_explain(cap: Capability, role: str, user=None) -> bool:
         def has_any(*items):
             return "*" in defaults or bool(defaults.intersection(items))
 
+    if user is not None:
+        from app.services.bots import runs_platform
+
+        if runs_platform(user):
+            return True
     if role == "owner" or "*" in defaults:
         return True
     if cap.tool == "query_record":
@@ -127,12 +132,18 @@ def _role_can_explain(cap: Capability, role: str, user=None) -> bool:
     return False
 
 
-def role_intro(role: str) -> str:
+def role_intro(role: str, user=None) -> str:
     """A short intro for the help page tailored to the role."""
     from app.services.access import normalize_role
     role = normalize_role(role)
-    from app.services.access import normalize_role
-    role = normalize_role(role)
+    if user is not None:
+        from app.services.bots import runs_platform
+
+        if runs_platform(user) and bool(getattr(user, "is_bot", False)):
+            return (
+                "You run this platform. You can see and do everything an owner can "
+                "across all properties. You cannot create, turn off, or remove the owner login."
+            )
     intros = {
         "owner": "You're the owner. You can see and do everything across all properties.",
         "admin": "You're an admin. You can manage most things across all properties, except ownership, API keys, and security.",
@@ -155,6 +166,11 @@ def role_summary(role: str, user=None) -> str:
     from app.services.access import normalize_role
     from app.services.legacy_access import ROLE_CAPABILITIES
     role = normalize_role(role)
+    if user is not None:
+        from app.services.bots import runs_platform
+
+        if runs_platform(user) and bool(getattr(user, "is_bot", False)):
+            return "You have full access to everything this app can do, except creating or removing the owner login."
     caps = ROLE_CAPABILITIES.get(role, set())
     if user is not None and role != "owner":
         from app.services.access import CAPABILITIES, has_capability

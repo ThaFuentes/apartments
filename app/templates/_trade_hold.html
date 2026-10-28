@@ -1,0 +1,24 @@
+{% if hold_part %}
+<p class="hint">Waiting on {{ hold_part }}{% if hold_who %} · {{ hold_who }} is bringing it{% endif %}</p>
+{% endif %}
+<details class="change-extra">
+  <summary>Waiting on a part</summary>
+  <form method="post" action="/units/{{ unit_id }}/hold" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <input type="hidden" name="job" value="{{ job }}">
+    <label>Part <input name="part" required value="{{ hold_part }}" placeholder="capacitor"></label>
+    <label>Who is bringing it <input name="who" value="{{ hold_who }}" placeholder="Ace"></label>
+    <button type="submit">Save</button>
+  </form>
+</details>
+<details class="change-extra">
+  <summary>Come back</summary>
+  <form method="post" action="/units/{{ unit_id }}/come-back" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <input type="hidden" name="job" value="{{ job }}">
+    <label>Due day <input type="date" name="return_on" required value="{{ return_on }}"></label>
+    <button type="submit">Save</button>
+  </form>
+</details>

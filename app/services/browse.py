@@ -195,13 +195,23 @@ def home_board(user_id: int, user=None) -> dict:
                 Unit.query.filter_by(property_id=panel.id, occupancy="make_ready")
                 .filter(Unit.deleted_at.is_(None))
                 .order_by(Unit.unit_number.asc())
-                .limit(6)
                 .all()
             )
-            ready_units = [
-                {"id": unit.id, "number": unit.unit_number, "building": unit.building or ""}
-                for unit in ready_rows
-            ]
+            ready_units = []
+            for unit in ready_rows:
+                # A come-back stays off home until the morning it is due.
+                if unit.return_on and unit.return_on > today:
+                    continue
+                ready_units.append(
+                    {
+                        "id": unit.id,
+                        "number": unit.unit_number,
+                        "building": unit.building or "",
+                        "back": unit.return_on.isoformat() if unit.return_on else "",
+                    }
+                )
+                if len(ready_units) >= 6:
+                    break
     return {
         "today": today,
         "place_count": len(places) + len(pinned),

@@ -18,9 +18,9 @@ from app.routes.common import bp, login_required, _history_ok, _key, _new_key
 def pack(property_id):
     if not _history_ok():
         abort(403)
-    prop = db.session.get(Property, property_id)
-    if not prop or prop.deleted_at:
-        abort(404)
+    from app.services.access import require_see
+
+    prop = require_see(current_user, db.session.get(Property, property_id))
     units = Unit.query.filter_by(property_id=prop.id).filter(Unit.deleted_at.is_(None)).all()
     jobs = Job.query.filter_by(property_id=prop.id).filter(Job.deleted_at.is_(None)).all()
     return jsonify(
@@ -242,7 +242,7 @@ def _photo_proposal(user, media, merged, quota: str, unit=None) -> dict:
 @bp.get("/media/<int:media_id>")
 @login_required
 def media_file(media_id):
-    if current_user.is_viewer:
+    if not _history_ok():
         abort(403)
     media = db.session.get(Media, media_id)
     if not media:

@@ -3,7 +3,7 @@
 {% block main %}
 <section class="sheet">
   <h1>{{ total }} miles</h1>
-  <p class="lead">Put in the odometer when you stop. The miles since the last reading add up here. You can also say “drove 86 miles”.</p>
+  <p class="lead">Put in the odometer when you stop. The miles since the last reading add up here. With no signal it says Waiting to send, then it shows here. You can also say “drove 86 miles”.</p>
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">

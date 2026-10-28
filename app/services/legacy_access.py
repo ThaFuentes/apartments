@@ -42,7 +42,7 @@ ROLE_CAPABILITIES = {
     "maintenance_person": {"read_assigned_properties", "write_maintenance", "log_personal_expenses", "delete_records"},
     # Office works the units from the desk: make readies, move-in dates, keys, and
     # contractors all land on the record with their name on the change.
-    "office": {"read_company", "read_reports", "write_maintenance"},
+    "office": {"read_company", "read_reports", "write_maintenance", "log_personal_expenses"},
     # A legacy read-only login. It sees the records and changes nothing.
     "viewer": {"read_company", "read_reports"},
 }

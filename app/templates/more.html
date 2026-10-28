@@ -34,7 +34,7 @@
     {% if not current_user.is_viewer %}
     <a href="/settings">Settings <span>→</span></a>
     {% endif %}
-    {% if current_user.role == 'owner' or security_watch %}
+    {% if platform or security_watch %}
     <a href="/security">Security console <span>→</span></a>
     {% endif %}
   </div>

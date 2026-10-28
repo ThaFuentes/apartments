@@ -33,8 +33,13 @@
     </div>
   </div>
 
+  {% include "_help_notes.html" %}
+
   <div class="phone-today phone-only">
     <a class="field-go" href="/ready">Open make ready</a>
+    {% if on_site %}
+    <p class="on-site-now">On site now: {% for row in on_site %}{{ row.contractor }} is in unit {{ row.unit }}{% if not loop.last %}. {% endif %}{% endfor %}.</p>
+    {% endif %}
     {% if board.plan %}
     <h2>Today</h2>
     <div class="stack">
@@ -52,7 +57,7 @@
       {% for unit in board.ready_units %}
       <a class="unit-card make-ready" href="/units/{{ unit.id }}">
         <strong>Unit {{ unit.number }}</strong>
-        <span class="unit-meta">{% if unit.building %}Building {{ unit.building }} · {% endif %}Make ready</span>
+        <span class="unit-meta">{% if unit.building %}Building {{ unit.building }} · {% endif %}Make ready{% if unit.back %} · Back {{ unit.back }}{% endif %}</span>
       </a>
       {% endfor %}
     </div>
@@ -83,7 +88,7 @@
         {% for unit in board.ready_units %}
         <a class="unit-card make-ready" href="/units/{{ unit.id }}">
           <strong>Unit {{ unit.number }}</strong>
-          <span class="unit-meta">{% if unit.building %}Building {{ unit.building }} · {% endif %}Make ready</span>
+          <span class="unit-meta">{% if unit.building %}Building {{ unit.building }} · {% endif %}Make ready{% if unit.back %} · Back {{ unit.back }}{% endif %}</span>
         </a>
         {% endfor %}
       </div>

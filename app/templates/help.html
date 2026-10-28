@@ -7,6 +7,7 @@
     <p class="lead">What you can do as a {{ role_display }}, and how to do it.</p>
     <p>{{ intro }}</p>
   </div>
+  {% include "_help_notes.html" %}
 
   {% if role == 'viewer' %}
   <article class="card stack" id="signin">
@@ -170,7 +171,7 @@
     <ol class="help-steps">
       <li><strong>1. The board you already opened</strong> Make ready, Home, and a unit stay on the phone after you have opened them once. If the page says you are offline, tap Open make ready when you are back in range.</li>
       <li><strong>2. A trade or a photo</strong> Tap it anyway. It sits in Waiting to send and goes through when the signal is back. The same tap is not saved twice.</li>
-      <li><strong>3. Gas, miles, and a receipt</strong> They wait on the phone too. When the signal is back, check the line and tap File this. Not now drops it. A typed chat note with no photo and no money still sends on its own.</li>
+      <li><strong>3. Gas, miles, and a receipt</strong> They sit in Waiting to send and go through when the signal is back. The same receipt is not filed twice. A typed chat note about money still waits until you tap Save.</li>
     </ol>
   </article>
 
@@ -188,7 +189,7 @@
     <h2>Office</h2>
     <p>More, then Office. Look, at the top, changes colors. Arrange changes a wide desk. A phone keeps the bottom bar. Neither one changes the records.</p>
     <ol class="help-steps">
-      <li><strong>1. Reports</strong> Open Reports. This week, not saved yet, is the live week. Save weekly report covers the team. Save my week is only your work. An owner or admin can also Save company report. One person can be picked for that person's week.</li>
+      <li><strong>1. Reports</strong> Open Reports. This week, not saved yet, is the live week. Save weekly report covers the team. Save my week is only your work. An owner, an admin, or a finished bot can also Save company report. One person can be picked for that person's week.</li>
       <li><strong>2. After it is saved</strong> Tap the title. Send from that page when you mean to mail it. Mail has to be saved in Settings first. A boss with an email can get the company report. CSV and Download stay on the page. A boss login can read what was saved and does not get the save buttons.</li>
       <li><strong>3. Audit log</strong> Who changed what, and when, on the units you can see. A recent removal can be restored from the unit, under Recently removed records.</li>
       {% if can_manage_people %}
@@ -199,7 +200,7 @@
       {% endif %}
       <li><strong>6. Settings</strong> Your name on reports, the chat name, and outgoing mail. The mailbox sends reports, codes, and password-reset links. Leave the mail password blank to keep the one already saved. Save the mailbox, then send a test if you want to see that it arrives.</li>
       <li><strong>7. AI keys</strong> Optional. A blank key still leaves the buttons and search working. A key shows only its last 4 characters. 1st is tried first. Do not paste a key into chat.</li>
-      {% if current_user.role == 'owner' or security_watch %}
+      {% if platform or security_watch %}
       <li><strong>8. Security console</strong> Sign-in trouble, bans, and the threat map. A ban needs the full sentence. Two-factor stays on its setup page.</li>
       {% endif %}
     </ol>

@@ -8,7 +8,21 @@ from app.builddb.builddb import db
 from app.models import Job, Property, Trip, TripProperty
 from app.services.pending import batch_confirm, confirm_id, confirm_property, discard_id, update_pending
 from app.services.talk import clear_chat, handle_message, handle_photo
-from app.routes.common import bp, login_required, _history_ok, _key, _new_key
+from app.routes.common import bp, login_required, _history_ok, _key, _money_ok, _new_key
+
+
+def _trip_visible(user, trip) -> bool:
+    """A trip is visible when this login can see one of its properties."""
+    if not trip or trip.deleted_at:
+        return False
+    from app.services.access import can_see_property, sees_all
+
+    if sees_all(user):
+        return True
+    links = TripProperty.query.filter_by(trip_id=trip.id).all()
+    if not links:
+        return trip.created_by_id == getattr(user, "id", None)
+    return any(can_see_property(user, link.property_id) for link in links)
 
 
 def _back_to(default: str = "/") -> str:
@@ -92,12 +106,28 @@ def home():
     from app.services.browse import home_board
     from app.services.context import property_picker
 
+    from app.services.access import can_manage_company_settings
+    from app.services.help_notes import active_notes
+
     properties, default_property_id = property_picker(current_user)
+    board = home_board(current_user.id, current_user)
+    from app.services.appliers_field import contractor_board
+
+    home_id = board.get("home_id")
+    on_site = [
+        row
+        for row in contractor_board(current_user)["on_site"]
+        if home_id is None or row.get("property_id") == home_id
+    ]
     return render_template(
         "home.html",
-        board=home_board(current_user.id, current_user),
+        board=board,
+        on_site=on_site,
         properties=properties,
         default_property_id=default_property_id,
+        help_notes=active_notes(),
+        can_pipe_help=can_manage_company_settings(current_user),
+        help_next="/",
         msg_key=_new_key(),
     )
 
@@ -441,7 +471,7 @@ def property_confirm():
 @bp.get("/miles")
 @login_required
 def miles_page():
-    if current_user.is_viewer:
+    if not _money_ok():
         abort(403)
     from app.models import MilesEntry, OdometerReading
     from app.services.miles import traveled_rows, traveled_total
@@ -471,7 +501,7 @@ def miles_page():
 @bp.post("/miles")
 @login_required
 def miles_save():
-    if current_user.is_viewer:
+    if not _money_ok():
         abort(403)
     from app.services.pending import commit_apply
 
@@ -491,7 +521,10 @@ def miles_save():
             "human",
             _key() or _new_key(),
         )
-    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    if result.get("duplicate"):
+        flash("That reading is already on the list.", "ok")
+    else:
+        flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
     return redirect("/miles")
 
 @bp.get("/more")
@@ -505,18 +538,25 @@ def more():
 def help_page():
     """Role-tiered help page: each role sees their own help plus everything below them."""
     from app.services.caps.help_content import role_help_topics, role_intro, role_summary, role_help_text
-    from app.services.access import role_of
+    from app.services.access import can_manage_company_settings, role_of
+    from app.services.help_notes import active_notes
+
+    from app.services.bots import runs_platform
 
     role = role_of(current_user)
     topics = role_help_topics(role, user=current_user)
+    bot_platform = runs_platform(current_user) and bool(getattr(current_user, "is_bot", False))
     return render_template(
         "help.html",
         role=role,
-        role_display=role.replace("_", " ").title() if role else "Unknown",
-        intro=role_intro(role),
+        role_display="Platform" if bot_platform else (role.replace("_", " ").title() if role else "Unknown"),
+        intro=role_intro(role, current_user),
         summary=role_summary(role, user=current_user),
         topics=topics,
         help_text=role_help_text(role),
+        help_notes=active_notes(),
+        can_pipe_help=can_manage_company_settings(current_user),
+        help_next="/help",
         msg_key=_new_key(),
     )
 
@@ -526,15 +566,21 @@ def trips():
     if not _history_ok():
         abort(403)
     from app.models import PlanItem
+    from app.services.access import sees_all, visible_property_ids
 
-    rows = Trip.query.filter(Trip.deleted_at.is_(None)).order_by(Trip.starts_on.desc(), Trip.id.desc()).all()
-    followups = Job.query.filter(Job.deleted_at.is_(None), Job.status.in_(("followup", "blocked"))).order_by(Job.id.desc()).all()
-    open_plan = (
-        PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial")))
-        .order_by(PlanItem.id.asc())
-        .all()
+    rows = [row for row in Trip.query.filter(Trip.deleted_at.is_(None)).order_by(Trip.starts_on.desc(), Trip.id.desc()).all() if _trip_visible(current_user, row)]
+    followups = Job.query.filter(Job.deleted_at.is_(None), Job.status.in_(("followup", "blocked")))
+    open_plan = PlanItem.query.filter(PlanItem.deleted_at.is_(None), PlanItem.status.in_(("open", "partial")))
+    if not sees_all(current_user):
+        allowed = visible_property_ids(current_user) or {-1}
+        followups = followups.filter(Job.property_id.in_(allowed))
+        open_plan = open_plan.filter(PlanItem.property_id.in_(allowed))
+    return render_template(
+        "trips.html",
+        trips=rows,
+        followups=followups.order_by(Job.id.desc()).all(),
+        open_plan=open_plan.order_by(PlanItem.id.asc()).all(),
     )
-    return render_template("trips.html", trips=rows, followups=followups, open_plan=open_plan)
 
 @bp.get("/trips/<int:trip_id>")
 @login_required
@@ -542,7 +588,7 @@ def trip_detail(trip_id):
     if not _history_ok():
         abort(403)
     trip = db.session.get(Trip, trip_id)
-    if not trip or trip.deleted_at:
+    if not _trip_visible(current_user, trip):
         abort(404)
     from app.models import PlanItem
     from app.services.plan import status_line

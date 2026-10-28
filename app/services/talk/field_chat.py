@@ -14,12 +14,14 @@ from app.services.talk.phrases import (
     EST_HOURS,
     ON_SITE_ASK,
     OVER_ESTIMATE_ASK,
+    COME_BACK,
     PARTS_USED,
     PM_DUE_ASK,
     PM_REMINDER,
     READY_BY,
     READY_DONE,
     UNIT_JOB,
+    WAITING_PART,
 )
 
 
@@ -136,6 +138,38 @@ def field_sentence(user, text: str, key: str, source: str) -> dict | None:
             day = (base + timedelta(days=1 if day == "tomorrow" else 0)).isoformat()
         payload = {"unit_number": number, "ready_by": day}
         return _stage_field(user, "set_ready_by", payload, key, source)
+
+    waiting = WAITING_PART.match(raw)
+    if waiting:
+        job = waiting.group("job1") or waiting.group("job2") or ""
+        number = waiting.group("num1") or waiting.group("num2") or ""
+        part = (waiting.group("part") or "").strip(" .")
+        who = (waiting.group("who") or "").strip(" .")
+        if not job or not number or not part:
+            return {"ok": True, "reply": "Which trade, which unit, and which part? Like: paint on unit 12 is waiting on a capacitor from Ace."}
+        payload = {
+            "unit_number": number,
+            "job": job,
+            "part": part,
+            "who": who,
+            **_field_place(""),
+        }
+        return _stage_field(user, "hold_part", payload, key, source)
+
+    coming = COME_BACK.match(raw)
+    if coming:
+        day = coming.group("day")
+        if day in ("today", "tomorrow"):
+            from datetime import timedelta
+
+            from app.services.clock import local_today
+            from app.services.records import site_profile
+
+            profile = site_profile()
+            base = local_today(profile.timezone if profile else None)
+            day = (base + timedelta(days=1 if day == "tomorrow" else 0)).isoformat()
+        payload = {"unit_number": coming.group("num") or "", "return_on": day}
+        return _stage_field(user, "come_back", payload, key, source)
 
     ready_done = READY_DONE.match(raw)
     if ready_done:

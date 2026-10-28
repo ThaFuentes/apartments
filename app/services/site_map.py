@@ -68,11 +68,14 @@ def can_upload_map(user, property_id: int) -> bool:
         return False
     from app.services.access import can_edit_property, can_see_property, role_of
 
+    from app.services.roles import based_on
+
     role = role_of(user)
-    if role not in _UPLOAD_ROLES:
+    parent = based_on(role)
+    if role not in _UPLOAD_ROLES and parent not in _UPLOAD_ROLES:
         return False
     prop_id = int(property_id)
-    if role in {"assistant_manager", "office"}:
+    if role in {"assistant_manager", "office"} or parent in {"assistant_manager", "office"}:
         return can_see_property(user, prop_id)
     return can_edit_property(user, prop_id)
 

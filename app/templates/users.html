@@ -7,7 +7,7 @@
     <div>
       <p class="kicker">Team</p>
       <h1>People</h1>
-      <p class="lead">Hire someone, give them a title, and pick the property they work. Owners can add another owner. Chat can do this too: “hire Dana Desk as office at Woodview.”</p>
+      <p class="lead">Name, title, and the property they work.</p>
     </div>
   </div>
 
@@ -37,22 +37,22 @@
       {% else %}
       <p class="hint">Add a property first, then you can seat them there.</p>
       {% endif %}
-      <label>Phone <span class="hint">optional</span> <input name="phone" autocomplete="tel" placeholder="432-555-0100"></label>
-      <label>Email <span class="hint">needed for an owner login, optional for everyone else</span> <input name="email" placeholder="Leave blank if they have none"></label>
+      <button type="submit">Add this person</button>
       <details>
-        <summary>Login details if you need them</summary>
+        <summary>Email, sign-in, and bot</summary>
         <div class="stack" style="margin-top:0.7rem">
+          <label>Phone <span class="hint">optional</span> <input name="phone" autocomplete="tel" placeholder="432-555-0100"></label>
+          <label>Email <span class="hint">needed for an owner login, optional for everyone else</span> <input name="email" placeholder="Leave blank if they have none"></label>
           <label>Username <span class="hint">blank makes one from their name</span> <input name="username" autocapitalize="none" placeholder="dana.desk"></label>
           <label>Password <span class="hint">blank creates one</span> <input name="password" type="text" minlength="8" autocomplete="off"></label>
           <label>2FA email <input name="security_email" placeholder="codes@…"></label>
           <label>Password-reset email <input name="reset_email" placeholder="resets@…"></label>
           <label class="check"><input type="checkbox" name="is_bot" value="1"> This is a bot</label>
-          {% if current_user.role == 'owner' %}
+          {% if platform %}
           <label class="check"><input type="checkbox" name="security_watch" value="1"> Security watch — site check, temp ban, and unban</label>
           {% endif %}
         </div>
       </details>
-      <button type="submit">Add this person</button>
     </form>
 
     {% if can_add_titles %}

@@ -28,9 +28,21 @@ def save_blob(raw: bytes) -> str:
     return name
 
 
+def _blob_path(name: str) -> str:
+    """A stored photo name is 32 hex characters. Anything else is not a file here."""
+    token = (name or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        return ""
+    root = os.path.abspath(UPLOADS)
+    path = os.path.abspath(os.path.join(root, token + ".enc"))
+    if os.path.dirname(path) != root:
+        return ""
+    return path
+
+
 def read_blob(name: str) -> bytes:
-    path = os.path.join(UPLOADS, (name or "") + ".enc")
-    if not os.path.isfile(path):
+    path = _blob_path(name)
+    if not path or not os.path.isfile(path):
         return b""
     with open(path, "rb") as handle:
         try:
@@ -40,10 +52,8 @@ def read_blob(name: str) -> bytes:
 
 
 def delete_blob(name: str) -> None:
-    if not name or not str(name).isalnum():
-        return
-    path = os.path.join(UPLOADS, name + ".enc")
-    if os.path.isfile(path):
+    path = _blob_path(name)
+    if path and os.path.isfile(path):
         os.remove(path)
 
 

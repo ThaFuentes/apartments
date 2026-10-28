@@ -434,6 +434,36 @@ TOOL_DECLS = [
         },
     },
     {
+        "name": "hold_part",
+        "description": "A make-ready trade is waiting on a part. The trade stays open and is not done. Name the part and who is bringing it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "job": {"type": "string"},
+                "part": {"type": "string"},
+                "who": {"type": "string", "description": "Who is bringing the part"},
+            },
+            "required": ["unit_number", "job", "part"],
+        },
+    },
+    {
+        "name": "come_back",
+        "description": "Leave the unit open and come back on a due day. Does not undo finished trades or remove photos.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "unit_number": {"type": "string"},
+                "property_name": {"type": "string"},
+                "city": {"type": "string"},
+                "return_on": {"type": "string", "description": "YYYY-MM-DD, today, or tomorrow"},
+            },
+            "required": ["unit_number", "return_on"],
+        },
+    },
+    {
         "name": "contractor_in",
         "description": "A contractor went into a unit. Check-in time is stated or now, with an optional hour estimate. Example: ABC Paint got into 204 at 8:10, should take 6 hours.",
         "parameters": {
@@ -678,6 +708,7 @@ CHAT_RULES = (
     "When she says remember I'm always at, my default property is, or set the default property, call set_default_property. "
     "A contractor going into or leaving a unit is contractor_in or contractor_out with the unit number and the stated time. "
     "Ready-by dates are set_ready_by; a trade marked done is ready_check with one of trashout, paint, carpet, floors, spray, resurfacing, clean, punch, appliances, keys. "
+    "Waiting on a part is hold_part: the trade stays open, with the part and who is bringing it. Come back on a day is come_back and leaves finished trades and photos in place. "
     "A contractor is one trade on one unit. Do not put that vendor on the unit's other jobs. Work with no vendor stays with maintenance. "
     "A trip or a day of stops is the only plan. Make-ready, a unit job, and one trade are not a plan. "
     "A recurring reminder like a filter change every 90 days is pm_save. Parts she used are parts_used. "

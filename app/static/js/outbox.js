@@ -1,5 +1,5 @@
-/* Trades and photos wait on the phone and send when the signal returns.
-   Gas, miles, and a receipt stay until you tap File this. */
+/* Trades, photos, gas, miles, and receipts wait on the phone and send when the signal returns.
+   The same receipt is not filed twice. */
 (function () {
   var KEY = "apt-outbox";
   var box = document.getElementById("apt-outbox");
@@ -130,8 +130,8 @@
       if (row.confirm) {
         html += "<button type=\"button\" data-file=\"" + escapeText(row.id) + "\">File this</button>";
         html += "<button type=\"button\" class=\"quiet\" data-drop=\"" + escapeText(row.id) + "\">Not now</button>";
-      } else if (!navigator.onLine) {
-        html += "<small>Sends when you have signal</small>";
+      } else {
+        html += "<small>Waiting to send</small>";
       }
       html += "</li>";
     });
@@ -291,13 +291,14 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     holdText = "";
+    delete fields.csrf_token;
     var item = {
       id: fields.idempotency_key,
       kind: kind,
       url: new URL(form.getAttribute("action") || location.href, location.href).pathname,
       fields: fields,
       label: labelFor(kind, fields, form),
-      confirm: kind === "money" || kind === "miles",
+      confirm: false,
       hasFile: !!file,
       fileName: file ? file.name : ""
     };

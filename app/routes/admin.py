@@ -32,8 +32,11 @@ def settings():
     from app.services.ai_voice import member_profile, shared_key_labels, spoken_name
     from app.services.providers import PROVIDERS
 
+    from app.services.bots import runs_platform
+
     profile = site_profile()
     house = can_manage_company_settings(current_user)
+    platform = runs_platform(current_user)
     mine = None if current_user.role == "owner" else member_profile(current_user)
     keys = ApiCredential.query.filter_by(user_id=current_user.id).all()
     keys.sort(key=lambda row: (row.use_order or 99, 0 if row.preferred else 1, row.id))
@@ -45,7 +48,7 @@ def settings():
         for key, spec in PROVIDERS.items()
     ]
     if request.method == "POST":
-        if current_user.role != "owner":
+        if not platform:
             abort(403)
         from app.services.pending import commit_apply
 
@@ -79,7 +82,7 @@ def settings():
         mine=mine,
         house=house,
         house_name=spoken_name(None),
-        shared_keys=shared_key_labels() if current_user.role == "owner" else [],
+        shared_keys=shared_key_labels() if platform else [],
         keys=keys,
         providers=providers,
         msg_key=_new_key(),
@@ -126,8 +129,12 @@ def settings_assistant():
 
 
 @bp.post("/settings/mail-test")
-@owner_required
+@login_required
 def settings_mail_test():
+    from app.services.bots import runs_platform
+
+    if not runs_platform(current_user):
+        abort(403)
     from app.services.mail import send_test
     from app.services.people import clean_email
 
@@ -500,11 +507,13 @@ def user_bot(user_id):
     if not person:
         abort(404)
     make = (request.form.get("is_bot") or "") in ("1", "true", "on", "yes")
+    from app.services.bots import runs_platform
+
     if person.role == "owner":
         abort(403)
-    if current_user.role != "owner" and not can_manage_user(current_user, person):
+    if not runs_platform(current_user) and not can_manage_user(current_user, person):
         abort(403)
-    if not make and current_user.role != "owner":
+    if not make and not runs_platform(current_user):
         flash("Only an owner can unmark a bot (that clears 2FA).", "warn")
         return redirect("/users")
     person.is_bot = make
@@ -536,7 +545,7 @@ def user_security_watch(user_id):
     audit(current_user.id, "human", "update", "user", person.id, {"security_watch": before}, {"security_watch": on})
     db.session.commit()
     flash(f"{person.label()} {'can watch the site' if on else 'no longer watches the site'}.", "ok")
-    return redirect(f"/users/{person.id}")
+    return redirect("/users")
 
 
 @bp.post("/users/<int:user_id>/hat")

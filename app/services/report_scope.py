@@ -28,6 +28,10 @@ AUDIENCE_LINE = "Prepared for property managers, regional managers, and admins."
 
 
 def manages_team_report(user) -> bool:
+    from app.services.bots import runs_platform
+
+    if runs_platform(user):
+        return True
     return bool(user and role_of(user) in LEADER_ROLES and has_capability(user, "manage_reports"))
 
 
@@ -160,8 +164,10 @@ def scope_for(user, person_id=None, property_id=None) -> dict:
             "subject": subject,
             "audience_line": f"This copy is one person's week: {subject}.",
         }
+    from app.services.bots import runs_platform
+
     role = role_of(user)
-    if role in ("owner", "admin") and single is None:
+    if (role in ("owner", "admin") or runs_platform(user)) and single is None:
         return {
             "ok": True,
             "property_ids": None,
@@ -224,6 +230,10 @@ def can_open_report(user, report) -> bool:
         return False
     if not user:
         return False
+    from app.services.bots import runs_platform
+
+    if runs_platform(user):
+        return True
     role = role_of(user)
     uid = getattr(user, "id", None)
     lane = report_lane(report)

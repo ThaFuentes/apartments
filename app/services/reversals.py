@@ -25,8 +25,9 @@ REVERSE_ROLES = {
 
 def can_reverse(user) -> bool:
     from app.services.access import role_of
+    from app.services.bots import runs_platform
 
-    return bool(user and role_of(user) in REVERSE_ROLES)
+    return bool(user and (runs_platform(user) or role_of(user) in REVERSE_ROLES))
 
 
 def _property_id(row) -> int | None:
@@ -47,8 +48,9 @@ def _can_touch(user, row) -> bool:
     if not can_reverse(user):
         return False
     from app.services.access import can_see_property, role_of
+    from app.services.bots import runs_platform
 
-    if role_of(user) in ("owner", "admin"):
+    if runs_platform(user) or role_of(user) in ("owner", "admin"):
         return True
     prop_id = _property_id(row)
     return bool(prop_id and can_see_property(user, prop_id))

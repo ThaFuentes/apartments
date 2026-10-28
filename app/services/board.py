@@ -6,6 +6,7 @@ import re
 from app.builddb.builddb import db
 from app.models import Job, Property, Unit, UnitTask
 from app.services.clock import utcnow
+from app.services.bots import history_who
 from app.services.people import person_label
 from app.services.records import audit, fuzzy_properties, normalize_unit, property_place
 
@@ -536,7 +537,7 @@ def unit_history(unit_id: int, limit: int = 100) -> list[dict]:
         details = loads(row.details_json)
         history.append({
             "when": row.created_at,
-            "who": person_label(row.actor_id) or "Someone",
+            "who": history_who(row.actor_id, row.source),
             "action": row.action.replace("_", " "),
             "summary": row.summary,
             "before": details.get("before") or {},

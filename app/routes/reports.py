@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from flask import abort, flash, redirect, render_template, request
+from flask import abort, flash, jsonify, redirect, render_template, request
 from flask_login import current_user
 
 from app.builddb.builddb import db
@@ -13,21 +13,27 @@ from app.services.records import audit
 from app.services.reports import build_snapshot, load_snapshot, render_csv, render_pdf, signature_ok
 from app.services.files import send_bytes
 from app.services.pending import commit_apply
-from app.routes.common import bp, login_required, _reports_ok, _key, _new_key
+from app.routes.common import bp, login_required, _money_ok, _reports_ok, _key, _new_key
 
 
 @bp.get("/expenses")
 @login_required
 def expenses():
-    if current_user.is_viewer:
+    if not _money_ok():
         abort(403)
-    rows = Expense.query.filter(Expense.deleted_at.is_(None)).order_by(Expense.id.desc()).limit(80).all()
+    from app.services.access import role_of
+    from app.services.bots import runs_platform
+
+    query = Expense.query.filter(Expense.deleted_at.is_(None))
+    if role_of(current_user) not in {"owner", "admin"} and not runs_platform(current_user):
+        query = query.filter(Expense.user_id == current_user.id)
+    rows = query.order_by(Expense.id.desc()).limit(80).all()
     return render_template("expenses.html", expenses=rows, money=money, msg_key=_new_key())
 
 @bp.post("/expenses")
 @login_required
 def expense_save():
-    if current_user.is_viewer:
+    if not _money_ok():
         abort(403)
     if request.headers.get("X-Apt-Offline-Queue") == "1":
         return jsonify({"ok": False, "error": "Confirm the expense when you are online."}), 409
@@ -49,7 +55,10 @@ def expense_save():
         payload["odometer"] = int(request.form.get("odometer"))
         payload["gas_stop"] = payload["kind"] == "gas"
     result = commit_apply(current_user, "log_expense", payload, "human", _key() or _new_key())
-    flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
+    if result.get("duplicate"):
+        flash("That receipt is already on the list.", "ok")
+    else:
+        flash(result.get("reply") or "", "ok" if result.get("ok") else "warn")
     return redirect("/expenses")
 
 @bp.get("/reports")
@@ -60,14 +69,18 @@ def reports():
     from app.services.report_scope import manages_team_report, people_choices, reports_for, scope_for
 
     saved = reports_for(current_user)
+    from app.services.context import remembered_property
+
+    focus = remembered_property(current_user)
     if current_user.is_viewer:
         preview = None
         scope = {}
     else:
-        scope = scope_for(current_user)
+        scope = scope_for(current_user, property_id=focus.id if focus else None)
         preview = build_snapshot(
             kind="weekly",
             author=current_user.label(),
+            property_id=focus.id if focus else None,
             property_ids=scope.get("property_ids"),
             person_id=scope.get("person_id"),
             audience=scope.get("audience") or "",
@@ -82,6 +95,8 @@ def reports():
         msg_key=_new_key(),
         team_report=manages_team_report(current_user),
         people=people_choices(current_user) if not current_user.is_viewer else [],
+        focus_name=focus.name if focus else "",
+        focus_id=focus.id if focus else None,
     )
 
 @bp.post("/reports/build")
@@ -95,6 +110,8 @@ def reports_build():
     payload = {"kind": kind, "force_new": request.form.get("force_new") == "1"}
     if request.form.get("person_id"):
         payload["person_id"] = request.form.get("person_id")
+    if request.form.get("property_id"):
+        payload["property_id"] = request.form.get("property_id")
     result = commit_apply(
         current_user,
         "draft_report",
@@ -139,7 +156,13 @@ def report_edit(report_id):
 
     if not report or report.deleted_at or not can_open_report(current_user, report):
         abort(404)
-    if current_user.role not in ("owner", "admin") and report.created_by_id != current_user.id:
+    from app.services.bots import runs_platform
+
+    if (
+        current_user.role not in ("owner", "admin")
+        and not runs_platform(current_user)
+        and report.created_by_id != current_user.id
+    ):
         abort(403)
     if report.status == "sent":
         flash("A sent report stays as the copy your bosses already have.", "warn")
@@ -213,7 +236,10 @@ def report_csv(report_id):
 @bp.post("/reports/<int:report_id>/send")
 @login_required
 def report_send(report_id):
-    if current_user.role != "owner":
+    from app.services.access import role_of
+    from app.services.bots import runs_platform
+
+    if role_of(current_user) not in ("owner", "admin") and not runs_platform(current_user):
         abort(403)
     from app.services.pending import commit_apply
 

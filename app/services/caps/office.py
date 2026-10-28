@@ -110,13 +110,13 @@ CAPS = [
         tool="mark_bot",
         label="mark a bot login",
         says=("mark Jane as a bot", "unmark Jane as a bot"),
-        howto="Say mark that person as a bot. Only an owner can unmark one, and that clears two-factor.",
+        howto="Say mark that person as a bot, or unmark that bot. Unmarking clears two-factor. The owner login cannot be a bot.",
     ),
     Capability(
         tool="set_security_watch",
         label="let a bot watch security",
         says=("let Jane watch security", "stop Jane watching security"),
-        howto="An owner says let that bot watch security, or stop them watching security.",
+        howto="Say let that bot watch security, or stop them watching security.",
     ),
     Capability(
         tool="send_password_reset",

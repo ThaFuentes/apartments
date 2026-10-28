@@ -167,7 +167,10 @@ def create_app() -> Flask:
     app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
 
     login_manager.init_app(app)
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    # Trust one proxy hop for the client IP and https. Do not trust
+    # X-Forwarded-Host: a caller can set it, and password-reset links
+    # are built from request.host.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0)
 
     from app.routes.web import bp
 
@@ -184,6 +187,8 @@ def create_app() -> Flask:
         if not bot_setup_remaining(current_user):
             return None
         path = request.path or ""
+        if path.startswith("/api/"):
+            return jsonify({"ok": False, "error": "Finish bot setup first."}), 403
         if bot_setup_path_ok(path):
             return None
         return redirect("/bot-setup")
@@ -194,7 +199,9 @@ def create_app() -> Flask:
             return None
         if not getattr(current_user, "is_authenticated", False):
             return None
-        if getattr(current_user, "role", "") != "viewer":
+        if bool(getattr(current_user, "is_bot", False)):
+            return None
+        if not getattr(current_user, "is_viewer", False):
             return None
         if request.path in ("/logout", "/appearance"):
             return None
@@ -261,16 +268,19 @@ def create_app() -> Flask:
         chat_cards = []
         can_manage_people = False
         can_manage_regions = False
+        platform = False
         property_choices = []
         header_property_id = None
         default_property_id = None
         if getattr(current_user, "is_authenticated", False):
             from app.models import Notice, PendingAction
             from app.services.records import open_shift
+            from app.services.bots import runs_platform
             from app.services.security_ops import watches_security
             from app.services.share import share_state
 
             security_watch = watches_security(current_user)
+            platform = runs_platform(current_user)
 
             shift = open_shift(current_user)
             if shift and shift.property:
@@ -478,6 +488,7 @@ def create_app() -> Flask:
             "chat_key": chat_key,
             "can_manage_people": can_manage_people,
             "can_manage_regions": can_manage_regions,
+            "platform": platform,
             "assistant_name": assistant_name,
             "drive": bool(request.cookies.get("apt_drive") == "1"),
             "appearance": appearance,

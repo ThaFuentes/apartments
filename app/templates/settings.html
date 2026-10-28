@@ -3,10 +3,10 @@
 {% block main %}
 <section class="sheet">
   <h1>Settings</h1>
-  {% if can_manage_people and current_user.role != 'owner' %}
+  {% if can_manage_people and not platform %}
   <p><a href="/users">People</a> — add a login or change who works where.</p>
   {% endif %}
-  {% if current_user.role == 'owner' %}
+  {% if platform %}
   <p><a href="/users">People</a> — add a boss or an employee. Their email can stay blank.</p>
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -77,7 +77,7 @@
     <label>Your notes
       <textarea name="personal_instructions" rows="5" maxlength="4000" placeholder="Call me by my first name. Short answers. Remind me to write the unit number.">{{ mine.personal_instructions if mine and mine.personal_instructions else '' }}</textarea>
     </label>
-    {% if not house %}
+    {% if current_user.role != 'owner' %}
     <p class="hint">Which key answers</p>
     <label class="check"><input type="radio" name="key_source" value="collective" {% if not mine or mine.key_source != 'own' %}checked{% endif %}> Collective keys</label>
     <label class="check"><input type="radio" name="key_source" value="own" {% if mine and mine.key_source == 'own' %}checked{% endif %}> My own keys</label>
@@ -91,6 +91,11 @@
   <p class="lead">These are the collective keys. A person with no key of their own uses this list. A key someone shares is tried after these. 1st is used first, then 2nd, then 3rd, if a key is out of quota. Only the last 4 characters are shown. You can also say “make Gemini 1st” in chat.</p>
   {% if shared_keys %}
   <p class="hint">Also in the collective: {% for item in shared_keys %}{{ item.who }} · {{ item.label }} ····{{ item.last4 }}{% if not loop.last %}; {% endif %}{% endfor %}.</p>
+  {% endif %}
+  {% elif platform %}
+  <p class="lead">These keys are on this bot login. Share one and people on the collective can use it after the house keys. Only the last 4 characters are shown.</p>
+  {% if shared_keys %}
+  <p class="hint">House and shared keys: {% for item in shared_keys %}{{ item.who }} · {{ item.label }} ····{{ item.last4 }}{% if not loop.last %}; {% endif %}{% endfor %}.</p>
   {% endif %}
   {% elif house %}
   <p class="lead">These keys are the ones your chat uses. Share one and people on the collective can use it after the house keys. Only the last 4 characters are shown.</p>

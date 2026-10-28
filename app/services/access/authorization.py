@@ -27,6 +27,9 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
 
     if not getattr(user, "active", True) or not known_role(role):
         return {"ok": False, "reply": "This login is inactive or has no configured role."}
+    from app.services.bots import runs_platform
+
+    platform = runs_platform(user)
     known = PROPERTY_WRITE_TOOLS | set(TOOL_CAPABILITY) | set(PERSONAL_TOOLS) | {"query_record", "soft_delete", "restore", "grant_access", "set_default_property", "show_property_map", "list_regions", "remove_property_map", "manage_region", "unlock_login", "restore_inventory", "reverse_audit", "remove_contractor", "ban_ip", "unban_ip", "ban_device", "unban_device", "send_password_reset", "set_security_watch", "mark_bot", "create_job_title", "set_hat", "clear_hat", "pin_property", "send_test_email", "set_reset_email"} | OWNER_PROTECTED_TOOLS
     if tool not in known:
         return {"ok": False, "reply": "This action is not available to this role."}
@@ -47,7 +50,7 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
             return {"ok": False, "reply": "That property is outside your assigned scope."}
         return {"ok": True}
     if tool == "send_report":
-        allowed = role in ("owner", "admin")
+        allowed = role in ("owner", "admin") or platform
         return {"ok": allowed, "reply": "" if allowed else "Only an owner or admin sends a report."}
     if tool == "draft_report":
         allowed = (
@@ -59,7 +62,8 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
     if tool == "read_reports":
         return {"ok": has_capability(user, "read_reports"), "reply": "Reports are not available to this role."}
     if tool == "update_settings":
-        return {"ok": has_capability(user, "manage_settings"), "reply": "This login cannot manage that company setting."}
+        allowed = has_capability(user, "manage_settings") and (not bool(getattr(user, "is_bot", False)) or platform)
+        return {"ok": allowed, "reply": "This login cannot manage that company setting."}
     if tool == "grant_access":
         # The apply step resolves the property and checks that this person really
         # manages people there; this only keeps the tool reachable at all.
@@ -97,7 +101,7 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
         allowed = self_reset_only or can_manage_user(user, target)
         return {"ok": allowed, "reply": "" if allowed else "This login cannot manage that person."}
     if tool in {"upsert_property", "update_property", "delete_property"}:
-        if tool == "delete_property" and role != "owner":
+        if tool == "delete_property" and not platform:
             return {"ok": False, "reply": "Only an owner can remove a property."}
         if tool == "delete_property" and not has_capability(user, "manage_properties"):
             return {"ok": False, "reply": "Property administration is not available to this role."}
@@ -114,7 +118,7 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
     if tool in {"soft_delete", "restore"}:
         entity = (payload.get("entity") or "").strip().lower()
         if entity == "expense":
-            return {"ok": role == "owner" or (has_capability(user, "delete_expenses") and _expense_belongs_to_user(user, payload)), "reply": "That expense is not on your login or you cannot remove it."}
+            return {"ok": platform or (has_capability(user, "delete_expenses") and _expense_belongs_to_user(user, payload)), "reply": "That expense is not on your login or you cannot remove it."}
         if entity not in {"unit", "job", "unit_task", "equipment"} or not has_capability(user, "delete_records"):
             return {"ok": False, "reply": "This login cannot remove or restore that record."}
         ids, error = _resource_property_ids(user, tool, payload)
@@ -172,7 +176,7 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
         from app.services.security_ops import can_open_security
 
         allowed = can_open_security(user)
-        return {"ok": allowed, "reply": "" if allowed else "Only the owner, or a bot marked to watch the site, can do that."}
+        return {"ok": allowed, "reply": "" if allowed else "Only the owner or a bot can do that."}
     if tool == "send_password_reset":
         from app.services.access.management import can_manage_user
         from app.services.people import find_person
@@ -185,7 +189,7 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
         allowed = getattr(user, "id", None) == person.id or role == "owner" or can_manage_user(user, person)
         return {"ok": allowed, "reply": "" if allowed else "This login cannot reset that person."}
     if tool == "set_security_watch":
-        return {"ok": role == "owner", "reply": "" if role == "owner" else "Only an owner can choose who watches security."}
+        return {"ok": platform, "reply": "" if platform else "Only an owner can choose who watches security."}
     if tool == "mark_bot":
         from app.services.access.management import can_manage_user
         from app.services.people import find_person
@@ -195,9 +199,9 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
             return {"ok": False, "reply": "I can't find that login."}
         if person.role == "owner":
             return {"ok": False, "reply": "An owner login is not a bot."}
-        if not payload.get("on") and role != "owner":
+        if not payload.get("on") and not platform:
             return {"ok": False, "reply": "Only an owner can unmark a bot."}
-        allowed = role == "owner" or can_manage_user(user, person)
+        allowed = platform or can_manage_user(user, person)
         return {"ok": allowed, "reply": "" if allowed else "This login cannot change that person."}
     if tool == "create_job_title":
         from app.services.access.management import can_create_custom_role
@@ -216,7 +220,7 @@ def authorize_tool(user, tool: str, payload: dict | None = None) -> dict:
     if tool == "pin_property":
         return {"ok": True, "reply": ""}
     if tool == "send_test_email":
-        return {"ok": role == "owner", "reply": "" if role == "owner" else "Only an owner can send a test email."}
+        return {"ok": platform, "reply": "" if platform else "Only an owner can send a test email."}
     if tool == "set_reset_email":
         return {"ok": True, "reply": ""}
     if not has_capability(user, "write_maintenance"):
@@ -490,7 +494,9 @@ def _resource_property_ids(user, tool: str, payload: dict) -> tuple[set[int], st
             if job and not job.deleted_at:
                 ids.add(job.property_id)
     if payload.get("entity") == "expense" and payload.get("entity_id") not in (None, ""):
-        if not _expense_belongs_to_user(user, payload) and role_of(user) != "owner":
+        from app.services.bots import runs_platform
+
+        if not _expense_belongs_to_user(user, payload) and not runs_platform(user):
             return set(), "That expense is not on your login."
     raw_trip = payload.get("trip_id")
     if raw_trip not in (None, ""):
@@ -535,14 +541,16 @@ def _resource_property_ids(user, tool: str, payload: dict) -> tuple[set[int], st
         shift = open_shift(user)
         if shift:
             ids.add(shift.property_id)
-    if tool in {"set_ready_by", "ready_check", "finish_vendor_trade", "make_ready_unit", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used"}:
+    if tool in {"set_ready_by", "ready_check", "hold_part", "come_back", "finish_vendor_trade", "make_ready_unit", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used"}:
         return _field_tool_place(user, tool, payload)
     return ids, ""
 
 
 def _new_property_allowed(user, tool: str, payload: dict) -> bool:
+    from app.services.bots import runs_platform
+
     role = role_of(user)
-    if role == "owner":
+    if runs_platform(user):
         return True
     if role == "admin":
         return has_capability(user, "create_properties")
@@ -550,7 +558,9 @@ def _new_property_allowed(user, tool: str, payload: dict) -> bool:
 
 
 def _can_edit_for_tool(user, prop_id: int, tool: str) -> bool:
-    if role_of(user) == "owner":
+    from app.services.bots import runs_platform
+
+    if runs_platform(user):
         return True
     if tool in {"upsert_property", "delete_property"}:
         capabilities = ("manage_properties",)
@@ -573,7 +583,9 @@ def _expense_belongs_to_user(user, payload: dict) -> bool:
 
 
 def sees_all(user) -> bool:
-    return role_of(user) == "owner" or (role_of(user) in {"admin", "office", "viewer"} and has_capability(user, "read_company"))
+    from app.services.access.core import _company_scope
+
+    return _company_scope(user)
 
 
 def _resolve_payload_place(user, name: str, city: str = "", region: str = ""):

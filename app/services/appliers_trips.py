@@ -636,7 +636,9 @@ def apply_estimate_miles(user, payload, source) -> dict:
 
 def apply_update_settings(user, payload, source) -> dict:
     source = _src(source)
-    if user.role != "owner":
+    from app.services.bots import runs_platform
+
+    if not runs_platform(user):
         return {"ok": False, "reply": "Settings stay on your login."}
     profile = site_profile()
     if not profile:

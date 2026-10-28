@@ -361,6 +361,46 @@ def unit_ready_check(unit_id):
     return redirect(target)
 
 
+@bp.post("/units/<int:unit_id>/hold")
+@login_required
+def unit_hold(unit_id):
+    from app.routes.common import _key
+    from app.services.holds import hold_for_part
+    from app.services.once import finish_once
+
+    unit = _editable_unit(unit_id)
+    result = hold_for_part(
+        current_user,
+        unit,
+        request.form.get("job") or "",
+        request.form.get("part") or "",
+        request.form.get("who") or "",
+    )
+    if result.get("ok"):
+        result = finish_once(current_user, _key(), "hold_part", result)
+    else:
+        db.session.rollback()
+    flash(result.get("reply") or "Saved.", "ok" if result.get("ok") else "warn")
+    return redirect(_field_next(f"/units/{unit.id}", "/ready"))
+
+
+@bp.post("/units/<int:unit_id>/come-back")
+@login_required
+def unit_come_back(unit_id):
+    from app.routes.common import _key
+    from app.services.holds import come_back
+    from app.services.once import finish_once
+
+    unit = _editable_unit(unit_id)
+    result = come_back(current_user, unit, request.form.get("return_on") or "")
+    if result.get("ok"):
+        result = finish_once(current_user, _key(), "come_back", result)
+    else:
+        db.session.rollback()
+    flash(result.get("reply") or "Saved.", "ok" if result.get("ok") else "warn")
+    return redirect(_field_next(f"/units/{unit.id}", "/ready"))
+
+
 @bp.post("/units/<int:unit_id>/call")
 @login_required
 def unit_call_contractor(unit_id):
@@ -393,7 +433,7 @@ def unit_call_contractor(unit_id):
 def contractors():
     if not _history_ok():
         abort(403)
-    if current_user.is_viewer:
+    if request.method != "GET" and current_user.is_viewer:
         abort(403)
     from app.models import ContractorVisit
     from app.services.contractors import list_contractors, remember_contractor

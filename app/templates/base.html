@@ -103,7 +103,7 @@
         </label>
       </form>
       {% endif %}
-      {% if current_user.role == 'owner' or security_watch %}
+      {% if platform or security_watch %}
       <a class="sec-switch" href="/security">Security console</a>
       {% endif %}
       <p class="desk-info-only">Property and the security console sit in this panel on a wide desk.</p>

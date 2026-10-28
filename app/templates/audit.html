@@ -20,8 +20,9 @@
     <label>Change <input name="action" value="{{ filters.action }}" placeholder="make ready, note, delete"></label>
     <label>From
       <select name="source">
-        <option value="">People and the chat</option>
+        <option value="">Everyone</option>
         <option value="human" {% if filters.source == 'human' %}selected{% endif %}>People only</option>
+        <option value="bot" {% if filters.source == 'bot' %}selected{% endif %}>Bot agents</option>
         <option value="ai" {% if filters.source == 'ai' %}selected{% endif %}>The chat only</option>
       </select>
     </label>

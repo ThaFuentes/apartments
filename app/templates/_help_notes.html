@@ -1,0 +1,24 @@
+{% if help_notes or can_pipe_help %}
+<section class="card stack" id="how-to">
+  <h2>How to</h2>
+  <p class="lead">Open a note. These stay on the page, so you do not have to use chat.</p>
+  {% for note in help_notes %}
+  <details id="help-{{ note.slug }}">
+    <summary>{{ note.title }}</summary>
+    <p class="note">{{ note.body }}</p>
+  </details>
+  {% endfor %}
+  {% if can_pipe_help %}
+  <details>
+    <summary>Add a help note</summary>
+    <form method="post" action="/api/help" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="{{ help_next or '/' }}">
+      <label>Title <input name="title" required maxlength="160" autocomplete="off"></label>
+      <label>Instructions <textarea name="body" required maxlength="8000" rows="5"></textarea></label>
+      <button type="submit">Save this note</button>
+    </form>
+  </details>
+  {% endif %}
+</section>
+{% endif %}

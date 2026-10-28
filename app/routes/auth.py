@@ -1,7 +1,7 @@
 """Login, invite, bot 2FA, and password-reset routes."""
 from __future__ import annotations
 
-from flask import flash, make_response, redirect, render_template, request
+from flask import flash, jsonify, make_response, redirect, render_template, request
 from flask_login import current_user
 from werkzeug.security import generate_password_hash
 
@@ -232,11 +232,16 @@ def bot_setup():
         try:
             if do == "emails":
                 security = clean_email(request.form.get("security_email"))
-                reset = clean_email(request.form.get("reset_email"))
-                current_user.security_email = security
-                current_user.reset_email = reset or None
-                db.session.commit()
-                flash("Inboxes saved. The 2FA address and the reset address can match, or they can be different.", "ok")
+                key_mail = clean_email(request.form.get("key_email"))
+                if not security or not key_mail:
+                    flash("A bot needs an API key address and a 2FA address.", "warn")
+                elif security == key_mail:
+                    flash("The API key address and the 2FA address have to be different.", "warn")
+                else:
+                    current_user.security_email = security
+                    current_user.key_email = key_mail
+                    db.session.commit()
+                    flash("Inboxes saved. Codes go to the 2FA address. Key changes go to the API key address.", "ok")
             elif do == "totp-start":
                 twofa_util.begin_totp_setup(current_user)
                 db.session.commit()
@@ -274,7 +279,7 @@ def bot_setup():
         inbox=twofa_util.twofa_inbox_for(current_user),
         login_email=(current_user.email or "").strip(),
         security_email=(current_user.security_email or "").strip(),
-        reset_email=(current_user.reset_email or "").strip(),
+        key_email=(current_user.key_email or "").strip(),
     )
 
 
@@ -315,3 +320,25 @@ def reset_password(token):
         flash("Password updated. Sign in with it.", "ok")
         return redirect("/login")
     return render_template("reset.html", token=token)
+
+
+@bp.post("/api/bot/key")
+@login_required
+def bot_replace_key():
+    """A signed-in bot replaces its own provider key. The mail carries the last 4."""
+    from app.services.bots import replace_own_key
+
+    if not bool(getattr(current_user, "is_bot", False)):
+        return jsonify({"ok": False, "error": "Only a bot can replace its key here."}), 403
+    body = request.get_json(silent=True) or {}
+    result = replace_own_key(
+        current_user,
+        body.get("provider") or request.form.get("provider") or "gemini",
+        body.get("api_key") or request.form.get("api_key") or "",
+        body.get("model") or request.form.get("model") or "",
+        body.get("base_url") or request.form.get("base_url") or "",
+    )
+    status = 200 if result.get("ok") else 400
+    if result.get("gaps"):
+        status = 403
+    return jsonify(result), status

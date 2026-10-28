@@ -144,7 +144,7 @@ def _from_calls(user, calls, key, source, quota_note, text: str = "") -> dict:
             if card.get("proposal"):
                 proposals.append(card["proposal"])
             continue
-        if name in ("plan_trip", "plan_day", "set_ready_by", "ready_check", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used"):
+        if name in ("plan_trip", "plan_day", "set_ready_by", "ready_check", "hold_part", "come_back", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used"):
             # Field tools always stage a card; the click is the save.
             result = commit_apply(user, name, args, source, item_key, batch_key=key)
             replies.append(result.get("reply") or "")

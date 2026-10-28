@@ -114,6 +114,7 @@ def create_user(
     active: bool = True,
     is_bot: bool = False,
     security_email=None,
+    key_email=None,
     reset_email=None,
 ) -> tuple[User, str]:
     role = normalize_job(role or "viewer")
@@ -136,6 +137,7 @@ def create_user(
         password = generated
     mail = clean_email(email)
     security = clean_email(security_email)
+    key_mail = clean_email(key_email)
     reset = clean_email(reset_email)
     # The account owner is reachable for recovery and billing; every other role
     # may legitimately have no email ("no email" in the chat).
@@ -149,6 +151,7 @@ def create_user(
         display_name=(display_name or ident).strip()[:150],
         email=mail,
         security_email=security,
+        key_email=key_mail,
         reset_email=reset,
         is_bot=bool(is_bot),
         phone=digits,

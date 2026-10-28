@@ -476,7 +476,34 @@ def collect_tool_calls(user, text: str):
             budget.record(row, tokens)
             return {"calls": calls, "text": prose, "note": ""}
         notes.append(f"{label} did not answer.")
-    return {"calls": [], "text": "", "note": " ".join(notes)}
+    return {"calls": [], "text": "", "note": nudge_for_dead_keys(" ".join(notes))}
+
+
+def nudge_for_dead_keys(note: str) -> str:
+    """When every key is quiet, tell the person to add or share one."""
+    text = (note or "").strip()
+    low = text.lower()
+    if not text or "add your own key" in low:
+        return text
+    if any(bit in low for bit in ("quota", "cooling", "resting", "did not answer")):
+        return text + " Add your own key in Settings, or share one with the collective. The buttons still work."
+    return text
+
+
+def quiet_key_note(user) -> str:
+    """Say when every saved key is in provider backoff. This does not call a model."""
+    rows = keys_for(user)
+    if not rows:
+        return ""
+    notes = []
+    now = utcnow()
+    for row in rows:
+        until = getattr(row, "backoff_until", None)
+        if not until or until <= now:
+            return ""
+        label = provider_spec(row.provider).get("label") or row.provider
+        notes.append(f"{label} is cooling down.")
+    return nudge_for_dead_keys(" ".join(notes))
 
 
 def _rest_note(label: str, row) -> str:

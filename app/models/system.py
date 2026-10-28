@@ -89,3 +89,17 @@ class AppSetting(db.Model):
 
     key_name = db.Column(db.String(80), primary_key=True)
     value_text = db.Column(db.Text, nullable=False, default="")
+class HelpNote(db.Model):
+    """A help note piped onto the home page. People read it without chat."""
+
+    __tablename__ = "help_notes"
+    __table_args__ = _OPTS
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    slug = db.Column(db.String(80), nullable=False, unique=True)
+    title = db.Column(db.String(160), nullable=False, default="")
+    body = db.Column(db.Text, nullable=False, default="")
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    active = db.Column(db.Boolean, nullable=False, default=True)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=utcnow)

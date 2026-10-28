@@ -11,10 +11,14 @@ def _offline(user) -> bool:
 def offline_menu(user) -> dict:
     """Plain greeting. It does not open a walk and it does not save anything."""
     head = "AI chat is offline. How can I help?" if _offline(user) else "How can I help?"
+    nudge = ""
+    if _offline(user):
+        nudge = "\n\nAdd your own key in Settings, or share one with the collective. The buttons still work."
     reply = (
         f"{head}\n\n"
         "Say what you would like to do. Make ready, vendor, units, and equipment come first. "
         "More covers plans, places, money, reports, people, and office.\n\n"
         "I'll ask one question at a time. Nothing is saved until you say so."
+        f"{nudge}"
     )
     return {"ok": True, "reply": reply}

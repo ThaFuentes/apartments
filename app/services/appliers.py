@@ -39,6 +39,7 @@ from app.services.appliers_trips import (
     apply_update_trip,
     apply_upsert_property,
 )
+from app.services.holds import apply_come_back, apply_hold_part
 from app.services.appliers_field import (
     apply_contractor_in,
     apply_contractor_out,
@@ -150,6 +151,8 @@ APPLIERS = {
     "set_default_property": _apply_set_default_property,
     "set_ready_by": apply_set_ready_by,
     "ready_check": apply_ready_check,
+    "hold_part": apply_hold_part,
+    "come_back": apply_come_back,
     "finish_vendor_trade": apply_finish_vendor_trade,
     "make_ready_unit": _apply_make_ready,
     "contractor_in": apply_contractor_in,

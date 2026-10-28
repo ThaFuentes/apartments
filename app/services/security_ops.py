@@ -26,7 +26,9 @@ def watches_security(user) -> bool:
 def can_open_security(user) -> bool:
     if not user or not getattr(user, "active", True):
         return False
-    if getattr(user, "role", "") == "owner":
+    from app.services.bots import runs_platform
+
+    if runs_platform(user):
         return True
     return watches_security(user)
 

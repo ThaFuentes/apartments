@@ -1,4 +1,4 @@
-const ASSET_V = "49";
+const ASSET_V = "51";
 
 const CACHE = "apt-shell-" + ASSET_V;
 const SHELL = [

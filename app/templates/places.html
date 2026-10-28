@@ -10,7 +10,7 @@
   <p class="lead">Every property, by state and city.</p>
   {% endif %}
   {% if not groups %}
-  <p class="empty">{% if current_user.role == 'owner' %}No properties yet. Add one on Home.{% else %}No properties are on this login yet.{% endif %}</p>
+  <p class="empty">{% if platform %}No properties yet. Add one on Home.{% else %}No properties are on this login yet.{% endif %}</p>
   {% endif %}
   {% set ns = namespace(state='') %}
   {% for group in groups %}

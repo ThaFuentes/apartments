@@ -185,6 +185,16 @@ READY_BY = re.compile(
     re.I,
 )
 
+WAITING_PART = re.compile(
+    r"^(?:(?:unit\s*)?#?(?P<num1>[0-9]{1,6}[a-z]?)\s+(?P<job1>trash[- ]?out|paint|carpet|floors?|spray|resurfacing|clean(?:ing)?|punch(?:\s*list)?|appliances?|keys)|(?P<job2>trash[- ]?out|paint|carpet|floors?|spray|resurfacing|clean(?:ing)?|punch(?:\s*list)?|appliances?|keys)\s+(?:on|at|for)\s+(?:unit\s*)?#?(?P<num2>[0-9]{1,6}[a-z]?))\s+(?:is\s+)?waiting on (?:a |the )?(?P<part>.+?)(?: from (?P<who>[A-Za-z][A-Za-z0-9 .'&/-]{1,40}))?$",
+    re.I,
+)
+
+COME_BACK = re.compile(
+    r"^(?:come back(?: to)?|callback(?: on| to)?)\s+(?:unit\s*)?#?(?P<num>[0-9]{1,6}[a-z]?)\s+(?:on\s+|by\s+)?(?P<day>today|tomorrow|\d{4}-\d{2}-\d{2})$",
+    re.I,
+)
+
 READY_DONE = re.compile(
     r"^(?:mark\s+|the\s+)?(?:(?:unit\s*#?(?P<num1>[0-9]{1,6}[a-z]?)\s+)?(?P<job1>trash[- ]?out|paint|carpet|clean(?:ing)?|punch(?:\s*list)?|appliances?|keys)|(?P<job2>trash[- ]?out|paint|carpet|clean(?:ing)?|punch(?:\s*list)?|appliances?|keys)\s+(?:is\s+|are\s+|was\s+)?)\s*(?:is\s+|are\s+|was\s+)?(?P<neg>not\s+|isn'?t\s+|still\s+)?done\s+(?:on|at|in|for)\s+(?:unit\s*#?)?(?P<num2>[0-9]{1,6}[a-z]?)(?:\s+(?:at|in)\s+(?P<place>[a-z][a-z0-9 .',&/-]{2,60}))?$",
     re.I,

@@ -48,6 +48,8 @@ def set_access(actor, person: User, prop: Property, *, see: bool, edit: bool | N
 
 def can_manage_property_people(actor, property_id: int) -> bool:
     role = role_of(actor)
+    if bool(getattr(actor, "is_bot", False)):
+        return True
     if role == "owner":
         return True
     if role == "admin":
@@ -71,6 +73,8 @@ def can_create_user(actor, role: str) -> bool:
     actor_role = role_of(actor)
     if not actor or not known_role(role):
         return False
+    if bool(getattr(actor, "is_bot", False)):
+        return role != "owner"
     if actor_role == "owner":
         return True
     if role in {"owner", "admin"}:
@@ -182,7 +186,9 @@ def can_manage_pm_default_policy(actor, target: User | None, region_id: int) -> 
     region = db.session.get(Region, int(region_id))
     if not region or not region.active:
         return False
-    if role_of(actor) == "owner":
+    from app.services.bots import runs_platform
+
+    if runs_platform(actor):
         return True
     if role_of(actor) != "regional_manager" or not has_capability(actor, "manage_region_people"):
         return False
@@ -197,8 +203,12 @@ def can_manage_user(actor, target: User | None) -> bool:
     if not actor or not target or actor.id == target.id:
         return False
     actor_role, target_role = role_of(actor), role_of(target)
+    if target_role == "owner":
+        return False
+    if bool(getattr(actor, "is_bot", False)):
+        return True
     if actor_role == "owner":
-        return target_role != "owner"
+        return True
     if target_role in {"owner", "admin"}:
         return False
     if has_capability(actor, "manage_users") and actor_role == "admin":
@@ -218,8 +228,14 @@ def can_manage_user(actor, target: User | None) -> bool:
 
 
 def can_manage_regions(user) -> bool:
-    """An owner or a login carrying manage_regions sets up the region map."""
-    return role_of(user) == "owner" or has_capability(user, "manage_regions")
+    """An owner, a finished bot, or a login carrying manage_regions sets up the region map."""
+    from app.services.bots import runs_platform
+
+    if runs_platform(user):
+        return True
+    if bool(getattr(user, "is_bot", False)):
+        return False
+    return has_capability(user, "manage_regions")
 
 
 def _regions_guard(actor) -> None:
@@ -383,7 +399,15 @@ def create_custom_role(actor, label: str, based_on: str):
 
 
 def can_manage_company_settings(user) -> bool:
-    return role_of(user) == "owner" or has_capability(user, "manage_settings")
+    from app.services.bots import runs_platform
+
+    if not user:
+        return False
+    if runs_platform(user):
+        return True
+    if bool(getattr(user, "is_bot", False)):
+        return False
+    return has_capability(user, "manage_settings")
 
 
 def pin_property(user, prop: Property, pinned: bool) -> str:

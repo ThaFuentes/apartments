@@ -35,7 +35,14 @@ def loads(text) -> dict:
 
 
 def audit(actor_id, source, action, entity, entity_id, before, after) -> None:
-    source = source if source in ("ai", "human") else "human"
+    source = source if source in ("ai", "human", "bot") else "human"
+    if actor_id:
+        try:
+            actor = db.session.get(User, int(actor_id))
+        except (TypeError, ValueError):
+            actor = None
+        if actor is not None and bool(getattr(actor, "is_bot", False)):
+            source = "bot"
     db.session.add(
         AuditLog(
             actor_id=actor_id,

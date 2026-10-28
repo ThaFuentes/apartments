@@ -365,7 +365,7 @@ def read_photo(user, image: bytes, mime: str) -> dict:
     if notes:
         row = empty()
         row["quota"] = True
-        row["reply"] = "Out of quota on " + ", ".join(notes) + ". I kept the photo and will not keep calling. Type the brand, model, and serial."
+        row["reply"] = "Out of quota on " + ", ".join(notes) + ". I kept the photo and will not keep calling. Type the brand, model, and serial. Add your own key in Settings, or share one with the collective. The buttons still work."
         return row
     return empty()
 

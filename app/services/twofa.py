@@ -108,11 +108,19 @@ def build_email_body(user, code: str) -> str:
 
 
 def twofa_inbox_for(user) -> str:
+    """2FA codes. A bot uses only its 2FA address, never the login email."""
+    if bool(getattr(user, "is_bot", False)):
+        return (getattr(user, "security_email", None) or "").strip()
     for attr in ("security_email", "email"):
         addr = (getattr(user, attr, None) or "").strip()
         if addr:
             return addr
     return ""
+
+
+def key_inbox_for(user) -> str:
+    """Where a key change is mailed. Never the 2FA address, and never a fallback."""
+    return (getattr(user, "key_email", None) or "").strip()
 
 
 def reset_inbox_for(user) -> str:
@@ -187,16 +195,25 @@ def twofa_enabled(user) -> bool:
 
 
 def bot_setup_remaining(user) -> list[str]:
-    """A bot stays on the setup screen until 2FA is on.
+    """A bot stays on the setup screen until both addresses differ and 2FA is on.
 
-    The login, 2FA, and password-reset addresses may match or differ.
-    A blank reset address uses the login email.
+    The API key address and the 2FA address are both required. They cannot match.
+    A blank one does not fall back to the login email.
     """
     if not bool(getattr(user, "is_bot", False)):
         return []
+    gaps = []
+    key_mail = key_inbox_for(user)
+    codes = (getattr(user, "security_email", None) or "").strip()
+    if not key_mail:
+        gaps.append("key_email")
+    if not codes:
+        gaps.append("twofa_email")
+    if key_mail and codes and key_mail.lower() == codes.lower():
+        gaps.append("distinct")
     if not twofa_enabled(user):
-        return ["twofa"]
-    return []
+        gaps.append("twofa")
+    return gaps
 
 
 _SETUP_OK_PREFIXES = (

@@ -21,6 +21,7 @@ class User(UserMixin, db.Model):
     role = db.Column(db.String(40), nullable=False, default="office")
     is_bot = db.Column(db.Boolean, nullable=False, default=False)
     security_email = db.Column(db.String(120), nullable=True)
+    key_email = db.Column(db.String(120), nullable=True)
     reset_email = db.Column(db.String(120), nullable=True)
     extra_data = db.Column(db.JSON, nullable=True)
     reset_token_hash = db.Column(db.String(64), nullable=True)
@@ -56,12 +57,16 @@ class User(UserMixin, db.Model):
 
     @property
     def is_viewer(self):
-        """A legacy read-only login. Office is a working role and is not a viewer."""
-        return self.role == "viewer"
+        """A read-only login. Legacy boss rows count. Office is a working role."""
+        from app.services.legacy_access import normalize_role
+
+        return normalize_role(self.role) == "viewer"
 
     @property
     def is_field(self):
-        return self.role in ("field", "maintenance_person")
+        from app.services.legacy_access import normalize_role
+
+        return normalize_role(self.role) == "maintenance_person"
 
     @property
     def is_admin(self):

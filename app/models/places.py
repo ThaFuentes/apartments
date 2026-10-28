@@ -51,6 +51,7 @@ class Unit(db.Model):
     building = db.Column(db.String(40), nullable=False, default="")
     occupancy = db.Column(db.String(20), nullable=False, default="")
     ready_by = db.Column(db.Date, nullable=True)
+    return_on = db.Column(db.Date, nullable=True)
     move_out_date = db.Column(db.Date, nullable=True)
     rentable = db.Column(db.Boolean, nullable=False, default=False)
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -78,6 +79,8 @@ class UnitTask(db.Model):
     returned_by_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     returned_at = db.Column(db.DateTime, nullable=True)
     return_note = db.Column(db.Text, nullable=True, default="")
+    hold_part = db.Column(db.String(160), nullable=False, default="")
+    hold_who = db.Column(db.String(160), nullable=False, default="")
     deleted_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=utcnow)
 

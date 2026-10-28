@@ -96,6 +96,11 @@ def _evolve_field_log():
             "returned_by_id": "INT NULL",
             "returned_at": "DATETIME NULL",
             "return_note": "TEXT NULL",
+            "hold_part": "VARCHAR(160) NOT NULL DEFAULT ''",
+            "hold_who": "VARCHAR(160) NOT NULL DEFAULT ''",
+        },
+        "units": {
+            "return_on": "DATE NULL",
         },
     }
     for table, columns in additions.items():
@@ -380,6 +385,7 @@ def _evolve_bots_hats_and_roles():
         additions = {
             "is_bot": "TINYINT(1) NOT NULL DEFAULT 0",
             "security_email": "VARCHAR(120) NULL",
+            "key_email": "VARCHAR(120) NULL",
             "reset_email": "VARCHAR(120) NULL",
             "extra_data": "JSON NULL",
             "reset_token_hash": "VARCHAR(64) NULL",

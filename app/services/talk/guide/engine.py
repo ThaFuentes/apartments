@@ -41,10 +41,24 @@ def answer_open_guide(user, text: str, key: str, source: str):
     if low.startswith(("show me the help", "open help", "go to help")):
         reply = offline_menu(user)
         reply["help_page_url"] = "/help"
-        return reply
+        return _with_quiet_keys(user, reply)
     if kind == "review":
-        return _review_answer(user, row, text, source)
-    return _continue(user, row, text, key, source)
+        return _with_quiet_keys(user, _review_answer(user, row, text, source))
+    return _with_quiet_keys(user, _continue(user, row, text, key, source))
+
+
+def _with_quiet_keys(user, result: dict) -> dict:
+    """A short menu reply still says when every key is cooling down."""
+    from app.services.providers import quiet_key_note
+
+    note = quiet_key_note(user)
+    reply = (result or {}).get("reply") or ""
+    if not note or note in reply:
+        return result
+    out = dict(result)
+    out["reply"] = f"{note} {reply}".strip()
+    out["quota"] = True
+    return out
 
 
 def start_guide(user, text: str, key: str, source: str):

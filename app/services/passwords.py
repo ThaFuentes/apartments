@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from datetime import timedelta
 
@@ -55,15 +56,25 @@ def issue_reset(user: User) -> str | None:
     return raw
 
 
-def send_reset(user: User, token: str) -> tuple[bool, str]:
-    from flask import url_for
+def _reset_link(token: str) -> str:
+    """Link on this site only. The host is the request Host, not X-Forwarded-Host."""
+    from flask import request, url_for
 
+    host = (request.host or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9.-]+(?::\d{1,5})?", host) or ".." in host:
+        return ""
+    return url_for("desk.reset_password", token=token, _external=True)
+
+
+def send_reset(user: User, token: str) -> tuple[bool, str]:
     from app.services.mail import send_text
 
     inbox = reset_inbox_for(user)
     if not inbox:
         return False, "No reset inbox on this login."
-    link = url_for("desk.reset_password", token=token, _external=True)
+    link = _reset_link(token)
+    if not link:
+        return False, "Could not build a reset link for this site."
     who = user.display_name or user.username
     bot_line = (
         "This is a bot account: the new password takes effect on the next sign-in.\n"

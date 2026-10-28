@@ -3,8 +3,8 @@
 {% block main %}
 <section class="sheet">
   <div class="hero">
-    <h1>This bot needs 2FA</h1>
-    <p class="lead">The record stays closed until two-factor sign-in is on. The 2FA address and the password-reset address can be the same, or they can be different. Leave reset blank to use the login email.</p>
+    <h1>This bot needs two inboxes and 2FA</h1>
+    <p class="lead">The record stays closed until the API key address and the 2FA address are both saved, they are different, and two-factor sign-in is on. A blank address does not use the login email.</p>
   </div>
 
   <form method="post" action="/bot-setup" class="card stack">
@@ -12,8 +12,9 @@
     <input type="hidden" name="do" value="emails">
     <h2>Inboxes</h2>
     <p class="hint">Login email{% if login_email %}: <strong>{{ login_email }}</strong>{% else %} is blank{% endif %}.</p>
-    <label>2FA codes go to <span class="hint">blank uses the login email</span> <input type="email" name="security_email" value="{{ security_email }}" placeholder="same or different"></label>
-    <label>Password resets go to <span class="hint">blank uses the login email</span> <input type="email" name="reset_email" value="{{ reset_email }}" placeholder="same or different"></label>
+    <label>API key mail <input type="email" name="key_email" value="{{ key_email }}" placeholder="keys@example.com" required></label>
+    <label>2FA codes <input type="email" name="security_email" value="{{ security_email }}" placeholder="codes@example.com" required></label>
+    <p class="hint">These two have to be different. Key changes go to the first. Sign-in codes go to the second.</p>
     <button type="submit">Save inboxes</button>
   </form>
 

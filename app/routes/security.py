@@ -12,6 +12,7 @@ from app.builddb.builddb import db
 from app.models import AuditLog, User
 from app.routes.common import bp, owner_required, security_required
 from app.services.clock import utcnow
+from app.services.bots import history_who
 from app.services.records import loads
 from app.services.security_queries import list_bans, list_device_bans, list_security_events, summary_stats
 
@@ -105,7 +106,7 @@ def security_audit():
             {
                 "id": row.id,
                 "when": row.created_at,
-                "who": actor.label() if actor else "system",
+                "who": history_who(row.actor_id, row.source) if actor else "system",
                 "source": row.source,
                 "action": row.action,
                 "entity": row.entity,

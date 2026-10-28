@@ -26,6 +26,7 @@ def load_tests(loader, tests, pattern):
         "tests.test_apt_budget",
         "tests.test_apt_mail",
         "tests.test_access_policy",
+        "tests.test_apt_route_matrix",
     ):
         module = importlib.import_module(name)
         suite.addTests(loader.loadTestsFromModule(module))

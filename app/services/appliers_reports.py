@@ -392,12 +392,12 @@ def apply_invite_viewer(user, payload, source) -> dict:
     secret = f" Temporary password: {generated}." if generated else ""
     bot_note = ""
     if created.is_bot:
-        bot_note = " Marked as a bot: first sign-in must turn on 2FA. The reset address can match the 2FA address, or it can be different."
+        bot_note = " Marked as a bot. First sign-in needs two different addresses, one for the API key and one for 2FA, and two-factor sign-in."
         if payload.get("security_watch"):
-            from app.services.access.core import role_of
             from app.services.security_ops import set_security_watch
+            from app.services.bots import runs_platform
 
-            if role_of(user) == "owner":
+            if runs_platform(user):
                 set_security_watch(created, True)
                 bot_note += " Security watch is on: this bot can check the site and temp-ban or unban."
     granted = []
@@ -513,8 +513,12 @@ def apply_update_viewer(user, payload, source) -> dict:
         return {"ok": False, "reply": "I don't know that role. Say owner, admin, regional manager, regional property manager, property manager, assistant manager, office, maintenance supervisor, or maintenance person."}
     if wanted_role and target.role == "owner":
         wanted_role = ""
+    if wanted_role == "owner" and bool(getattr(user, "is_bot", False)):
+        return {"ok": False, "reply": "A bot cannot make an owner."}
     if wanted_role and not can_create_user(user, wanted_role):
         return {"ok": False, "reply": "This login cannot assign that role."}
+    if payload.get("active") is False and target.role == "owner":
+        return {"ok": False, "reply": "The owner stays on."}
     before = {
         "role": target.role,
         "email": target.email,
@@ -533,7 +537,9 @@ def apply_update_viewer(user, payload, source) -> dict:
         make = bool(payload.get("is_bot"))
         if make and target.role == "owner":
             return {"ok": False, "reply": "The owner login cannot be a bot."}
-        if not make and target.is_bot and role_of(user) != "owner":
+        from app.services.bots import runs_platform
+
+        if not make and target.is_bot and not runs_platform(user):
             return {"ok": False, "reply": "Only an owner can unmark a bot. That clears 2FA."}
         if not make and target.is_bot:
             from app.services.twofa import turn_off

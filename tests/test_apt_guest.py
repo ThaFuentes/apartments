@@ -29,6 +29,33 @@ class GuestAccessTests(AptTestBase):
         self.assertNotEqual(missing.status_code, 403)
         self.assertIn(missing.status_code, (200, 302))
 
+    def test_forwarded_host_does_not_enter_a_reset_link(self):
+        from unittest.mock import patch
+
+        self.owner()
+        client = _guest_client()
+        with patch("app.services.mail.send_text", return_value=(True, "sent")) as sent:
+            page = client.post(
+                "/forgot",
+                data={"ident": "alex"},
+                headers={"X-Forwarded-Host": "evil.example"},
+                follow_redirects=False,
+            )
+        self.assertIn(page.status_code, (200, 302))
+        self.assertTrue(sent.called, sent.call_args)
+        body = sent.call_args[0][2]
+        self.assertNotIn("evil.example", body)
+        self.assertIn("https://localhost/reset/", body)
+
+    def test_photo_names_cannot_leave_uploads(self):
+        from app.services.files import read_blob
+
+        self.assertEqual(read_blob("../.env"), b"")
+        self.assertEqual(read_blob("/etc/passwd"), b"")
+        self.assertEqual(read_blob("..%2f..%2fetc%2fpasswd"), b"")
+        self.assertEqual(read_blob("shot.jpg"), b"")
+        self.assertEqual(read_blob("a" * 32), b"")
+
     def test_logged_out_pages_redirect_and_unknown_is_404(self):
         self.owner()
         client = _guest_client()

@@ -177,7 +177,7 @@ def answer_record(user, text: str) -> dict | None:
         from app.models import AuditLog, Property, Unit, UnitChange
         from app.services.parse import resolve_property
         from app.services.records import loads
-        from app.services.people import person_label
+        from app.services.bots import history_who
 
         number = history_match.group(1) if history_match else ""
         units_query = Unit.query.filter(Unit.deleted_at.is_(None))
@@ -204,7 +204,7 @@ def answer_record(user, text: str) -> dict | None:
         for row in changes:
             detail = loads(row.details_json)
             before, after = detail.get("before") or {}, detail.get("after") or {}
-            who = person_label(row.actor_id) or "Someone"
+            who = history_who(row.actor_id, row.source)
             when = row.created_at.strftime("%b %d, %Y %I:%M %p").lstrip("0") if row.created_at else ""
             changed = [f"{key.replace('_', ' ')}: {before.get(key, '—')} → {value}" for key, value in after.items() if before.get(key) != value and key not in {"property_id", "unit_id", "related_unit_ids", "deleted_at"}]
             lines.append(f"{when} — {who} {row.action.replace('_', ' ')} {row.summary or ('unit ' + unit.unit_number)}" + (f" ({'; '.join(changed)})" if changed else ""))
@@ -212,7 +212,7 @@ def answer_record(user, text: str) -> dict | None:
             audits = AuditLog.query.filter(AuditLog.entity_id == unit.id, AuditLog.entity == "unit").order_by(AuditLog.id.desc()).limit(30).all()
             for row in audits:
                 before, after = loads(row.before_json), loads(row.after_json)
-                who = person_label(row.actor_id) or "Someone"
+                who = history_who(row.actor_id, row.source)
                 when = row.created_at.strftime("%b %d, %Y %I:%M %p").lstrip("0") if row.created_at else ""
                 changed = [f"{key.replace('_', ' ')}: {before.get(key, '—')} → {value}" for key, value in after.items() if before.get(key) != value and key not in {"property_id", "unit_id", "related_unit_ids", "deleted_at"}]
                 lines.append(f"{when} — {who} {row.action} unit {unit.unit_number}" + (f" ({'; '.join(changed)})" if changed else ""))

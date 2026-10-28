@@ -68,6 +68,7 @@ TABLES = [
     "api_credentials",
     "assistant_profiles",
     "app_settings",
+    "help_notes",
     "users",
 ]
 

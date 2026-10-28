@@ -327,6 +327,8 @@ def set_ready_job_done(user, unit: Unit, job: str, done: bool) -> dict:
             row.return_note = ""
             row.returned_by_id = None
             row.returned_at = None
+            row.hold_part = ""
+            row.hold_who = ""
             audit(
                 getattr(user, "id", None),
                 "human",
@@ -504,6 +506,8 @@ def ready_checklist(tasks) -> list[dict]:
                 "task_id": row.id if row else None,
                 "vendor": ((row.vendor or "").strip() if row else ""),
                 "return_note": (row.return_note or "").strip() if row and row.status != "done" else "",
+                "hold_part": (row.hold_part or "").strip() if row and row.status != "done" else "",
+                "hold_who": (row.hold_who or "").strip() if row and row.status != "done" else "",
                 "actor": person_label(actor_id) if actor_id else "",
             }
         )

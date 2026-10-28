@@ -17,6 +17,12 @@
       {% if last %} Last worked {{ last|apt_when }}.{% endif %}
     </p>
   </div>
+  {% for item in gear if item.notes %}
+  <p class="gear-note">{{ kind_label(item.kind) or 'Equipment' }}: {{ item.notes }}</p>
+  {% endfor %}
+  {% if next_pm %}
+  <p class="hint">Next upkeep: {{ next_pm.task }}{% if next_gear %} on the {{ kind_label(next_gear.kind) or 'equipment' }}{% endif %} · {{ next_pm.next_due|apt_when }}</p>
+  {% endif %}
   {% if editable %}
   <form method="post" action="/units/{{ unit.id }}/photo" enctype="multipart/form-data" class="photo-shot" id="unit-photo">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -128,6 +134,11 @@
     <p class="hint">{{ who(item.created_by_id) or "Someone" }} · unit {{ unit.unit_number }} · {{ item.created_at|apt_when }} · {{ item.status }}</p>
     {% endif %}
     {% if item.notes %}<p>{{ item.notes }}</p>{% endif %}
+    {% if editable and unit.occupancy != 'occupied' %}
+    {% with unit_id=unit.id, job=item.title, next='/units/' ~ unit.id, hold_part=item.hold_part, hold_who=item.hold_who, return_on=(unit.return_on.isoformat() if unit.return_on else '') %}
+    {% include "_trade_hold.html" %}
+    {% endwith %}
+    {% endif %}
     {% if editable and unit.occupancy != 'occupied' and (item.status == 'done' or item.return_note) %}
     <details class="change-extra">
       <summary>{{ 'Why they need to go back' if item.status == 'done' else "What's left" }}</summary>

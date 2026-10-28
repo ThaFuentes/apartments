@@ -3,7 +3,7 @@
 {% block main %}
 <section class="sheet">
   <h1>Gas and receipts</h1>
-  <p class="lead">Snap the receipt or type the amount. Nothing is saved until you say it's right.</p>
+  <p class="lead">Type the amount and file it. With no signal it says Waiting to send, then it shows on this list. The same receipt is not filed twice.</p>
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="idempotency_key" value="{{ msg_key }}">

@@ -31,7 +31,9 @@ def owner_required(fn):
     def wrapped(*args, **kwargs):
         if not getattr(current_user, "is_authenticated", False):
             return _login_redirect()
-        if current_user.role != "owner":
+        from app.services.bots import runs_platform
+
+        if not runs_platform(current_user):
             abort(403)
         return fn(*args, **kwargs)
 
@@ -88,6 +90,20 @@ def _history_ok() -> bool:
 
 
 def _reports_ok() -> bool:
+    """Workers open their own week. A read-only login needs the reports flag."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
     if not current_user.is_viewer:
         return True
-    return bool(current_user.can_see_reports)
+    from app.services.access import has_capability
+
+    return bool(current_user.can_see_reports) and has_capability(current_user, "read_reports")
+
+
+def _money_ok() -> bool:
+    """Own miles and receipts. A read-only login does not file them."""
+    if not getattr(current_user, "is_authenticated", False):
+        return False
+    from app.services.access import has_capability
+
+    return has_capability(current_user, "log_personal_expenses")

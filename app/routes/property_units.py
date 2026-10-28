@@ -29,9 +29,13 @@ def city_detail(city_id):
     city = db.session.get(City, city_id)
     if not city:
         abort(404)
+    from app.services.access import sees_all
     from app.services.browse import place_groups
 
-    return render_template("places.html", groups=place_groups(city.id, user=current_user), city=city)
+    groups = place_groups(city.id, user=current_user)
+    if not groups and not sees_all(current_user):
+        abort(404)
+    return render_template("places.html", groups=groups, city=city)
 
 
 @bp.get("/properties/<int:property_id>")
@@ -239,6 +243,13 @@ def unit_detail(unit_id):
     from app.services.people import person_label
     from app.services.ready import job_choices
 
+    next_pm = None
+    next_gear = None
+    for item in gear:
+        for row in reminders.get(item.id) or []:
+            if row.next_due and (next_pm is None or row.next_due < next_pm.next_due):
+                next_pm = row
+                next_gear = item
     last = jobs[0].created_at if jobs else (visits[0].started_at if visits else None)
     unit_changes = unit_history(unit.id, limit=120)
     deleted_tasks = UnitTask.query.filter_by(unit_id=unit.id).filter(UnitTask.deleted_at.isnot(None)).order_by(UnitTask.id.desc()).all()
@@ -256,6 +267,8 @@ def unit_detail(unit_id):
         reminders=reminders,
         contractor_visits=contractor_visits,
         gear=gear,
+        next_pm=next_pm,
+        next_gear=next_gear,
         gear_kinds=kind_choices(),
         kind_label=kind_label,
         tasks=task_groups(unit.id),

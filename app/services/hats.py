@@ -41,7 +41,9 @@ def can_assign_hat(actor, target: User | None) -> bool:
 
     if not actor or not target:
         return False
-    if role_of(actor) == "owner":
+    from app.services.bots import runs_platform
+
+    if runs_platform(actor):
         return True
     if role_of(target) == "owner":
         return False

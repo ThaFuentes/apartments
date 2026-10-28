@@ -60,7 +60,7 @@ OWNER_PROTECTED_TOOLS = {"transfer_ownership", "delete_owner", "promote_owner"}
 PERSONAL_TOOLS = {"estimate_miles", "log_expense", "log_miles", "log_odometer"}
 
 
-PROPERTY_WRITE_TOOLS = {"add_plan_card", "attach_media", "clear_plan", "log_job_event", "log_work", "move_equipment", "note_equipment", "plan_day", "plan_outcome", "plan_trip", "record_unit_visit", "unit_board", "ready_vendor", "update_trip", "set_ready_by", "ready_check", "finish_vendor_trade", "make_ready_unit", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used", "send_back", "mark_rentable", "set_move_out", "save_how_to", "add_place_gear"}
+PROPERTY_WRITE_TOOLS = {"add_plan_card", "attach_media", "clear_plan", "log_job_event", "log_work", "move_equipment", "note_equipment", "plan_day", "plan_outcome", "plan_trip", "record_unit_visit", "unit_board", "ready_vendor", "update_trip", "set_ready_by", "ready_check", "hold_part", "come_back", "finish_vendor_trade", "make_ready_unit", "contractor_in", "contractor_out", "pm_save", "pm_done", "parts_used", "send_back", "mark_rentable", "set_move_out", "save_how_to", "add_place_gear"}
 
 
 TOOL_CAPABILITY = {"read_reports": "read_reports", "draft_report": "manage_reports", "send_report": "manage_reports", "update_settings": "manage_settings", "invite_viewer": "manage_users", "update_viewer": "manage_users", "upsert_property": "create_properties", "update_property": "manage_properties", "delete_property": "manage_properties", "lookup_address": "read_assigned_properties"}
@@ -120,6 +120,15 @@ def has_capability(user, capability: str, property_id: int | None = None) -> boo
         return False
     if role_of(user) == "owner":
         return True
+    from app.services.bots import runs_platform
+
+    if runs_platform(user):
+        # A finished bot runs the platform the way the owner does.
+        return True
+    if bool(getattr(user, "is_bot", False)):
+        # Still on setup. The desk set stays, and the setup wall blocks the pages.
+        if capability in ROLE_CAPABILITIES["admin"] or capability in {"manage_settings", "read_company"}:
+            return True
     if capability not in CAPABILITIES:
         return False
     granted = _default_capability(user, capability, property_id)
@@ -144,9 +153,12 @@ def _set_user_capability(actor, target: User, capability: str, granted: bool | N
         raise PermissionError("Owner permissions cannot be changed here.")
     if capability not in CAPABILITIES:
         raise ValueError("Choose a known permission.")
-    if capability == "manage_security" and actor_role != "owner":
+    from app.services.bots import runs_platform
+
+    platform = runs_platform(actor)
+    if capability == "manage_security" and not platform:
         raise PermissionError("Only an owner can change security permissions.")
-    if actor_role in {"owner", "admin"}:
+    if platform or actor_role == "admin":
         if scope_key != "global":
             raise PermissionError("Company permission overrides must use the company-wide scope.")
     elif capability == "open_team_default_property" and actor_role == "regional_manager":
@@ -177,7 +189,19 @@ def set_user_capability(actor, target: User, capability: str, granted: bool | No
 
 
 def _company_scope(user) -> bool:
-    return role_of(user) == "owner" or (role_of(user) in {"admin", "office", "viewer"} and has_capability(user, "read_company"))
+    """Company-wide read: owner, a bot, and admin, office, or viewer, including an extra title based on those."""
+    if not user or not getattr(user, "active", True):
+        return False
+    if bool(getattr(user, "is_bot", False)):
+        return True
+    role = role_of(user)
+    if role == "owner":
+        return True
+    if not has_capability(user, "read_company"):
+        return False
+    from app.services.roles import based_on
+
+    return based_on(role) in {"admin", "office", "viewer"}
 
 
 def can_read_history(user) -> bool:
@@ -222,7 +246,9 @@ def visible_property_ids(user) -> set[int]:
 
 def scoped_property_query(user, query, column=None):
     column = column if column is not None else Property.id
-    if role_of(user) == "owner":
+    from app.services.bots import runs_platform
+
+    if runs_platform(user):
         return query
     return query.filter(column.in_(visible_property_ids(user) or {-1}))
 
@@ -240,13 +266,17 @@ def require_see(user, prop: Property | None) -> Property:
 def can_edit_property(user, property_id: int) -> bool:
     if not user or not getattr(user, "active", True):
         return False
+    if bool(getattr(user, "is_bot", False)):
+        return True
     role, prop_id = role_of(user), int(property_id)
     if role == "owner":
         return True
     if role == "admin" and _company_scope(user) and any(has_capability(user, cap, prop_id) for cap in ("write_maintenance", "edit_properties", "manage_properties")):
         return prop_id in visible_property_ids(user)
-    if role == "office" and _company_scope(user) and has_capability(user, "write_maintenance", prop_id):
-        # Office works every unit in the company from the desk, no per-property grant.
+    from app.services.roles import based_on
+
+    if based_on(role) == "office" and _company_scope(user) and has_capability(user, "write_maintenance", prop_id):
+        # Office, and a title started from office, works every unit from the desk.
         return prop_id in visible_property_ids(user)
     if role in {"regional_manager", "regional_property_manager", "maintenance_regional"} and prop_id in _region_property_ids(user):
         return any(has_capability(user, cap, prop_id) for cap in ("edit_properties", "write_maintenance", "manage_properties"))

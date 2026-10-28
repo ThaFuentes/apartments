@@ -64,11 +64,13 @@ def audit_log():
             )
         if filters["action"]:
             query = query.filter(UnitChange.action.ilike(f"%{filters['action']}%"))
-        if filters["source"] in ("ai", "human"):
+        if filters["source"] in ("ai", "human", "bot"):
             query = query.filter(UnitChange.source == filters["source"])
         query = query.filter(UnitChange.created_at >= utcnow() - timedelta(days=days))
         total = query.count()
         rows = query.order_by(UnitChange.id.desc()).limit(300).all()
+    from app.services.bots import history_who
+
     entries = []
     for row in rows:
         detail = loads(row.details_json)
@@ -94,7 +96,7 @@ def audit_log():
         entries.append(
             {
                 "when": row.created_at,
-                "who": row.actor.label() if row.actor else "a removed login",
+                "who": history_who(row.actor_id, row.source) if row.actor else "a removed login",
                 "source": row.source,
                 "property": row.unit.property.name if row.unit and row.unit.property else "",
                 "unit": row.unit.unit_number if row.unit else "",
@@ -105,7 +107,9 @@ def audit_log():
         )
     from app.services.reversals import can_reverse, inventory_removals
 
-    owner_console = getattr(current_user, "role", "") == "owner"
+    from app.services.bots import runs_platform
+
+    owner_console = runs_platform(current_user)
     removed = inventory_removals(current_user, min(days, 30)) if can_reverse(current_user) else []
     removers: dict[int, dict] = {}
     for item in removed:

@@ -351,11 +351,11 @@ def apply_send_password_reset(user, payload: dict, source: str) -> dict:
 
 
 def apply_set_security_watch(user, payload: dict, source: str) -> dict:
-    from app.services.access import role_of
     from app.services.records import audit
     from app.services.security_ops import set_security_watch
+    from app.services.bots import runs_platform
 
-    if role_of(user) != "owner":
+    if not runs_platform(user):
         return {"ok": False, "reply": "Only an owner can choose who watches security."}
     person, problem = _person_or_reply(payload)
     if problem:
@@ -393,7 +393,9 @@ def apply_mark_bot(user, payload: dict, source: str) -> dict:
     make = bool(payload.get("on"))
     if role_of(user) != "owner" and not can_manage_user(user, person):
         return {"ok": False, "reply": "This login cannot change that person."}
-    if not make and role_of(user) != "owner":
+    from app.services.bots import runs_platform
+
+    if not make and not runs_platform(user):
         return {"ok": False, "reply": "Only an owner can unmark a bot."}
     before = bool(person.is_bot)
     person.is_bot = make
@@ -488,11 +490,11 @@ def apply_pin_property(user, payload: dict, source: str) -> dict:
 
 
 def apply_send_test_email(user, payload: dict, source: str) -> dict:
-    from app.services.access import role_of
     from app.services.mail import send_test
     from app.services.people import clean_email
+    from app.services.bots import runs_platform
 
-    if role_of(user) != "owner":
+    if not runs_platform(user):
         return {"ok": False, "reply": "Only an owner can send a test email."}
     try:
         inbox = clean_email(payload.get("to") or "")

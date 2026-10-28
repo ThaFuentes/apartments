@@ -91,7 +91,7 @@
     <li>Miles {{ snapshot.miles.estimate or 0 }} this week, {{ snapshot.prior.miles or 0 }} last week.</li>
   </ul>
   <p><a href="/reports/{{ report.id }}/pdf?dl=1">Download PDF</a> · <a href="/reports/{{ report.id }}/csv">Download CSV</a></p>
-  {% if current_user.is_authenticated and current_user.role == 'owner' and report.status != 'sent' %}
+  {% if current_user.is_authenticated and (platform or current_user.role == 'admin') and report.status != 'sent' %}
   <form method="post" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Edit the written copy <textarea name="body_md" rows="8">{{ report.body_md }}</textarea></label>

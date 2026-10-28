@@ -448,12 +448,19 @@ def _field_tool_rows(payload: dict) -> list[dict]:
         rows.append(change("Unit", "—", number))
         rows.append(change("Unit ID", "—", unit.id if unit else "Assigned when saved"))
     tool = payload.get("_tool") or ""
-    if tool in {"set_ready_by", "ready_check"}:
+    if tool in {"set_ready_by", "ready_check", "hold_part", "come_back"}:
         if payload.get("ready_by") is not None:
             rows.append(change("Target ready", "—", payload.get("ready_by") or "cleared"))
         if payload.get("job"):
             rows.append(change("Trade", "—", payload.get("job")))
-            rows.append(change("Done", "—", "yes" if payload.get("done") in (True, "1", 1) else "reopened"))
+            if tool == "ready_check":
+                rows.append(change("Done", "—", "yes" if payload.get("done") in (True, "1", 1) else "reopened"))
+        if payload.get("part"):
+            rows.append(change("Part", "—", payload.get("part")))
+        if payload.get("who"):
+            rows.append(change("Bringing it", "—", payload.get("who")))
+        if payload.get("return_on"):
+            rows.append(change("Back on", "—", payload.get("return_on")))
     if tool in {"contractor_in", "contractor_out"}:
         who = payload.get("contractor_id") or payload.get("contractor") or payload.get("vendor") or ""
         if isinstance(who, (int, str)) and str(who).isdigit():
@@ -505,6 +512,14 @@ def _ready_check(payload: dict, user=None) -> list[dict]:
     return _field_tool_rows({**payload, "_tool": "ready_check"})
 
 
+def _hold_part(payload: dict, user=None) -> list[dict]:
+    return _field_tool_rows({**payload, "_tool": "hold_part"})
+
+
+def _come_back(payload: dict, user=None) -> list[dict]:
+    return _field_tool_rows({**payload, "_tool": "come_back"})
+
+
 def _contractor_in(payload: dict, user=None) -> list[dict]:
     return _field_tool_rows({**payload, "_tool": "contractor_in"})
 
@@ -544,6 +559,8 @@ _DETAILS = {
     "set_default_property": lambda payload, user=None: _record_change("set_default_property", payload, user),
     "set_ready_by": _set_ready_by,
     "ready_check": _ready_check,
+    "hold_part": _hold_part,
+    "come_back": _come_back,
     "contractor_in": _contractor_in,
     "contractor_out": _contractor_out,
     "pm_save": _pm_save,
