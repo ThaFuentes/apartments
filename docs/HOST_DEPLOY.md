@@ -48,3 +48,7 @@ touch tmp/restart.txt
 ```
 
 Do not overwrite `passenger_wsgi.py`, `.htaccess`, `.env`, or `uploads/`.
+
+## Docroot deny
+
+Apache serves a real file before Flask sees it. Append `docs/docroot-deny.htaccess` when the live file has no `BEGIN PBT DOCROOT FILE RULE` marker. Do not replace `.htaccess`. After `/stderr.log` and `/requirements.txt` return 403, move `stderr.log` and `logs/traffic_log.jsonl` out of `public_html`. Do not print them.

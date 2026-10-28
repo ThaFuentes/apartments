@@ -1,0 +1,23 @@
+# BEGIN PBT DOCROOT FILE RULE 2026-10-28
+# The app root is the public docroot. The web server sends a real file
+# before Flask sees the request, so this block has to live in .htaccess.
+# Append it. Do not replace the live file: it holds Passenger and may hold
+# a server-only key. /static/ and /app/static/ stay public. ACME stays public.
+# A Flask route still runs when no file exists at that URL.
+Options -Indexes
+<IfModule mod_headers.c>
+  Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+</IfModule>
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^(?:logs|tmp|docs|backups|instance|scripts|tests|poweredbytop|cgi-bin|unrelated|data|local_testing|uploads|migrations|mariadb_data|inbox|vault|export|exports)(?:/|$) - [F,L]
+  RewriteRule ^(?:app/)?static/uploads/(?:incidents|notes)(?:/|$) - [F,L,NC]
+  RewriteRule ^app/(?!static/) - [F,L]
+  RewriteRule (^|/)\.(?!well-known) - [F,L]
+  RewriteCond %{REQUEST_URI} !^/static/ [NC]
+  RewriteCond %{REQUEST_URI} !^/app/static/ [NC]
+  RewriteCond %{REQUEST_URI} !^/\.well-known/ [NC]
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteRule ^ - [F,L]
+</IfModule>
+# END PBT DOCROOT FILE RULE 2026-10-28
