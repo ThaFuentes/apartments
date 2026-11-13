@@ -11,23 +11,15 @@ logger = logging.getLogger("poweredbytop.security")
 
 
 def get_real_ip() -> str:
-    """
-    Get the real client IP address safely.
-    Works behind Cloudflare, proxies, or direct connections.
-    """
-    if not has_request_context():
-        return "0.0.0.0"
-
+    """Same rule as poweredbytop.utils.helpers.get_real_ip. One implementation."""
     try:
-        return (
-            request.headers.get("CF-Connecting-IP")
-            or request.headers.get("X-Real-IP")
-            or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or request.remote_addr
-            or "0.0.0.0"
-        )
+        from poweredbytop.utils.helpers import get_real_ip as _real
+
+        return _real()
     except Exception:
-        return "0.0.0.0"
+        if not has_request_context():
+            return "0.0.0.0"
+        return request.remote_addr or "0.0.0.0"
 
 
 def safe_log(message: str, level: str = "info"):

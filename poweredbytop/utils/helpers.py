@@ -10,8 +10,10 @@
 # ================================================================
 
 import os
+import re
 import time
 import hashlib
+import ipaddress
 import threading
 from datetime import datetime
 from flask import has_request_context, current_app
@@ -167,22 +169,134 @@ def safe_get_request(req=None):
     return None
 
 
+_PROXY_NETS_CACHE = (None, ())
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def trust_proxy_headers() -> bool:
+    """False unless TRUST_PROXY_HEADERS is explicitly enabled."""
+    return _env_bool("TRUST_PROXY_HEADERS", False)
+
+
+def _parse_ip(value):
+    text = (value or "").strip()
+    if not text:
+        return None
+    if text.startswith("[") and "]" in text:
+        text = text[1:text.index("]")]
+    if "%" in text:
+        text = text.split("%", 1)[0]
+    try:
+        return ipaddress.ip_address(text)
+    except ValueError:
+        return None
+
+
+def _ip_in(addr, nets) -> bool:
+    return any(addr in net for net in nets)
+
+
+def _trusted_proxy_nets():
+    """Parse TRUSTED_PROXY_IPS (comma or space separated IPs and CIDRs)."""
+    global _PROXY_NETS_CACHE
+    raw = (os.getenv("TRUSTED_PROXY_IPS") or "").strip()
+    if raw == _PROXY_NETS_CACHE[0]:
+        return _PROXY_NETS_CACHE[1]
+    nets = []
+    for part in re.split(r"[\s,;]+", raw):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            if "/" in part:
+                nets.append(ipaddress.ip_network(part, strict=False))
+            else:
+                addr = ipaddress.ip_address(part)
+                suffix = "32" if addr.version == 4 else "128"
+                nets.append(ipaddress.ip_network(f"{part}/{suffix}", strict=False))
+        except ValueError:
+            logger(f"TRUSTED_PROXY_IPS ignored invalid entry: {part[:64]}")
+    _PROXY_NETS_CACHE = (raw, tuple(nets))
+    return _PROXY_NETS_CACHE[1]
+
+
+def _get_header(req_obj, name: str):
+    try:
+        if isinstance(req_obj, dict):
+            return req_obj.get("HTTP_" + name.upper().replace("-", "_"))
+        return req_obj.headers.get(name)
+    except Exception:
+        return None
+
+
+def _xff_client(raw, trusted_nets):
+    """Use the right-most address that is not a trusted proxy."""
+    parts = []
+    for chunk in (raw or "").split(","):
+        parsed = _parse_ip(chunk)
+        if parsed is not None:
+            parts.append(parsed)
+    if not parts:
+        return None
+    for addr in reversed(parts):
+        if not _ip_in(addr, trusted_nets):
+            return addr
+    return parts[-1]
+
+
 def get_real_ip(req=None):
+    """Return the visitor IP from the real connection, never a spoofed header.
+
+    A direct visitor is the tcp peer. Cloudflare, True-Client-IP, X-Real-IP,
+    and X-Forwarded-For are ignored unless TRUST_PROXY_HEADERS is on and
+    REMOTE_ADDR is listed in TRUSTED_PROXY_IPS. A missing Cloudflare header
+    is a normal direct visit and is not a block.
+    """
     if isinstance(req, str):
-        return req
+        parsed = _parse_ip(req)
+        return str(parsed) if parsed else req.strip()
     request_obj = safe_get_request(req)
     if not request_obj:
         return "0.0.0.0"
     try:
-        return (
-            request_obj.headers.get("CF-Connecting-IP")
-            or request_obj.headers.get("X-Real-IP")
-            or request_obj.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or getattr(request_obj, "remote_addr", None)
-            or "0.0.0.0"
+        peer_raw = (
+            request_obj.get("REMOTE_ADDR")
+            if isinstance(request_obj, dict)
+            else getattr(request_obj, "remote_addr", None)
         )
+        peer = _parse_ip(peer_raw)
+        trusted = (
+            trust_proxy_headers()
+            and peer is not None
+            and bool(_trusted_proxy_nets())
+            and _ip_in(peer, _trusted_proxy_nets())
+        )
+        if trusted:
+            for header_name in ("CF-Connecting-IP", "True-Client-IP", "X-Real-IP"):
+                header = _parse_ip(_get_header(request_obj, header_name))
+                if header is not None:
+                    return str(header)
+            forwarded = _xff_client(
+                _get_header(request_obj, "X-Forwarded-For"), _trusted_proxy_nets()
+            )
+            if forwarded is not None:
+                return str(forwarded)
+        if peer is not None:
+            return str(peer)
     except Exception:
-        return "0.0.0.0"
+        pass
+    return "0.0.0.0"
+
+
+def get_client_ip(req=None):
+    """Same address as get_real_ip."""
+    return get_real_ip(req)
 
 
 def is_internal_request(req=None) -> bool:
@@ -194,12 +308,15 @@ def is_internal_request(req=None) -> bool:
         path = getattr(request_obj, "path", "") or ""
         if path.startswith(("/static/", "/health", "/favicon", "/robots.txt", "/_", "/api/internal")):
             return True
-        ip = get_real_ip(request_obj)
-        if ip in ("127.0.0.1", "::1") or ip.startswith(("172.17.", "10.", "192.168.")):
-            return True
         host = getattr(request_obj, "host", "") or ""
         if host in ("localhost", "127.0.0.1") or host.startswith("localhost:"):
             return True
+        ip = get_real_ip(request_obj)
+        if ip in ("127.0.0.1", "::1") or ip.startswith(("172.17.", "10.", "192.168.")):
+            # A public Host reached through the local web server is still a
+            # public visitor. Treating that address as internal would skip
+            # bans for every visit that arrives as loopback.
+            return False
     except Exception:
         pass
     return False
