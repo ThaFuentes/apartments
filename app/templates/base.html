@@ -149,6 +149,7 @@
     {% endif %}
   </nav>
   {% endif %}
+  <script src="{{ url_for('static', filename='js/pbt-retry.js') }}?v={{ asset_v }}"></script>
   <script src="{{ url_for('static', filename='js/apt.js') }}?v={{ asset_v }}"></script>
   {% if current_user.is_authenticated and current_user.role != 'viewer' %}
   <script src="{{ url_for('static', filename='js/outbox.js') }}?v={{ asset_v }}"></script>

@@ -6,7 +6,9 @@
 # A Flask route still runs when no file exists at that URL.
 Options -Indexes
 <IfModule mod_headers.c>
-  Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+  # Never "always set" this: the Flask app already sends the per-site policy,
+  # and a deny-all here silently breaks officer GPS on every phone (no prompt).
+  Header setifempty Permissions-Policy "geolocation=(self), microphone=(), camera=(self), payment=()"
 </IfModule>
 <IfModule mod_rewrite.c>
   RewriteEngine On

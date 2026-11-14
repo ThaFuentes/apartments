@@ -34,13 +34,18 @@ def create_app() -> Flask:
         "pool_recycle": 50,
         "pool_size": 2,
         "max_overflow": 5,
-        "pool_timeout": 45,
+        # One request must never hold a worker for long. A 45s pool wait or a
+        # 20s connect kept the worker busy past Cloudflare's patience, and
+        # every site on the account answered 520/522 (2026-11-12). These are
+        # client deadlines on a local MariaDB socket. APT_DB_READ_TIMEOUT can
+        # raise the statement limit for a deliberately long report.
+        "pool_timeout": 2,
         "pool_reset_on_return": "rollback",
         "connect_args": {
             "charset": "utf8mb4",
-            "connect_timeout": 20,
-            "read_timeout": 45,
-            "write_timeout": 45,
+            "connect_timeout": 3,
+            "read_timeout": int(os.getenv("APT_DB_READ_TIMEOUT") or "5"),
+            "write_timeout": int(os.getenv("APT_DB_READ_TIMEOUT") or "5"),
         },
     }
     app.config["MAX_CONTENT_LENGTH"] = int(os.getenv("UPLOAD_MAX_BYTES") or str(16 * 1024 * 1024))
@@ -153,6 +158,27 @@ def create_app() -> Flask:
         return response
 
     open_guest_paths()
+
+    # One in-flight write per signed-in person (2026-11-12 process-pool
+    # incident). A second concurrent write gets 429 + Retry-After, and
+    # js/pbt-retry.js sends the same request again. Reads are untouched.
+    try:
+        from app.utils.one_worker import install_one_worker
+
+        install_one_worker(app)
+    except Exception as exc:
+        print(f"[apt] one-worker lane failed (app still starts): {exc}", flush=True)
+
+    # Name any page that runs past the 5s rule (rule 6). One log line per
+    # request, so a legitimately big report can be measured before the DB
+    # statement deadline is raised. See APT_SLOW_MS.
+    try:
+        from app.utils.request_timing import install_request_timing
+
+        install_request_timing(app)
+    except Exception as exc:
+        print(f"[apt] request timing failed (app still starts): {exc}", flush=True)
+
     try:
         from poweredbytop import init_security
 
